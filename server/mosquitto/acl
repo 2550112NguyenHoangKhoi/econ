@@ -10,7 +10,7 @@ topic read econ/telemetry/#
 topic read econ/status/#
 topic write econ/commands/#
 
-# Edge nodes (ESP32, Pico, Raspberry Pi gateway, CV occupancy nodes) share this identity.
+# Edge nodes (ESP32, Raspberry Pi gateway, CV occupancy nodes) share this identity.
 # They publish their own telemetry and liveness, and subscribe to commands.
 #
 # Per-node identities are the next step and are the right answer for a real install: give

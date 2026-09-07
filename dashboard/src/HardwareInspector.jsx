@@ -100,19 +100,47 @@ const IR_PROTOCOLS = [
   'RC6',
 ];
 
-const HARDWARE_LIBRARY = [
-  { device: 'HVAC IR Blaster', pin: 'GPIO 19', bus: 'PWM / IRremoteESP8266', flag: 'USE_IR_AC', desc: 'Commands split-unit ACs (Coolix, Electra, Daikin, etc.) via 940nm IR emitter' },
-  { device: 'Smart Plug Relay', pin: 'GPIO 25', bus: 'Digital Output', flag: 'USE_PLUG', desc: 'Sheds non-critical socket circuits after-hours (APLC automated plug load control)' },
-  { device: 'Lighting Relay', pin: 'GPIO 23', bus: 'Digital Output', flag: 'RELAY_PIN', desc: 'Controls room lighting circuit based on occupancy & manual override' },
-  { device: 'ACS712 Power Strip Meter', pin: 'GPIO 33 (ADC1_CH5)', bus: 'Analog ADC (True-RMS)', flag: 'USE_STRIP', desc: 'True-RMS strip current sensing with compute offload fallback streaming' },
-  { device: 'SCT-013 Plug CT Clamp', pin: 'GPIO 34 (ADC1_CH6)', bus: 'Analog ADC (33Ω burden)', flag: 'USE_PLUG', desc: 'Monitors wall plug circuit current draw (plugW)' },
-  { device: 'SCT-013 AC CT Clamp', pin: 'GPIO 35 (ADC1_CH7)', bus: 'Analog ADC (33Ω burden)', flag: 'USE_AC_CLAMP', desc: 'Measures compressor active power (acW) for thermodynamic model tracking' },
-  { device: 'DS18B20 Supply Air Temp', pin: 'GPIO 26', bus: '1-Wire Digital', flag: 'USE_SUPPLY_TEMP', desc: 'High-precision temperature sensor in AC discharge louvre' },
-  { device: 'SHT30 / ACD1200 / BH1750', pin: 'GPIO 21 (SDA), GPIO 22 (SCL)', bus: 'I2C Bus (400 kHz)', flag: 'USE_SHT30, USE_CO2, USE_LUX', desc: 'Environmental telemetry: air temperature, relative humidity, CO2 ppm, lux' },
-  { device: 'PIR & mmWave Radar', pin: 'GPIO 18', bus: 'Digital Pulse / UART', flag: 'USE_PIR, USE_MMWAVE', desc: 'Passive infrared & 24GHz FMCW presence radar for occupancy verification' },
+const DEFAULT_HARDWARE_LIBRARY = [
+  { id: 'ir_blaster', device: 'HVAC IR Blaster', pin: 'GPIO 19', bus: 'PWM / IRremoteESP8266', flag: 'USE_IR_AC', desc: 'Commands split-unit ACs (Coolix, Electra, Daikin, etc.) via 940nm IR emitter' },
+  { id: 'smart_plug', device: 'Smart Plug Relay', pin: 'GPIO 25', bus: 'Digital Output', flag: 'USE_PLUG', desc: 'Sheds non-critical socket circuits after-hours (APLC automated plug load control)' },
+  { id: 'lighting', device: 'Lighting Relay', pin: 'GPIO 23', bus: 'Digital Output', flag: 'RELAY_PIN', desc: 'Controls room lighting circuit based on occupancy & manual override' },
+  { id: 'strip_meter', device: 'ACS712 Power Strip Meter', pin: 'GPIO 33 (ADC1_CH5)', bus: 'Analog ADC (True-RMS)', flag: 'USE_STRIP', desc: 'True-RMS strip current sensing with compute offload fallback streaming' },
+  { id: 'plug_clamp', device: 'SCT-013 Plug CT Clamp', pin: 'GPIO 34 (ADC1_CH6)', bus: 'Analog ADC (33Ω burden)', flag: 'USE_PLUG', desc: 'Monitors wall plug circuit current draw (plugW)' },
+  { id: 'ac_clamp', device: 'SCT-013 AC CT Clamp', pin: 'GPIO 35 (ADC1_CH7)', bus: 'Analog ADC (33Ω burden)', flag: 'USE_AC_CLAMP', desc: 'Measures compressor active power (acW) for thermodynamic model tracking' },
+  { id: 'supply_temp', device: 'DS18B20 Supply Air Temp', pin: 'GPIO 26', bus: '1-Wire Digital', flag: 'USE_SUPPLY_TEMP', desc: 'High-precision temperature sensor in AC discharge louvre' },
+  { id: 'env_sensors', device: 'SHT30 / ACD1200 / BH1750', pin: 'GPIO 21 (SDA), GPIO 22 (SCL)', bus: 'I2C Bus (400 kHz)', flag: 'USE_SHT30, USE_CO2, USE_LUX', desc: 'Environmental telemetry: air temperature, relative humidity, CO2 ppm, lux' },
+  { id: 'pir_radar', device: 'PIR & mmWave Radar', pin: 'GPIO 18', bus: 'Digital Pulse / UART', flag: 'USE_PIR, USE_MMWAVE', desc: 'Passive infrared & 24GHz FMCW presence radar for occupancy verification' },
 ];
 
 function DeviceControls({ targetZone = 'zone-office-a', targetDevice = '' }) {
+  const [pinOverrides, setPinOverrides] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('econ_gpio_overrides') || '{}'); } catch { return {}; }
+  });
+  const [editingPin, setEditingPin] = useState(null);
+
+  const hwLibrary = DEFAULT_HARDWARE_LIBRARY.map(item => ({
+    ...item,
+    pin: pinOverrides[item.id] || item.pin,
+  }));
+
+  const savePinConfig = (id, newPin) => {
+    const next = { ...pinOverrides, [id]: newPin };
+    setPinOverrides(next);
+    localStorage.setItem('econ_gpio_overrides', JSON.stringify(next));
+    setEditingPin(null);
+    // Push the pin remap to the edge node via the command API
+    fetch(`${API_BASE}/api/command`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ zone: targetZone || 'all', command: `CONFIG:PIN_REMAP:${id}=${newPin}` }),
+    }).catch(() => {});
+  };
+
+  const resetPins = () => {
+    setPinOverrides({});
+    localStorage.removeItem('econ_gpio_overrides');
+    setEditingPin(null);
+  };
   const [protocol, setProtocol] = useState('COOLIX');
   const [hexCode, setHexCode] = useState('0xB27BE0');
   const [bits, setBits] = useState('32');
@@ -202,24 +230,41 @@ function DeviceControls({ targetZone = 'zone-office-a', targetDevice = '' }) {
       {/* Collapsible Device Library */}
       {showLib && (
         <div style={{ background: '#080d14', border: '1px solid #1f2937', borderRadius: 4, padding: 10, marginBottom: 14 }}>
-          <div style={{ fontSize: 12, fontWeight: 700, color: '#f3f4f6', marginBottom: 6 }}>
-            Compiled Edge Node Hardware Library (edge/esp32/src/main.cpp)
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#f3f4f6' }}>
+              ESP32 Edge Node Hardware Library (edge/esp32/src/main.cpp)
+            </div>
+            <button onClick={resetPins} style={{ fontSize: 10, padding: '3px 8px', background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.4)', color: '#fca5a5', borderRadius: 4, cursor: 'pointer' }}>
+              Reset GPIO Defaults
+            </button>
           </div>
           <table style={S.table}>
             <thead>
               <tr>
                 <th style={S.th}>Device</th>
-                <th style={S.th}>GPIO Pin</th>
+                <th style={S.th}>GPIO Pin <span style={{ color: '#60a5fa', fontSize: 9 }}>(click to edit)</span></th>
                 <th style={S.th}>Protocol / Bus</th>
                 <th style={S.th}>Build Flag</th>
                 <th style={S.th}>Function</th>
               </tr>
             </thead>
             <tbody>
-              {HARDWARE_LIBRARY.map((item) => (
-                <tr key={item.device}>
+              {hwLibrary.map((item) => (
+                <tr key={item.id}>
                   <td style={{ ...S.td, fontWeight: 600, color: '#e5e7eb' }}>{item.device}</td>
-                  <td style={{ ...S.td, color: '#60a5fa' }}><code>{item.pin}</code></td>
+                  <td style={{ ...S.td, color: '#60a5fa', cursor: 'pointer' }} onClick={() => setEditingPin(item.id)}>
+                    {editingPin === item.id ? (
+                      <input
+                        autoFocus
+                        defaultValue={item.pin}
+                        style={{ background: '#0f172a', border: '1px solid #3b82f6', color: '#60a5fa', padding: '2px 6px', borderRadius: 3, fontSize: 11, width: '100%', fontFamily: 'monospace' }}
+                        onBlur={(e) => savePinConfig(item.id, e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') savePinConfig(item.id, e.target.value); if (e.key === 'Escape') setEditingPin(null); }}
+                      />
+                    ) : (
+                      <code style={{ cursor: 'pointer' }}>{item.pin}{pinOverrides[item.id] ? ' ✎' : ''}</code>
+                    )}
+                  </td>
                   <td style={S.td}>{item.bus}</td>
                   <td style={S.td}><code style={{ color: '#f59e0b' }}>{item.flag}</code></td>
                   <td style={{ ...S.td, color: '#9ca3af' }}>{item.desc}</td>
@@ -1210,16 +1255,10 @@ export default function HardwareInspector() {
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-            {devices.filter(d => !d.id.includes('pico')).length > 0 && (
+            {devices.length > 0 && (
               <div>
                 <h3 style={{ color: '#9ca3af', fontSize: '13px', margin: '0 0 10px 0', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 600 }}>ESP32 Edge Nodes</h3>
-                {devices.filter(d => !d.id.includes('pico')).map((d) => <DeviceCard key={d.id} dev={d} staleAfter={data?.staleAfter || 20} />)}
-              </div>
-            )}
-            {devices.filter(d => d.id.includes('pico')).length > 0 && (
-              <div>
-                <h3 style={{ color: '#9ca3af', fontSize: '13px', margin: '0 0 10px 0', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 600 }}>Pico Radar Modules</h3>
-                {devices.filter(d => d.id.includes('pico')).map((d) => <DeviceCard key={d.id} dev={d} staleAfter={data?.staleAfter || 20} />)}
+                {devices.map((d) => <DeviceCard key={d.id} dev={d} staleAfter={data?.staleAfter || 20} />)}
               </div>
             )}
           </div>
@@ -1227,93 +1266,16 @@ export default function HardwareInspector() {
       )}
 
       {tab === 'controls' && <ControlsTab devices={devices} />}
-
-      {tab === 'events' && (
-        <div style={S.card}>
-          {events === null && <div style={S.empty}>loading…</div>}
-          <table style={S.table}>
-            <thead><tr><th style={S.th}>time</th><th style={S.th}>device</th><th style={S.th}>event</th><th style={S.th}>detail</th></tr></thead>
-            <tbody>
-              {events?.length === 0 && <tr><td colSpan={4} style={S.td}>no events recorded</td></tr>}
-              {(events || []).map((e, i) => (
-                <tr key={i}>
-                  <td style={S.td}>{new Date(e.t).toLocaleString()}</td>
-                  <td style={S.td}>{e.device}</td>
-                  <td style={{ ...S.td, color: e.event === 'offline' ? '#ef4444' : '#4ade80' }}>{e.event}</td>
-                  <td style={S.td}>{e.detail}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {tab === 'forecast' && <ForecastTab />}
-      {tab === 'sustainability' && <SustainabilityTab />}
-      {tab === 'usb' && <UsbTab />}
+      {tab === 'events' && <EventsTab events={events} />}
+      {tab === 'quality' && <QualityTab quality={quality} setQMinutes={setQMinutes} qMinutes={qMinutes} />}
       {tab === 'config' && <ConfigTab />}
-
-      {tab === 'quality' && (
-        <div style={S.card}>
-          <div style={S.chartHead}>
-            <p style={{ ...S.dim, margin: 0, maxWidth: 620, lineHeight: 1.6 }}>
-              How much of stored history is evidence rather than simulation. A chart drawn over
-              mostly <strong>modelled</strong> rows describes the twin, not the building.
-            </p>
-            <span>
-              {[15, 60, 360, 1440].map((m) => (
-                <button key={m} style={S.btn(qMinutes === m)} onClick={() => setQMinutes(m)}>
-                  {m < 60 ? `${m}m` : `${m / 60}h`}
-                </button>
-              ))}
-            </span>
-          </div>
-          {quality === null && (
-            <div style={S.empty}>
-              counting rows over the last {qMinutes < 60 ? `${qMinutes}m` : `${qMinutes / 60}h`}…
-              <br /><span style={{ fontSize: 11 }}>the engine writes ~1500 rows/s, so a wide window takes a while</span>
-            </div>
-          )}
-          {quality?.error && <div style={S.warn}>query failed — is the database up?</div>}
-          {quality?.totals && (
-            <div style={S.totals}>
-              {Object.entries(quality.totals).map(([k, v]) => (
-                <div key={k} style={S.total}>
-                  <div style={{ fontSize: 22, fontWeight: 700,
-                    color: k === 'measured' ? '#4ade80' : k === 'modelled' ? '#f59e0b' : '#60a5fa' }}>
-                    {v.toLocaleString()}
-                  </div>
-                  <div style={S.dim}>{k} rows</div>
-                </div>
-              ))}
-            </div>
-          )}
-          <table style={S.table}>
-            <thead><tr><th style={S.th}>quality</th><th style={S.th}>device</th><th style={S.th}>metric</th><th style={S.th}>rows</th><th style={S.th}>span</th></tr></thead>
-            <tbody>
-              {(quality?.breakdown || []).map((r, i) => (
-                <tr key={i}>
-                  <td style={{ ...S.td, color: r.quality === 'measured' ? '#4ade80' : r.quality === 'modelled' ? '#f59e0b' : '#9ca3af' }}>{r.quality}</td>
-                  <td style={S.td}>{r.device}</td>
-                  <td style={S.td}>{r.metric}</td>
-                  <td style={S.td}>{r.rows.toLocaleString()}</td>
-                  <td style={S.td}>{new Date(r.from).toLocaleTimeString()} → {new Date(r.to).toLocaleTimeString()}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      {tab === 'forecast' && <ForecastTab />}
     </div>
   );
 }
 
-/**
- * Sparkline for a FORECAST horizon: evenly-spaced future values, no timestamps and no
- * provenance. Deliberately not the Spark component above — that one colours its stroke by
- * measured-vs-modelled, which is a statement about evidence that no forecast can make.
- */
-function ForecastSpark({ values, colour, width = 300, height = 60 }) {
+
+function ForecastSpark({ values, width = 200, height = 40, colour = '#60a5fa' }) {
   if (!values || values.length < 2) return null;
   const lo = Math.min(...values), hi = Math.max(...values);
   const span = hi - lo || 1;

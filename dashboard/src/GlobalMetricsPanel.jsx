@@ -444,7 +444,7 @@ export default function GlobalMetricsPanel({ simData, globalMetrics, loadHistory
             </div>
           </div>
 
-          {/* Physical edge nodes (ESP32 / Pico) currently bound into the twin */}
+          {/* Physical edge nodes (ESP32) currently bound into the twin */}
           {Object.values(hardwareNodes || {}).length > 0 && (
             <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-glass)', borderRadius: '8px', padding: '12px' }}>
               <div style={{ fontSize: '10px', color: 'var(--text-secondary)', fontWeight: 'bold', letterSpacing: '0.05em', marginBottom: '8px' }}>
