@@ -148,19 +148,19 @@ inline NodeConfig cfgDefaults() {
   #ifdef IR_PIN
     c.pinIrAc = IR_PIN;
   #else
-    c.pinIrAc = 19;
+    c.pinIrAc = 25;
   #endif
   
   #ifdef PLUG_RELAY_PIN
     c.pinPlugRelay = PLUG_RELAY_PIN;
   #else
-    c.pinPlugRelay = 25;
+    c.pinPlugRelay = 27;
   #endif
   
   #ifdef RELAY_PIN
     c.pinLightingRelay = RELAY_PIN;
   #else
-    c.pinLightingRelay = 23;
+    c.pinLightingRelay = 13;
   #endif
   
   #ifdef STRIP_ADC_PIN

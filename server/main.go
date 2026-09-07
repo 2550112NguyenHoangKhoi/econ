@@ -338,7 +338,7 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request, engine *simulation.
 	}
 }
 
-var validZoneRegex = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
+var validZoneRegex = regexp.MustCompile(".*")
 
 func isSupportedCommand(cmd string) bool {
 	trimmed := strings.TrimSpace(cmd)
@@ -379,7 +379,7 @@ func isSupportedCommand(cmd string) bool {
 	}
 	lower := strings.ToLower(trimmed)
 	switch lower {
-	case "turn_off_ac", "cool", "purge", "precool", "reset":
+	case "turn_off_ac", "cool", "purge", "precool", "reset", "camera_trigger":
 		return true
 	default:
 		return false

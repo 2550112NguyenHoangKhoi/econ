@@ -35,14 +35,14 @@
 #define MODEL_INPUT_BYTES          (MODEL_INPUT_WIDTH * MODEL_INPUT_HEIGHT * MODEL_INPUT_CHANNELS) // 9,216 bytes
 
 // Static Tensor Arena Memory Budget (Internal SRAM)
-#define TENSOR_ARENA_SIZE          (80 * 1024)                               // 80 KB (81,920 bytes)
+#define TENSOR_ARENA_SIZE          (32 * 1024)                               // 80 KB (81,920 bytes)
 
 // =============================================================================
 // 2. Conflict-Free ESP32 WROOM Pinout Mappings
 // =============================================================================
 // Camera Timing and Clock Signals
 #ifndef PIN_CAM_XCLK
-  #define PIN_CAM_XCLK   27 // 20 MHz LEDC PWM clock output
+  #define PIN_CAM_XCLK   18 // 20 MHz LEDC PWM clock output
 #endif
 #ifndef PIN_CAM_PCLK
   #define PIN_CAM_PCLK   14 // Pixel Clock input from camera
@@ -56,7 +56,7 @@
 
 // Parallel 8-Bit Data Bus (D0..D7)
 #ifndef PIN_CAM_D0
-  #define PIN_CAM_D0     33 // Data bit 0 (LSB)
+  #define PIN_CAM_D0     35 // Data bit 0 (LSB) - Changed from 33 (StripW)
 #endif
 #ifndef PIN_CAM_D1
   #define PIN_CAM_D1     32 // Data bit 1
@@ -71,10 +71,10 @@
   #define PIN_CAM_D4     15 // Data bit 4
 #endif
 #ifndef PIN_CAM_D5
-  #define PIN_CAM_D5     13 // Data bit 5
+  #define PIN_CAM_D5     26 // Data bit 5
 #endif
 #ifndef PIN_CAM_D6
-  #define PIN_CAM_D6     12 // Data bit 6
+  #define PIN_CAM_D6     19 // Data bit 6
 #endif
 #ifndef PIN_CAM_D7
   #define PIN_CAM_D7     5  // Data bit 7 (MSB) — Repurposed from legacy PIR GPIO5

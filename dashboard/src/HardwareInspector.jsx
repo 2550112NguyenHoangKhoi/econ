@@ -544,6 +544,42 @@ function DeviceControls({ targetZone = 'zone-office-a', targetDevice = '' }) {
             </div>
           </div>
         </div>
+
+        {/* Section 4: Camera & ML */}
+        <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 4, padding: 12 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+            <span style={{ fontWeight: 700, fontSize: 12, color: '#f3f4f6' }}>Camera & ML Person Detection</span>
+            <span style={S.badge('#a855f7')}>VISION</span>
+          </div>
+
+          
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ border: '1px solid #374151', borderRadius: 4, padding: 8, background: '#000', textAlign: 'center' }}>
+              <img 
+                src={`http://192.168.50.28:8080/?t=${Date.now()}`} 
+                alt="Live Camera Feed" 
+                style={{ width: '100%', maxWidth: '320px', height: 'auto', imageRendering: 'pixelated' }} 
+                onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'block'; }}
+              />
+              <div style={{ color: '#9ca3af', fontSize: 12, padding: 20, display: 'none' }}>
+                Camera feed offline or unreachable at esp32-41c3f0.local:8080
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                data-testid="camera-trigger-btn"
+                style={{ ...btnStyle('primary'), flex: 1 }}
+                onClick={() => sendCommand('CAMERA_TRIGGER')}
+                disabled={sending}
+              >
+                Trigger Inference
+              </button>
+            </div>
+            <div style={{ fontSize: 10, color: '#6b7280', marginTop: 4, lineHeight: 1.4 }}>
+              Forces the edge node to capture a frame and run the TensorFlow Lite person detection model immediately.
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Action feedback status banner */}

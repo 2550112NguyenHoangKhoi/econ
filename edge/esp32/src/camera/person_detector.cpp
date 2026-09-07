@@ -12,8 +12,9 @@
 #include <Arduino.h>
 #include "tensorflow/lite/micro/micro_interpreter.h"
 #include "tensorflow/lite/micro/micro_mutable_op_resolver.h"
+#include "tensorflow/lite/micro/micro_error_reporter.h"
 #include "tensorflow/lite/schema/schema_generated.h"
-#include "tensorflow/lite/version.h"
+// removed version.h
 #else
 #include <chrono>
 static inline uint32_t getDetectorMillis() {
@@ -88,8 +89,10 @@ bool CameraPersonDetector::init() {
   resolver.AddAdd();
 
   // Instantiate MicroInterpreter with 80 KB Static Internal SRAM Arena
+  static tflite::MicroErrorReporter micro_error_reporter;
+  tflite::ErrorReporter* error_reporter = &micro_error_reporter;
   static tflite::MicroInterpreter static_interpreter(
-      model, resolver, tensor_arena_, TENSOR_ARENA_SIZE);
+      model, resolver, tensor_arena_, TENSOR_ARENA_SIZE, error_reporter);
 
   if (static_interpreter.AllocateTensors() != kTfLiteOk) {
     state_ = DetectorState::ERROR_MODEL;
@@ -158,7 +161,9 @@ bool CameraPersonDetector::runInferenceInternal(const int8_t* input_tensor) {
   // Copy input tensor to TFLM interpreter input
   const tflite::Model* model = tflite::GetModel(g_person_detect_model_data);
   static tflite::MicroMutableOpResolver<8> resolver;
-  static tflite::MicroInterpreter interpreter(model, resolver, tensor_arena_, TENSOR_ARENA_SIZE);
+  static tflite::MicroErrorReporter micro_error_reporter;
+  tflite::ErrorReporter* error_reporter = &micro_error_reporter;
+  static tflite::MicroInterpreter interpreter(model, resolver, tensor_arena_, TENSOR_ARENA_SIZE, error_reporter);
 
   TfLiteTensor* input = interpreter.input(0);
   if (!input || input->bytes != MODEL_INPUT_BYTES) {

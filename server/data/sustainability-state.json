@@ -1,5 +1,7 @@
 {
   "buildingId": "bldg-econ-digitized",
-  "cumulativeEmissionsKg": 0,
-  "equipmentRuntimeHours": {}
+  "cumulativeEmissionsKg": 40.2546176302714,
+  "equipmentRuntimeHours": {
+    "strip-zone-lobby-33-lvl10": 0.1166667935877778
+  }
 }

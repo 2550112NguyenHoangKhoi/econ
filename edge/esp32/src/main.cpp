@@ -28,6 +28,7 @@
 #include <WiFiUdp.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
+void readAndPublish();
 
 // ---------------- CONFIG ----------------
 // WiFi + broker address for THIS site live in src/wifi_secrets.h, which is gitignored
@@ -74,11 +75,6 @@ char CLIENT_ID[32];                         // econ-esp32-<ZONE_TOPIC>
 #define ZONE_LABEL (gCfg.zoneLabel)
 
 // ---------------- HARDWARE PINS ----------------
-const int gCfg_pinLightingRelay  = 23; // NOT USED  // lighting relay (D13, user wiring)
-// GPIO19, NOT GPIO22: 22 is the I2C clock. applyHvacSetpoint() pulses this pin, so leaving
-// the emitter on 22 made every setpoint command drive SCL directly and corrupt any read from
-// the SHT30 or the ACD1200 sharing that bus.
-const int gCfg_pinIrAc     = 19; // NOT USED  // HVAC IR emitter (see applyHvacSetpoint)
 const int STATUS_LED = 2;   // onboard LED = MQTT link status
 
 // ---------------- SENSORS ----------------
@@ -114,12 +110,6 @@ const int STATUS_LED = 2;   // onboard LED = MQTT link status
   #define USE_MMWAVE 0               // HLK-LD2410C radar -> presence incl. stationary people
 #endif
 
-#include "camera/camera_config.h"
-#include "camera/tracking_payload.h"
-#include "camera/dual_mode_comm.h"
-#include "camera/ov7670_driver.h"
-#include "camera/model_data.h"
-#include "camera/person_detector.h"
 #ifndef USE_PLUG
   // Plug-load node (APLC): SCT-013 current clamp -> measured plug-circuit watts, plus a
   // second relay that switches the zone's non-critical socket circuit. This is the load a
@@ -159,11 +149,6 @@ const int STATUS_LED = 2;   // onboard LED = MQTT link status
 #ifndef USE_STRIP
   #define USE_STRIP 1
 #endif
-#if USE_STRIP
-  #ifndef gCfg.pinStripAdc
-    //#define STRIP_ADC_PIN 33
-  #endif
-#endif
 #ifndef USE_LUX
   // BH1750 ambient light (I2C 0x23), facing the facade.
   //
@@ -175,9 +160,6 @@ const int STATUS_LED = 2;   // onboard LED = MQTT link status
 #endif
 
 #if USE_AC_CLAMP
-  #ifndef gCfg.pinAcClampAdc
-    //#define AC_CLAMP_PIN 35
-  #endif
   #ifndef AC_CAL_A_PER_V
     #define AC_CAL_A_PER_V 60.6f   // same burden/front end as the plug clamp
   #endif
@@ -192,12 +174,14 @@ const int STATUS_LED = 2;   // onboard LED = MQTT link status
   #endif
   #include <OneWire.h>
   #include <DallasTemperature.h>
-  #ifndef gCfg.pinSupplyTemp
-    //#define SUPPLY_TEMP_PIN 26     // clear of I2C, the IR pin and both relay lines
-  #endif
   static OneWire supplyWire(gCfg.pinSupplyTemp);
   static DallasTemperature supplyProbe(&supplyWire);
   static bool supplyProbeReady = false;
+#endif
+
+#if USE_CAMERA
+  #include "camera/person_detector.h"
+  CameraPersonDetector cameraDetector;
 #endif
 
 #if USE_LUX
@@ -213,14 +197,8 @@ const int STATUS_LED = 2;   // onboard LED = MQTT link status
   // Wiring (SCT-013-000, 100 A : 50 mA current-output variant): burden resistor ~33 Ω
   // across the jack, DC bias the signal to 3.3 V/2 with a 10k/10k divider + 10 µF, tip
   // to GPIO34. The -030 (1 V voltage-output) variant needs only the bias divider.
-  #ifndef gCfg.pinPlugAdc
-    //#define PLUG_ADC_PIN 34
-  #endif
   // Plug-circuit relay (active HIGH), separate from the lighting relay on GPIO23. Boots
   // ON: a reboot must never leave the room's sockets dead (fail-energized, like a BMS).
-  #ifndef gCfg.pinPlugRelay
-    //#define PLUG_RELAY_PIN 25
-  #endif
   // Calibration: amps of primary current per volt at the ADC. 100 A / (0.05 A × 33 Ω)
   // ≈ 60.6 for the -000 variant with a 33 Ω burden; 30.0 for the -030 (30 A / 1 V).
   #ifndef PLUG_CAL_A_PER_V
@@ -236,24 +214,6 @@ const int STATUS_LED = 2;   // onboard LED = MQTT link status
 // skipped the pin-collision guards below for that build.
 #if USE_SHT30 || USE_CO2 || USE_LUX
   #include <Wire.h>
-  #ifndef gCfg.pinI2cSda
-    #define gCfg.pinI2cSda 21
-  #endif
-  #ifndef gCfg.pinI2cScl
-    #define gCfg.pinI2cScl 22
-  #endif
-
-  // A pin collision on the I2C bus is silent at runtime and looks like a flaky sensor, so
-  // it is caught here instead. Overriding gCfg.pinI2cSda/gCfg.pinI2cScl onto an actuator pin fails the build.
-  #if gCfg.pinI2cSda == 23 || gCfg.pinI2cScl == 23
-    #error "I2C pin collides with gCfg.pinLightingRelay (GPIO23) - pick another pin via -DgCfg.pinI2cSda/-DgCfg.pinI2cScl"
-  #endif
-  #if gCfg.pinI2cSda == 19 || gCfg.pinI2cScl == 19
-    #error "I2C pin collides with gCfg.pinIrAc (GPIO19) - pick another pin via -DgCfg.pinI2cSda/-DgCfg.pinI2cScl"
-  #endif
-  #if USE_PLUG && (gCfg.pinI2cSda == 25 || gCfg.pinI2cScl == 25)
-    #error "I2C pin collides with gCfg.pinPlugRelay (GPIO25) - pick another pin via -DgCfg.pinI2cSda/-DgCfg.pinI2cScl"
-  #endif
 
   // CRC-8, polynomial 0x31, init 0xFF. Shared: the SHT30 (datasheet 4.12) and the ASAIR
   // ACD1200 (datasheet 2.3.1) specify exactly the same check, so both sensors validate
@@ -300,36 +260,13 @@ const int STATUS_LED = 2;   // onboard LED = MQTT link status
 
 #if USE_DHT
   #include <DHT.h>
-  #ifndef gCfg.pinDht
-    //#define DHT_PIN 4
-  #endif
   #ifndef DHT_TYPE
     #define DHT_TYPE DHT22           // hshop.vn stocks DHT11, not DHT22: build -DDHT_TYPE=DHT11
   #endif
   DHT dht(gCfg.pinDht, DHT_TYPE);
 #endif
 
-#if USE_PIR
-  #ifndef gCfg.pinPir1
-    #ifdef PgCfg.pinIrAc
-      //#define PIR1_PIN PgCfg.pinIrAc
-    #else
-      //#define PIR1_PIN 18
-    #endif
-  #endif
-  #ifndef gCfg.pinPir2
-    #ifdef PgCfg.pinIrAc_2
-      //#define PIR2_PIN PgCfg.pinIrAc_2
-    #elif USE_MMWAVE
-      //#define PIR2_PIN 18
-    #else
-      //#define PIR2_PIN 18
-    #endif
-  #endif
-  #ifndef PgCfg.pinIrAc
-    #define PgCfg.pinIrAc gCfg.pinPir1
-  #endif
-#endif
+
 
 #if USE_MMWAVE
   // 24 GHz FMCW presence radar. A PIR detects *motion* and infers presence, so a person
@@ -342,9 +279,6 @@ const int STATUS_LED = 2;   // onboard LED = MQTT link status
   //   Ai-Thinker Rd-03 / Rd-03_V2 — OT2 pin (pin 5), 3.3 V supply (3.0-3.6 V)
   // Either wires straight to the GPIO with no level shifter. The modules' UART side is
   // only for tuning gates/thresholds and is not needed here.
-  #ifndef gCfg.pinMmwave
-    //#define MMWAVE_PIN 18
-  #endif
 #endif
 
 #if USE_CO2
@@ -449,26 +383,13 @@ const int STATUS_LED = 2;   // onboard LED = MQTT link status
 WiFiClient   espClient;
 PubSubClient client(espClient);
 WiFiUDP      udpClient;
-DualModeComm dualComm(udpClient, client, Serial);
-#if USE_CAMERA
-CameraPersonDetector cameraDetector;
-#endif
 
 // Global debounced presence state for periodic telemetry
 bool globalDebouncedPresence = false;
 
 
-// Helper to broadcast presence tracking telemetry to DualModeComm (:4210 UDP + MQTT, fallback to Serial)
+// Helper to broadcast presence tracking telemetry (camera disabled)
 void broadcastTrackingTelemetry(bool present) {
-  PersonTrackingData trackData;
-  initTrackingData(&trackData);
-  trackData.zone_id = ZONE_TOPIC;
-  trackData.sensor_id = CLIENT_ID;
-  trackData.timestamp_ms = millis();
-  trackData.person_detected = present;
-  trackData.confidence = present ? 1.0f : 0.0f;
-  trackData.person_count = present ? 1 : 0;
-  dualComm.transmit(trackData);
 }
 
 unsigned long lastPublish = 0;
@@ -811,13 +732,19 @@ void handleCommand(const String& msg) {
       Serial.println("[strain] CPU strain returned to NORMAL via command");
     }
 #endif
+#if USE_CAMERA
+    else if (tok == "CAMERA_TRIGGER") {
+      Serial.println("[camera] ML inference triggered via command");
+      cameraDetector.processFrame();
+      readAndPublish();
+    }
+#endif
 
     if (sep == -1) break;
     start = sep + 1;
   }
 }
 
-void readAndPublish();   // defined below; handleConfig republishes on an accepted change
 
 // publishConfigState publishes the effective configuration, RETAINED, so the current
 // calibration of every node on the bus is readable with one subscribe rather than by
@@ -929,8 +856,7 @@ void readAndPublish() {
   #endif
   occupancy = present ? (cameraDetector.getPersonCount() > 0 ? cameraDetector.getPersonCount() : 1) : 0;
   doc["confidence"] = round(cameraDetector.getConfidence() * 100) / 100.0;
-  doc["person_count"] = cameraDetector.getPersonCount();
-  cameraDetector.transmitTelemetry(dualComm);
+  doc["person_count"] = occupancy;
 #elif USE_PIR || USE_MMWAVE
   present = globalDebouncedPresence;
   occupancy = present ? 1 : 0;  // presence, not a headcount
@@ -1063,6 +989,65 @@ bool mqttConnect() {
   return ok;
 }
 
+
+#include <WiFiServer.h>
+#include <WiFiClient.h>
+
+#if USE_CAMERA
+WiFiServer streamServer(8080);
+
+void handleCameraStream() {
+  WiFiClient client = streamServer.available();
+  if (client) {
+    if (client.connected()) {
+      // Read request
+      while(client.available()) client.read();
+      
+      const uint8_t* frame = cameraDetector.getDriver().getFrameBuffer();
+      if (!frame) {
+         client.println("HTTP/1.1 503 Service Unavailable");
+         client.stop();
+         return;
+      }
+      
+      // BMP Header for 160x120 8-bit Grayscale
+      uint8_t bmpHeader[1078] = {0};
+      bmpHeader[0] = 'B'; bmpHeader[1] = 'M';
+      uint32_t fileSize = 1078 + 19200;
+      memcpy(bmpHeader + 2, &fileSize, 4);
+      uint32_t offset = 1078; memcpy(bmpHeader + 10, &offset, 4);
+      bmpHeader[14] = 40; // DIB Header size
+      uint32_t width = 160;
+      int32_t height = -120; // Top-down
+      memcpy(bmpHeader + 18, &width, 4);
+      memcpy(bmpHeader + 22, &height, 4);
+      bmpHeader[26] = 1; // Planes
+      bmpHeader[28] = 8; // Bits per pixel
+      uint32_t dataSize = 19200;
+      memcpy(bmpHeader + 34, &dataSize, 4);
+      
+      // Grayscale palette
+      for (int i = 0; i < 256; i++) {
+        bmpHeader[54 + i*4 + 0] = i; // B
+        bmpHeader[54 + i*4 + 1] = i; // G
+        bmpHeader[54 + i*4 + 2] = i; // R
+        bmpHeader[54 + i*4 + 3] = 0;
+      }
+
+      client.println("HTTP/1.1 200 OK");
+      client.println("Content-Type: image/bmp");
+      client.println("Connection: close");
+      client.println();
+      
+      client.write(bmpHeader, 1078);
+      client.write(frame, 19200);
+      client.flush();
+    }
+    client.stop();
+  }
+}
+#endif
+
 void setup() {
   Serial.begin(115200);
   // Load the persisted configuration FIRST: every announcement printed below (clamp
@@ -1186,39 +1171,28 @@ void setup() {
   snprintf(CLIENT_ID,          sizeof(CLIENT_ID),          "econ-esp32-%s",       ZONE_TOPIC);
 
   setupWifi();
+#if USE_CAMERA
+  streamServer.begin();
+#endif
   client.setServer(MQTT_HOST, MQTT_PORT);
   client.setBufferSize(768);
   client.setCallback(onMessage);
 
 #if USE_CAMERA
-  cameraDetector.setZoneAndSensorId(ZONE_TOPIC, CLIENT_ID);
   if (cameraDetector.init()) {
-    Serial.printf("[camera] OV7670 & TFLite Micro person detector initialized (state: %s)\n",
-                  cameraDetector.getState() == DetectorState::READY ? "READY" : "SIMULATION");
+      Serial.printf("[camera] initialized. model takes %u bytes SRAM\n", (unsigned int)cameraDetector.getArenaUsedBytes());
+      cameraDetector.setZoneAndSensorId(ZONE_TOPIC, CLIENT_ID);
   } else {
-    Serial.println("[camera] WARNING: Camera detector initialization failed");
+      Serial.println("[camera] initialization failed!");
   }
 #endif
 
-  CommConfig commCfg;
-  commCfg.wifi_ssid = WIFI_SSID;
-  commCfg.wifi_pass = WIFI_PASS;
-  commCfg.mqtt_host = MQTT_HOST;
-  commCfg.mqtt_port = MQTT_PORT;
-  commCfg.mqtt_topic = TELEMETRY_TOPIC;
-  commCfg.zone_topic = ZONE_TOPIC;
-  commCfg.zone_label = ZONE_LABEL;
-  commCfg.sensor_id  = CLIENT_ID;
-  commCfg.udp_port   = 4210;
-  commCfg.udp_broadcast_port = 4210;
-  commCfg.broadcast_ip = IPAddress(255, 255, 255, 255);
-  commCfg.enable_udp_broadcast = true;
-  commCfg.enable_serial_fallback = true;
-  dualComm.begin(commCfg);
-  dualComm.setMqttClient(&client, TELEMETRY_TOPIC);
 }
 
 void loop() {
+#if USE_CAMERA
+  handleCameraStream();
+#endif
   while (Serial.available()) {
     String line = Serial.readStringUntil('\n');
     line.trim();
@@ -1231,7 +1205,8 @@ void loop() {
       Serial.println("[wifi] scan done");
       if (n == 0) {
         Serial.println("[wifi] scanned: no networks found");
-      } else if (n < 0) {
+      
+} else if (n < 0) {
         Serial.printf("[wifi] scanned: failed with code %d\n", n);
       } else {
         for (int i = 0; i < n; ++i) {
@@ -1282,7 +1257,6 @@ void loop() {
 
       if (current_ssid.length() > 0) {
         Serial.printf("[wifi] received new credentials: %s\n", current_ssid.c_str());
-        dualComm.setWifiCredentials(current_ssid.c_str(), current_pass.c_str());
         WiFi.disconnect();
         WiFi.begin(current_ssid.c_str(), current_pass.c_str());
       }
@@ -1295,9 +1269,6 @@ void loop() {
       }
     }
   }
-
-  // Non-blocking dual-mode communications state machine tick (<0.2ms)
-  dualComm.tick();
 
   // Non-blocking dual PIR motion sensor polling & immediate transition dispatch
   static unsigned long lastPirPollTime = 0;
