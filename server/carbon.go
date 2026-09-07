@@ -156,6 +156,27 @@ func CalculateOffsetRecommendation(cumulativeEmissionsKg float64, budgetKg float
 				IsLive:                   false,
 				FetchedAt:                time.Now().UTC().Format(time.RFC3339),
 			},
+			{
+				Source:                   "Verra VCS (Verified Carbon Standard)",
+				SpotPricePerMetricTonUSD: 14.20,
+				Currency:                 "USD",
+				IsLive:                   false,
+				FetchedAt:                time.Now().UTC().Format(time.RFC3339),
+			},
+			{
+				Source:                   "Climate Action Reserve (CAR)",
+				SpotPricePerMetricTonUSD: 16.80,
+				Currency:                 "USD",
+				IsLive:                   false,
+				FetchedAt:                time.Now().UTC().Format(time.RFC3339),
+			},
+			{
+				Source:                   "South Pole (Nature-Based)",
+				SpotPricePerMetricTonUSD: 22.00,
+				Currency:                 "USD",
+				IsLive:                   false,
+				FetchedAt:                time.Now().UTC().Format(time.RFC3339),
+			},
 		},
 	}
 

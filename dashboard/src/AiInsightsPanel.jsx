@@ -149,7 +149,7 @@ export default function AiInsightsPanel({ simData, activeScenario, faultTarget, 
       });
     }
 
-    // 2. Physical hardware bound into the twin (ESP32 / Pico edge nodes)
+    // 2. Physical hardware bound into the twin (ESP32 edge nodes)
     if (hwList.length > 0) {
       const pinned = hwList.filter((n) => n.tempPinned).length;
       generated.push({

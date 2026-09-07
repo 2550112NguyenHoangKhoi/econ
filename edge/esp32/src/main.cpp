@@ -74,11 +74,11 @@ char CLIENT_ID[32];                         // econ-esp32-<ZONE_TOPIC>
 #define ZONE_LABEL (gCfg.zoneLabel)
 
 // ---------------- HARDWARE PINS ----------------
-const int RELAY_PIN  = 23;  // lighting relay (D13, user wiring)
+const int gCfg_pinLightingRelay  = 23; // NOT USED  // lighting relay (D13, user wiring)
 // GPIO19, NOT GPIO22: 22 is the I2C clock. applyHvacSetpoint() pulses this pin, so leaving
 // the emitter on 22 made every setpoint command drive SCL directly and corrupt any read from
 // the SHT30 or the ACD1200 sharing that bus.
-const int IR_PIN     = 19;  // HVAC IR emitter (see applyHvacSetpoint)
+const int gCfg_pinIrAc     = 19; // NOT USED  // HVAC IR emitter (see applyHvacSetpoint)
 const int STATUS_LED = 2;   // onboard LED = MQTT link status
 
 // ---------------- SENSORS ----------------
@@ -160,8 +160,8 @@ const int STATUS_LED = 2;   // onboard LED = MQTT link status
   #define USE_STRIP 1
 #endif
 #if USE_STRIP
-  #ifndef STRIP_ADC_PIN
-    #define STRIP_ADC_PIN 33
+  #ifndef gCfg.pinStripAdc
+    //#define STRIP_ADC_PIN 33
   #endif
 #endif
 #ifndef USE_LUX
@@ -175,8 +175,8 @@ const int STATUS_LED = 2;   // onboard LED = MQTT link status
 #endif
 
 #if USE_AC_CLAMP
-  #ifndef AC_CLAMP_PIN
-    #define AC_CLAMP_PIN 35
+  #ifndef gCfg.pinAcClampAdc
+    //#define AC_CLAMP_PIN 35
   #endif
   #ifndef AC_CAL_A_PER_V
     #define AC_CAL_A_PER_V 60.6f   // same burden/front end as the plug clamp
@@ -188,14 +188,14 @@ const int STATUS_LED = 2;   // onboard LED = MQTT link status
 
 #if USE_SUPPLY_TEMP
   #if USE_IR_AC && defined(IR_RECV_PIN) && IR_RECV_PIN == 26
-    #error "SUPPLY_TEMP_PIN collides with IR_RECV_PIN (GPIO26) - cannot use both simultaneously"
+    #error "gCfg.pinSupplyTemp collides with IR_RECV_PIN (GPIO26) - cannot use both simultaneously"
   #endif
   #include <OneWire.h>
   #include <DallasTemperature.h>
-  #ifndef SUPPLY_TEMP_PIN
-    #define SUPPLY_TEMP_PIN 26     // clear of I2C, the IR pin and both relay lines
+  #ifndef gCfg.pinSupplyTemp
+    //#define SUPPLY_TEMP_PIN 26     // clear of I2C, the IR pin and both relay lines
   #endif
-  static OneWire supplyWire(SUPPLY_TEMP_PIN);
+  static OneWire supplyWire(gCfg.pinSupplyTemp);
   static DallasTemperature supplyProbe(&supplyWire);
   static bool supplyProbeReady = false;
 #endif
@@ -213,13 +213,13 @@ const int STATUS_LED = 2;   // onboard LED = MQTT link status
   // Wiring (SCT-013-000, 100 A : 50 mA current-output variant): burden resistor ~33 Ω
   // across the jack, DC bias the signal to 3.3 V/2 with a 10k/10k divider + 10 µF, tip
   // to GPIO34. The -030 (1 V voltage-output) variant needs only the bias divider.
-  #ifndef PLUG_ADC_PIN
-    #define PLUG_ADC_PIN 34
+  #ifndef gCfg.pinPlugAdc
+    //#define PLUG_ADC_PIN 34
   #endif
   // Plug-circuit relay (active HIGH), separate from the lighting relay on GPIO23. Boots
   // ON: a reboot must never leave the room's sockets dead (fail-energized, like a BMS).
-  #ifndef PLUG_RELAY_PIN
-    #define PLUG_RELAY_PIN 25
+  #ifndef gCfg.pinPlugRelay
+    //#define PLUG_RELAY_PIN 25
   #endif
   // Calibration: amps of primary current per volt at the ADC. 100 A / (0.05 A × 33 Ω)
   // ≈ 60.6 for the -000 variant with a 33 Ω burden; 30.0 for the -030 (30 A / 1 V).
@@ -236,23 +236,23 @@ const int STATUS_LED = 2;   // onboard LED = MQTT link status
 // skipped the pin-collision guards below for that build.
 #if USE_SHT30 || USE_CO2 || USE_LUX
   #include <Wire.h>
-  #ifndef I2C_SDA
-    #define I2C_SDA 21
+  #ifndef gCfg.pinI2cSda
+    #define gCfg.pinI2cSda 21
   #endif
-  #ifndef I2C_SCL
-    #define I2C_SCL 22
+  #ifndef gCfg.pinI2cScl
+    #define gCfg.pinI2cScl 22
   #endif
 
   // A pin collision on the I2C bus is silent at runtime and looks like a flaky sensor, so
-  // it is caught here instead. Overriding I2C_SDA/I2C_SCL onto an actuator pin fails the build.
-  #if I2C_SDA == 23 || I2C_SCL == 23
-    #error "I2C pin collides with RELAY_PIN (GPIO23) - pick another pin via -DI2C_SDA/-DI2C_SCL"
+  // it is caught here instead. Overriding gCfg.pinI2cSda/gCfg.pinI2cScl onto an actuator pin fails the build.
+  #if gCfg.pinI2cSda == 23 || gCfg.pinI2cScl == 23
+    #error "I2C pin collides with gCfg.pinLightingRelay (GPIO23) - pick another pin via -DgCfg.pinI2cSda/-DgCfg.pinI2cScl"
   #endif
-  #if I2C_SDA == 19 || I2C_SCL == 19
-    #error "I2C pin collides with IR_PIN (GPIO19) - pick another pin via -DI2C_SDA/-DI2C_SCL"
+  #if gCfg.pinI2cSda == 19 || gCfg.pinI2cScl == 19
+    #error "I2C pin collides with gCfg.pinIrAc (GPIO19) - pick another pin via -DgCfg.pinI2cSda/-DgCfg.pinI2cScl"
   #endif
-  #if USE_PLUG && (I2C_SDA == 25 || I2C_SCL == 25)
-    #error "I2C pin collides with PLUG_RELAY_PIN (GPIO25) - pick another pin via -DI2C_SDA/-DI2C_SCL"
+  #if USE_PLUG && (gCfg.pinI2cSda == 25 || gCfg.pinI2cScl == 25)
+    #error "I2C pin collides with gCfg.pinPlugRelay (GPIO25) - pick another pin via -DgCfg.pinI2cSda/-DgCfg.pinI2cScl"
   #endif
 
   // CRC-8, polynomial 0x31, init 0xFF. Shared: the SHT30 (datasheet 4.12) and the ASAIR
@@ -300,34 +300,34 @@ const int STATUS_LED = 2;   // onboard LED = MQTT link status
 
 #if USE_DHT
   #include <DHT.h>
-  #ifndef DHT_PIN
-    #define DHT_PIN 4
+  #ifndef gCfg.pinDht
+    //#define DHT_PIN 4
   #endif
   #ifndef DHT_TYPE
     #define DHT_TYPE DHT22           // hshop.vn stocks DHT11, not DHT22: build -DDHT_TYPE=DHT11
   #endif
-  DHT dht(DHT_PIN, DHT_TYPE);
+  DHT dht(gCfg.pinDht, DHT_TYPE);
 #endif
 
 #if USE_PIR
-  #ifndef PIR1_PIN
-    #ifdef PIR_PIN
-      #define PIR1_PIN PIR_PIN
+  #ifndef gCfg.pinPir1
+    #ifdef PgCfg.pinIrAc
+      //#define PIR1_PIN PgCfg.pinIrAc
     #else
-      #define PIR1_PIN 18
+      //#define PIR1_PIN 18
     #endif
   #endif
-  #ifndef PIR2_PIN
-    #ifdef PIR_PIN_2
-      #define PIR2_PIN PIR_PIN_2
+  #ifndef gCfg.pinPir2
+    #ifdef PgCfg.pinIrAc_2
+      //#define PIR2_PIN PgCfg.pinIrAc_2
     #elif USE_MMWAVE
-      #define PIR2_PIN 18
+      //#define PIR2_PIN 18
     #else
-      #define PIR2_PIN 18
+      //#define PIR2_PIN 18
     #endif
   #endif
-  #ifndef PIR_PIN
-    #define PIR_PIN PIR1_PIN
+  #ifndef PgCfg.pinIrAc
+    #define PgCfg.pinIrAc gCfg.pinPir1
   #endif
 #endif
 
@@ -342,8 +342,8 @@ const int STATUS_LED = 2;   // onboard LED = MQTT link status
   //   Ai-Thinker Rd-03 / Rd-03_V2 — OT2 pin (pin 5), 3.3 V supply (3.0-3.6 V)
   // Either wires straight to the GPIO with no level shifter. The modules' UART side is
   // only for tuning gates/thresholds and is not needed here.
-  #ifndef MMWAVE_PIN
-    #define MMWAVE_PIN 18
+  #ifndef gCfg.pinMmwave
+    //#define MMWAVE_PIN 18
   #endif
 #endif
 
@@ -525,8 +525,8 @@ void setupWifi() {
     #define IR_AC_FAN kAuto          // stdAc::fanspeed_t member name
   #endif
 
-  IRac ac(IR_PIN);
-  IRsend customIrSend(IR_PIN);       // Generic IR sender for fans, TVs, etc.
+  IRac ac(gCfg.pinIrAc);
+  IRsend customIrSend(gCfg.pinIrAc);       // Generic IR sender for fans, TVs, etc.
   bool irAcReady = false;            // protocol compiled AND supported by the library
 #endif
 
@@ -580,16 +580,16 @@ void applyHvacSetpoint(float celsius) {
   Serial.println("[hvac] WARNING: IR AC compiled in but protocol unsupported -> not sent");
 #else
   // No AC control fitted. The pulse is a diagnostic only — it lets a scope or an LED on
-  // IR_PIN confirm the command arrived and was parsed — and telemetry says acReal:false
+  // gCfg.pinIrAc confirm the command arrived and was parsed — and telemetry says acReal:false
   // so nothing downstream reads this as a machine having been commanded.
   Serial.printf("[hvac] setpoint %.1f C parsed (no IR AC compiled in; acReal:false)\n", celsius);
-  for (int i = 0; i < 3; i++) { digitalWrite(IR_PIN, HIGH); delay(8); digitalWrite(IR_PIN, LOW); delay(8); }
+  for (int i = 0; i < 3; i++) { digitalWrite(gCfg.pinIrAc, HIGH); delay(8); digitalWrite(gCfg.pinIrAc, LOW); delay(8); }
 #endif
 }
 
 void setLights(bool on) {
   lightsOn = on;
-  digitalWrite(RELAY_PIN, on ? HIGH : LOW);
+  digitalWrite(gCfg.pinLightingRelay, on ? HIGH : LOW);
   Serial.printf("[relay] lights %s\n", on ? "ON" : "OFF");
 }
 
@@ -598,7 +598,7 @@ bool plugOn = true;  // fail-energized: sockets are live until the engine says o
 
 void setPlug(bool on) {
   plugOn = on;
-  digitalWrite(PLUG_RELAY_PIN, on ? HIGH : LOW);
+  digitalWrite(gCfg.pinPlugRelay, on ? HIGH : LOW);
   Serial.printf("[relay] plug circuit %s\n", on ? "ON" : "OFF");
 }
 
@@ -622,7 +622,7 @@ float readPlugAmps() {
   static int sampleBuf[MAX_SAMPLES];
   unsigned long start = millis();
   while (millis() - start < 100 && n < MAX_SAMPLES) {
-    sampleBuf[n++] = analogRead(PLUG_ADC_PIN);
+    sampleBuf[n++] = analogRead(gCfg.pinPlugAdc);
   }
   plugDenoiser.setCal(gCfg.plugCalAPerV);
   return plugDenoiser.processWindow(sampleBuf, n);
@@ -648,7 +648,7 @@ float readAcAmps() {
   static int sampleBuf[MAX_SAMPLES];
   unsigned long start = millis();
   while (millis() - start < 100 && n < MAX_SAMPLES) {
-    sampleBuf[n++] = analogRead(AC_CLAMP_PIN);
+    sampleBuf[n++] = analogRead(gCfg.pinAcClampAdc);
   }
   acDenoiser.setCal(gCfg.acCalAPerV);
   return acDenoiser.processWindow(sampleBuf, n);
@@ -690,7 +690,7 @@ float readStripAmps() {
   static int sampleBuf[MAX_SAMPLES];
   unsigned long start = millis();
   while (millis() - start < 100 && n < MAX_SAMPLES) {
-    sampleBuf[n++] = analogRead(STRIP_ADC_PIN);
+    sampleBuf[n++] = analogRead(gCfg.pinStripAdc);
   }
 
   // Starvation guard (< 100 samples in window)
@@ -843,9 +843,15 @@ void handleConfig(const String& msg) {
     return;
   }
   bool wasReset = false;
-  bool changed  = cfgApplyJson(doc, wasReset);
+  bool hardwareChanged = false;
+  bool changed  = cfgApplyJson(doc, wasReset, hardwareChanged);
   publishConfigState();
   if (changed) {
+    if (hardwareChanged || wasReset) {
+      Serial.println("[config] Hardware pins changed or reset requested. Rebooting ESP32 in 1s...");
+      delay(1000);
+      ESP.restart();
+    }
     // Republish immediately rather than waiting out the interval: the operator who just
     // changed a calibration wants to see the corrected watts now, and the new cfgRev is
     // what marks where the old series stopped being comparable.
@@ -919,7 +925,7 @@ void readAndPublish() {
 #if USE_CAMERA
   present = cameraDetector.isPersonDetected();
   #if USE_MMWAVE
-    if (digitalRead(MMWAVE_PIN) == HIGH) present = true;
+    if (digitalRead(gCfg.pinMmwave) == HIGH) present = true;
   #endif
   occupancy = present ? (cameraDetector.getPersonCount() > 0 ? cameraDetector.getPersonCount() : 1) : 0;
   doc["confidence"] = round(cameraDetector.getConfidence() * 100) / 100.0;
@@ -1063,8 +1069,8 @@ void setup() {
   // calibration, touch threshold, publish cadence) must report what this node will
   // actually run with, not the compiled default it may already have been told to replace.
   cfgLoad();
-  pinMode(RELAY_PIN, OUTPUT);
-  pinMode(IR_PIN, OUTPUT);
+  pinMode(gCfg.pinLightingRelay, OUTPUT);
+  pinMode(gCfg.pinIrAc, OUTPUT);
 #if USE_IR_AC
   customIrSend.begin();
   // IRac has no begin() — the per-protocol sender initialises itself on send. What DOES
@@ -1078,7 +1084,7 @@ void setup() {
   irAcReady = IRac::isProtocolSupported(decode_type_t::IR_AC_PROTOCOL);
   if (irAcReady) {
     Serial.printf("[hvac] IR AC control ACTIVE: %s on GPIO%d\n",
-                  typeToString(decode_type_t::IR_AC_PROTOCOL).c_str(), IR_PIN);
+                  typeToString(decode_type_t::IR_AC_PROTOCOL).c_str(), gCfg.pinIrAc);
   } else {
     Serial.printf("[hvac] WARNING: protocol %s is not send-supported by this library build; "
                   "setpoints will NOT reach the AC (acReal:false)\n",
@@ -1091,24 +1097,24 @@ void setup() {
   pinMode(STATUS_LED, OUTPUT);
   setLights(true);
 #if USE_SHT30 || USE_CO2 || USE_LUX
-  Wire.begin(I2C_SDA, I2C_SCL);
-  Serial.printf("[i2c] bus up on SDA=GPIO%d SCL=GPIO%d\n", I2C_SDA, I2C_SCL);
+  Wire.begin(gCfg.pinI2cSda, gCfg.pinI2cScl);
+  Serial.printf("[i2c] bus up on SDA=GPIO%d SCL=GPIO%d\n", gCfg.pinI2cSda, gCfg.pinI2cScl);
 #endif
 #if USE_SHT30
   Serial.printf("[sht30] expecting I2C addr 0x%02X\n", SHT30_ADDR);
 #endif
 #if USE_DHT
   dht.begin();
-  Serial.printf("[dht] sensor on GPIO%d\n", DHT_PIN);
+  Serial.printf("[dht] sensor on GPIO%d\n", gCfg.pinDht);
 #endif
 #if USE_PIR
-  pinMode(PIR1_PIN, INPUT);
-  pinMode(PIR2_PIN, INPUT);
-  Serial.printf("[pir] dual PIR sensors initialized on GPIO%d and GPIO%d\n", PIR1_PIN, PIR2_PIN);
+  pinMode(gCfg.pinPir1, INPUT);
+  pinMode(gCfg.pinPir2, INPUT);
+  Serial.printf("[pir] dual PIR sensors initialized on GPIO%d and GPIO%d\n", gCfg.pinPir1, gCfg.pinPir2);
 #endif
 #if USE_MMWAVE
-  pinMode(MMWAVE_PIN, INPUT);
-  Serial.printf("[mmwave] LD2410C presence on GPIO%d (holds for stationary occupants)\n", MMWAVE_PIN);
+  pinMode(gCfg.pinMmwave, INPUT);
+  Serial.printf("[mmwave] LD2410C presence on GPIO%d (holds for stationary occupants)\n", gCfg.pinMmwave);
 #endif
 #if USE_CO2
   #if CO2_ABC_OFF
@@ -1123,15 +1129,15 @@ void setup() {
                 ACD1200_ADDR);
 #endif
 #if USE_PLUG
-  pinMode(PLUG_RELAY_PIN, OUTPUT);
+  pinMode(gCfg.pinPlugRelay, OUTPUT);
   setPlug(true);  // fail-energized: sockets live from boot until the engine sheds them
   analogReadResolution(12);
   Serial.printf("[plug] SCT-013 on GPIO%d (cal %.1f A/V), relay on GPIO%d\n",
-                PLUG_ADC_PIN, (double)gCfg.plugCalAPerV, PLUG_RELAY_PIN);
+                gCfg.pinPlugAdc, (double)gCfg.plugCalAPerV, gCfg.pinPlugRelay);
 #endif
 #if USE_STRIP
   analogReadResolution(12);
-  Serial.printf("[strip] ACS712 on GPIO%d (cal %.1f A/V) — power strip metering\n", STRIP_ADC_PIN, (double)gCfg.stripCalAPerV);
+  Serial.printf("[strip] ACS712 on GPIO%d (cal %.1f A/V) — power strip metering\n", gCfg.pinStripAdc, (double)gCfg.stripCalAPerV);
 #endif
 #if USE_SUPPLY_TEMP
   supplyProbe.begin();
@@ -1139,17 +1145,17 @@ void setup() {
   if (supplyProbeReady) {
     supplyProbe.setResolution(12);
     Serial.printf("[supply] DS18B20 on GPIO%d — measured supply air replaces the engine's "
-                  "design constant for this zone\n", SUPPLY_TEMP_PIN);
+                  "design constant for this zone\n", gCfg.pinSupplyTemp);
   } else {
     Serial.printf("[supply] no DS18B20 found on GPIO%d — supplyC omitted, engine keeps its "
-                  "design value\n", SUPPLY_TEMP_PIN);
+                  "design value\n", gCfg.pinSupplyTemp);
   }
 #endif
 #if USE_AC_CLAMP
   analogReadResolution(12);
   Serial.printf("[ac] SCT-013 on the AC supply, GPIO%d (cal %.1f A/V) — measured compressor "
                 "power replaces the twin's simulated VAV flow for this zone\n",
-                AC_CLAMP_PIN, (double)gCfg.acCalAPerV);
+                gCfg.pinAcClampAdc, (double)gCfg.acCalAPerV);
 #endif
 #if USE_LUX
   {
@@ -1300,14 +1306,14 @@ void loop() {
   if (nowPir - lastPirPollTime >= 50) {
     lastPirPollTime = nowPir;
 #if USE_PIR
-    bool pir1 = (digitalRead(PIR1_PIN) == HIGH);
-    bool pir2 = (digitalRead(PIR2_PIN) == HIGH);
+    bool pir1 = (digitalRead(gCfg.pinPir1) == HIGH);
+    bool pir2 = (digitalRead(gCfg.pinPir2) == HIGH);
     bool currentDetected = (pir1 || pir2);
 #else
     bool currentDetected = false;
 #endif
 #if USE_MMWAVE
-    if (digitalRead(MMWAVE_PIN) == HIGH) currentDetected = true;
+    if (digitalRead(gCfg.pinMmwave) == HIGH) currentDetected = true;
 #endif
 
     // Immediate telemetry burst on occupancy transition (<200ms latency)

@@ -443,7 +443,7 @@ function App() {
       .catch(err => console.error("Failed to load Brick ontology:", err));
   }, []);
 
-  // Physical edge nodes (ESP32 / Pico): poll which zones mirror real hardware so the
+  // Physical edge nodes (ESP32): poll which zones mirror real hardware so the
   // micro-HUD can badge them. Stays an empty map when no node has ever reported.
   const [hardwareNodes, setHardwareNodes] = useState({});
 
@@ -831,6 +831,89 @@ function App() {
                   <option value="NEC:0x20DF10EF:32">Dyson Fan (Raw Hex)</option>
                 </select>
               </div>
+
+              {/* ESP32 & SENSOR ADVANCED DIAGNOSTICS */}
+              <details style={{ marginTop: '12px', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '6px', background: 'rgba(239, 68, 68, 0.05)' }}>
+                <summary style={{ padding: '8px', fontSize: '10px', fontWeight: 'bold', color: '#fca5a5', cursor: 'pointer', outline: 'none' }}>
+                  🔧 ESP32 & SENSOR ADVANCED DIAGNOSTICS
+                </summary>
+                <div style={{ padding: '8px', fontSize: '10px', color: '#fecaca', borderTop: '1px solid rgba(239, 68, 68, 0.2)' }}>
+                  {/* ADC & Power Measurement */}
+                  <details open style={{ marginBottom: '8px' }}>
+                    <summary style={{ fontWeight: 'bold', color: '#f59e0b', cursor: 'pointer', fontSize: '10px' }}>⚡ ADC & Power Measurement</summary>
+                    <ul style={{ margin: '4px 0', paddingLeft: '16px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <li><strong>ADC2 / WiFi Conflict:</strong> ESP32 cannot use ADC2 pins (GPIO 0, 2, 4, 12-15, 25-27) while WiFi is active. Use ADC1 pins (GPIO 32-39) for analogRead. If readings are 0 or erratic, check your pin assignment.</li>
+                      <li><strong>ACS712 Noise Floor:</strong> Loads below ~35W (0.15A cutoff) will read as 0W due to DSP denoising. This is intentional to prevent ghost readings from EMI. Verify with a known 100W+ load.</li>
+                      <li><strong>SCT-013 CT Clamp Reads 0:</strong> Ensure the clamp jaw is fully closed around the wire. Verify the 33Ω burden resistor is installed. Check <code>plugCalAPerV</code> calibration constant in firmware.</li>
+                      <li><strong>ADC Nonlinearity:</strong> ESP32 ADC is non-linear above 3.1V and below 0.1V. Apply polynomial correction or use attenuation setting <code>ADC_ATTEN_DB_11</code> for full 0-3.3V range.</li>
+                    </ul>
+                  </details>
+
+                  {/* I2C Bus */}
+                  <details style={{ marginBottom: '8px' }}>
+                    <summary style={{ fontWeight: 'bold', color: '#60a5fa', cursor: 'pointer', fontSize: '10px' }}>🔌 I2C Bus (SHT30, CO2, BH1750)</summary>
+                    <ul style={{ margin: '4px 0', paddingLeft: '16px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <li><strong>Bus Lockup:</strong> If sensors return NaN or freeze, the I2C bus may be locked. Add 4.7kΩ pull-ups on SDA (GPIO 21) and SCL (GPIO 22). Power-cycle the sensor or call <code>Wire.begin()</code> to reset.</li>
+                      <li><strong>Address Conflicts:</strong> SHT30 defaults to 0x44, BH1750 to 0x23, SCD30/ACD1200 to 0x61. Run an I2C scan if sensors are not detected. Conflicting addresses will cause both devices to fail.</li>
+                      <li><strong>Cable Length:</strong> I2C is reliable up to ~1m at 400kHz. For longer runs, reduce to 100kHz or use an I2C bus extender (P82B715).</li>
+                      <li><strong>CO2 Sensor Warm-Up:</strong> SCD30/ACD1200 requires 30-60 seconds of warm-up before readings stabilize. First readings may show 0 or 400 ppm baseline.</li>
+                    </ul>
+                  </details>
+
+                  {/* Temperature Sensors */}
+                  <details style={{ marginBottom: '8px' }}>
+                    <summary style={{ fontWeight: 'bold', color: '#34d399', cursor: 'pointer', fontSize: '10px' }}>🌡 Temperature Sensors (DS18B20, SHT30)</summary>
+                    <ul style={{ margin: '4px 0', paddingLeft: '16px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <li><strong>DS18B20 reads -127°C:</strong> Sensor is disconnected or the 4.7kΩ pull-up resistor to 3.3V on the data pin (GPIO 26) is missing.</li>
+                      <li><strong>DS18B20 reads 85°C:</strong> Sensor has power but failed to complete a temperature conversion. Check wiring or increase conversion delay to 750ms.</li>
+                      <li><strong>SHT30 reads 0°C / 0%RH:</strong> I2C communication failure. Check pull-ups and verify the sensor address (0x44 or 0x45). Try a soft reset command (0x30A2).</li>
+                      <li><strong>Self-Heating:</strong> SHT30 in continuous measurement mode can self-heat +0.5°C. Use single-shot mode with <code>repeatability=HIGH</code> for accurate readings.</li>
+                    </ul>
+                  </details>
+
+                  {/* PIR & Occupancy */}
+                  <details style={{ marginBottom: '8px' }}>
+                    <summary style={{ fontWeight: 'bold', color: '#a78bfa', cursor: 'pointer', fontSize: '10px' }}>🏃 PIR & Occupancy Detection</summary>
+                    <ul style={{ margin: '4px 0', paddingLeft: '16px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <li><strong>PIR RD-04 Not Registering:</strong> Adjust sensitivity potentiometer. Ensure the Fresnel lens is unobstructed. PIR requires line-of-sight and detects motion (not static presence).</li>
+                      <li><strong>False Triggers:</strong> PIR can false-trigger from HVAC air drafts, sunlight, or nearby heat sources. Add a 2-second debounce timer. Shield the sensor from direct AC discharge.</li>
+                      <li><strong>mmWave Radar Interference:</strong> 24GHz FMCW radar can detect through thin walls, causing ghost occupancy. Reduce detection range via UART configuration. Keep away from fluorescent ballasts.</li>
+                      <li><strong>Capacitive Touch Flapping:</strong> GPIO32 touch sensing near high-voltage lines may false-trigger the SSR relay. Adjust <code>touchEnterPct</code> and <code>touchExitPct</code> thresholds.</li>
+                    </ul>
+                  </details>
+
+                  {/* IR Blaster */}
+                  <details style={{ marginBottom: '8px' }}>
+                    <summary style={{ fontWeight: 'bold', color: '#f472b6', cursor: 'pointer', fontSize: '10px' }}>📡 IR Blaster & AC Control</summary>
+                    <ul style={{ margin: '4px 0', paddingLeft: '16px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <li><strong>IR Command Not Received:</strong> Ensure the 940nm IR LED is pointed at the AC receiver. Maximum reliable range is ~5m with direct line-of-sight. Check GPIO 19 PWM output with a phone camera (IR shows as purple glow).</li>
+                      <li><strong>Wrong Protocol:</strong> Try COOLIX first (most Casper/generic ACs). If no response, cycle through GREE → DAIKIN → ELECTRA → PANASONIC_AC. Use the raw hex capture mode to learn unknown protocols.</li>
+                      <li><strong>IR LED Wiring:</strong> Drive the LED through a 2N2222 transistor (not directly from GPIO). Use a 22Ω series resistor. Maximum forward current is 100mA.</li>
+                    </ul>
+                  </details>
+
+                  {/* WiFi & MQTT */}
+                  <details style={{ marginBottom: '8px' }}>
+                    <summary style={{ fontWeight: 'bold', color: '#38bdf8', cursor: 'pointer', fontSize: '10px' }}>📶 WiFi & MQTT Connectivity</summary>
+                    <ul style={{ margin: '4px 0', paddingLeft: '16px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <li><strong>Frequent Disconnects:</strong> ESP32 WiFi is 2.4GHz only. Ensure your router's 2.4GHz band is active and not overloaded. Set a static IP in the firmware to avoid DHCP renewal drops.</li>
+                      <li><strong>MQTT Publish Fails:</strong> Check broker address and port (default 1883). Verify the MQTT client ID is unique per device. If using TLS (port 8883), ensure the CA certificate is loaded.</li>
+                      <li><strong>Telemetry Gaps:</strong> If the Hardware Inspector shows stale data, check the MQTT QoS level (use QoS 1 for guaranteed delivery). Increase the keepalive interval to 60s.</li>
+                      <li><strong>Watchdog Reboot:</strong> If ESP32 reboots every ~5 minutes, the task watchdog is triggering. Ensure <code>yield()</code> or <code>vTaskDelay(1)</code> is called in tight loops.</li>
+                    </ul>
+                  </details>
+
+                  {/* Power & Boot */}
+                  <details>
+                    <summary style={{ fontWeight: 'bold', color: '#fb923c', cursor: 'pointer', fontSize: '10px' }}>🔋 Power & Boot Issues</summary>
+                    <ul style={{ margin: '4px 0', paddingLeft: '16px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <li><strong>Brown-Out Reset:</strong> If ESP32 reboots when WiFi connects, the USB power supply is insufficient. Use a dedicated 5V/2A supply. Add a 470µF capacitor across VIN/GND.</li>
+                      <li><strong>Boot Loop (GPIO 0, 2, 12, 15):</strong> These are strapping pins. Avoid connecting peripherals that pull them HIGH or LOW during boot. GPIO 12 pulled HIGH forces 1.8V flash voltage (crash).</li>
+                      <li><strong>Compute Offload Mode:</strong> If the ESP32 is too strained (CPU &gt;85%), it will automatically switch to pass-through mode and stream raw ADC values to the backend for server-side DSP processing.</li>
+                    </ul>
+                  </details>
+                </div>
+              </details>
               {/* [GEMINI IMPLEMENTATION END] */}
             </div>
           </div>

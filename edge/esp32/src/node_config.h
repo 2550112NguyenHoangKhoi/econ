@@ -105,6 +105,22 @@ struct NodeConfig {
   float    setpointMaxC;
   bool     relayActiveLow;        // true = LOW turns relay ON, false = HIGH turns relay ON
   bool     simulateCpuStrain = false; // high CPU load offload fallback simulation
+  
+  // GPIO Pin Assignments
+  uint8_t  pinIrAc;
+  uint8_t  pinPlugRelay;
+  uint8_t  pinLightingRelay;
+  uint8_t  pinStripAdc;
+  uint8_t  pinPlugAdc;
+  uint8_t  pinAcClampAdc;
+  uint8_t  pinSupplyTemp;
+  uint8_t  pinI2cSda;
+  uint8_t  pinI2cScl;
+  uint8_t  pinPir1;
+  uint8_t  pinPir2;
+  uint8_t  pinMmwave;
+  uint8_t  pinDht;
+  
   uint32_t cfgRev;                // bumped on every accepted change; published in telemetry
 };
 
@@ -127,6 +143,86 @@ inline NodeConfig cfgDefaults() {
   c.setpointMaxC      = SETPOINT_MAX_C_DEFAULT;
   c.relayActiveLow    = false;
   c.simulateCpuStrain = false;
+  
+  // Default GPIO from #define macros if they exist, or 255 if unused
+  #ifdef IR_PIN
+    c.pinIrAc = IR_PIN;
+  #else
+    c.pinIrAc = 19;
+  #endif
+  
+  #ifdef PLUG_RELAY_PIN
+    c.pinPlugRelay = PLUG_RELAY_PIN;
+  #else
+    c.pinPlugRelay = 25;
+  #endif
+  
+  #ifdef RELAY_PIN
+    c.pinLightingRelay = RELAY_PIN;
+  #else
+    c.pinLightingRelay = 23;
+  #endif
+  
+  #ifdef STRIP_ADC_PIN
+    c.pinStripAdc = STRIP_ADC_PIN;
+  #else
+    c.pinStripAdc = 33;
+  #endif
+  
+  #ifdef PLUG_ADC_PIN
+    c.pinPlugAdc = PLUG_ADC_PIN;
+  #else
+    c.pinPlugAdc = 34;
+  #endif
+  
+  #ifdef AC_CLAMP_PIN
+    c.pinAcClampAdc = AC_CLAMP_PIN;
+  #else
+    c.pinAcClampAdc = 35;
+  #endif
+  
+  #ifdef SUPPLY_TEMP_PIN
+    c.pinSupplyTemp = SUPPLY_TEMP_PIN;
+  #else
+    c.pinSupplyTemp = 26;
+  #endif
+  
+  #ifdef I2C_SDA
+    c.pinI2cSda = I2C_SDA;
+  #else
+    c.pinI2cSda = 21;
+  #endif
+  
+  #ifdef I2C_SCL
+    c.pinI2cScl = I2C_SCL;
+  #else
+    c.pinI2cScl = 22;
+  #endif
+  
+  #ifdef PIR1_PIN
+    c.pinPir1 = PIR1_PIN;
+  #else
+    c.pinPir1 = 18;
+  #endif
+  
+  #ifdef PIR2_PIN
+    c.pinPir2 = PIR2_PIN;
+  #else
+    c.pinPir2 = 18;
+  #endif
+  
+  #ifdef MMWAVE_PIN
+    c.pinMmwave = MMWAVE_PIN;
+  #else
+    c.pinMmwave = 18;
+  #endif
+  
+  #ifdef DHT_PIN
+    c.pinDht = DHT_PIN;
+  #else
+    c.pinDht = 4;
+  #endif
+
   c.cfgRev            = 0;
   return c;
 }
@@ -242,8 +338,9 @@ inline void cfgFactoryReset() {
 // a message setting three fields where the second is out of range applies none of them,
 // so the node is never left in a half-configured state that no operator asked for.
 // ---------------------------------------------------------------------------------
-inline bool cfgApplyJson(const JsonDocument& doc, bool& outReset) {
+inline bool cfgApplyJson(const JsonDocument& doc, bool& outReset, bool& outHardwareChanged) {
   outReset = false;
+  outHardwareChanged = false;
   if (doc["reset"].as<bool>()) {
     cfgFactoryReset();
     outReset = true;
@@ -267,10 +364,34 @@ inline bool cfgApplyJson(const JsonDocument& doc, bool& outReset) {
   if (doc.containsKey("relayActiveLow"))    next.relayActiveLow    = doc["relayActiveLow"];
   if (doc.containsKey("simulateCpuStrain")) next.simulateCpuStrain = doc["simulateCpuStrain"];
 
+  if (doc.containsKey("pinIrAc"))          next.pinIrAc          = doc["pinIrAc"];
+  if (doc.containsKey("pinPlugRelay"))     next.pinPlugRelay     = doc["pinPlugRelay"];
+  if (doc.containsKey("pinLightingRelay")) next.pinLightingRelay = doc["pinLightingRelay"];
+  if (doc.containsKey("pinStripAdc"))      next.pinStripAdc      = doc["pinStripAdc"];
+  if (doc.containsKey("pinPlugAdc"))       next.pinPlugAdc       = doc["pinPlugAdc"];
+  if (doc.containsKey("pinAcClampAdc"))    next.pinAcClampAdc    = doc["pinAcClampAdc"];
+  if (doc.containsKey("pinSupplyTemp"))    next.pinSupplyTemp    = doc["pinSupplyTemp"];
+  if (doc.containsKey("pinI2cSda"))        next.pinI2cSda        = doc["pinI2cSda"];
+  if (doc.containsKey("pinI2cScl"))        next.pinI2cScl        = doc["pinI2cScl"];
+  if (doc.containsKey("pinPir1"))          next.pinPir1          = doc["pinPir1"];
+  if (doc.containsKey("pinPir2"))          next.pinPir2          = doc["pinPir2"];
+  if (doc.containsKey("pinMmwave"))        next.pinMmwave        = doc["pinMmwave"];
+  if (doc.containsKey("pinDht"))           next.pinDht           = doc["pinDht"];
+
   if (!cfgValidate(next)) return false;               // gCfgLastError already set
   if (memcmp(&next, &gCfg, sizeof(next)) == 0) {
     Serial.println("[config] message matched the running config — nothing to do");
     return false;                                     // retained message replayed on reconnect
+  }
+
+  // Check if any hardware pins changed
+  if (next.pinIrAc != gCfg.pinIrAc || next.pinPlugRelay != gCfg.pinPlugRelay ||
+      next.pinLightingRelay != gCfg.pinLightingRelay || next.pinStripAdc != gCfg.pinStripAdc ||
+      next.pinPlugAdc != gCfg.pinPlugAdc || next.pinAcClampAdc != gCfg.pinAcClampAdc ||
+      next.pinSupplyTemp != gCfg.pinSupplyTemp || next.pinI2cSda != gCfg.pinI2cSda ||
+      next.pinI2cScl != gCfg.pinI2cScl || next.pinPir1 != gCfg.pinPir1 ||
+      next.pinPir2 != gCfg.pinPir2 || next.pinMmwave != gCfg.pinMmwave || next.pinDht != gCfg.pinDht) {
+    outHardwareChanged = true;
   }
 
   next.cfgRev = gCfg.cfgRev + 1;
@@ -310,6 +431,20 @@ inline void cfgSerializeState(JsonDocument& out) {
   out["setpointMaxC"]      = gCfg.setpointMaxC;
   out["relayActiveLow"]    = gCfg.relayActiveLow;
   out["simulateCpuStrain"] = gCfg.simulateCpuStrain;
+  
+  out["pinIrAc"]          = gCfg.pinIrAc;
+  out["pinPlugRelay"]     = gCfg.pinPlugRelay;
+  out["pinLightingRelay"] = gCfg.pinLightingRelay;
+  out["pinStripAdc"]      = gCfg.pinStripAdc;
+  out["pinPlugAdc"]       = gCfg.pinPlugAdc;
+  out["pinAcClampAdc"]    = gCfg.pinAcClampAdc;
+  out["pinSupplyTemp"]    = gCfg.pinSupplyTemp;
+  out["pinI2cSda"]        = gCfg.pinI2cSda;
+  out["pinI2cScl"]        = gCfg.pinI2cScl;
+  out["pinPir1"]          = gCfg.pinPir1;
+  out["pinPir2"]          = gCfg.pinPir2;
+  out["pinMmwave"]        = gCfg.pinMmwave;
+  out["pinDht"]           = gCfg.pinDht;
 
   JsonArray ov = out.createNestedArray("overrides");
   if (strcmp(gCfg.zoneLabel, d.zoneLabel) != 0)        ov.add("zoneLabel");
@@ -325,7 +460,21 @@ inline void cfgSerializeState(JsonDocument& out) {
   if (gCfg.setpointMinC      != d.setpointMinC)        ov.add("setpointMinC");
   if (gCfg.setpointMaxC      != d.setpointMaxC)        ov.add("setpointMaxC");
   if (gCfg.relayActiveLow    != d.relayActiveLow)      ov.add("relayActiveLow");
-  if (gCfg.simulateCpuStrain != d.simulateCpuStrain)    ov.add("simulateCpuStrain");
+  if (gCfg.simulateCpuStrain != d.simulateCpuStrain)   ov.add("simulateCpuStrain");
+  
+  if (gCfg.pinIrAc          != d.pinIrAc)          ov.add("pinIrAc");
+  if (gCfg.pinPlugRelay     != d.pinPlugRelay)     ov.add("pinPlugRelay");
+  if (gCfg.pinLightingRelay != d.pinLightingRelay) ov.add("pinLightingRelay");
+  if (gCfg.pinStripAdc      != d.pinStripAdc)      ov.add("pinStripAdc");
+  if (gCfg.pinPlugAdc       != d.pinPlugAdc)       ov.add("pinPlugAdc");
+  if (gCfg.pinAcClampAdc    != d.pinAcClampAdc)    ov.add("pinAcClampAdc");
+  if (gCfg.pinSupplyTemp    != d.pinSupplyTemp)    ov.add("pinSupplyTemp");
+  if (gCfg.pinI2cSda        != d.pinI2cSda)        ov.add("pinI2cSda");
+  if (gCfg.pinI2cScl        != d.pinI2cScl)        ov.add("pinI2cScl");
+  if (gCfg.pinPir1          != d.pinPir1)          ov.add("pinPir1");
+  if (gCfg.pinPir2          != d.pinPir2)          ov.add("pinPir2");
+  if (gCfg.pinMmwave        != d.pinMmwave)        ov.add("pinMmwave");
+  if (gCfg.pinDht           != d.pinDht)           ov.add("pinDht");
 
   if (gCfgLastError[0]) out["lastError"] = gCfgLastError;
 }
