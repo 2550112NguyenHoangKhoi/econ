@@ -1,119 +1,178 @@
-# Project: econ IoT Smart Building — Occupancy AI, Authentic Forecast & Edge Compute Offload
+# Project: ECON Digital Twin — Hardware Expansion, UI Controls, Sustainability & Offline AI Integration
 
 ## Architecture
-The system integrates an edge-to-cloud IoT smart building platform consisting of:
-1. **Edge Firmware (ESP32 / Pico / C++)**:
-   - ESP32 ADC1 True-RMS current sampling with `CurrentDenoiser` (spike filter, linear detrending, noise variance subtraction $\sigma^2=300$, normalized covariance autocorrelation gating, and EMA with deadband).
-   - Dynamic CPU strain detection (DSP window execution timing $>15\text{ ms}$ or sample starvation $n<400$) and synthetic strain injection (`simulateCpuStrain` in `NodeConfig` or `CPU_STRAIN:HIGH` MQTT command).
-   - Pass-through mode: skips heavy local DSP, toggles `rawFallback: true`, and streams decimated raw ADC sample buffers (`rawStripSamples: 50..100` samples) or statistical moments in expanded 768-byte JSON buffers.
-2. **Go Backend Server (`server/`)**:
-   - `server/simulation/engine.go`: Digital twin simulation engine maintaining zone physics, occupancy, telemetry, and autonomous optimization. Ingests telemetry every cycle.
-   - `server/simulation/baselines.go`: Online statistical baseline learning (Welford/EWMA mean, variance, count, z-score per zone and metric). Registered `"occupancy"` with variance tracking.
-   - `server/simulation/recommend.go`: Occupancy AI anomaly detection using learned baseline distributions ($N \ge 20$, $z \le -1.5$, `Basis: "learned"`) rather than hardcoded zero-checks, with cold-start standard fallback ($N < 20$, `Basis: "standard"`).
-   - `server/simulation/dsp.go`: Native Go port of `CurrentDenoiser` implementing the full 2-stage DSP pipeline with identical hardware parameters ($\text{dividerRatio}=0.5$, $\text{calAPerV}=15.0$, $\sigma^2=300.0$).
-   - `server/mqtt.go`: Telemetry parser detecting `rawFallback: true`, executing server-side DSP to calculate clean Amps and Watts before storing into zone measurements and database.
-   - `server/forecast.go`: Peak load and trajectory forecasting. Eliminates synthetic cubic spline and sine fallbacks, returning empty series when models lack sequence predictions.
-3. **React Dashboard (`dashboard/`)**:
-   - `dashboard/src/ForecastChart.jsx`: Authentic forecast rendering. Removes cubic spline fabrication (`smooth = t * t * (3 - 2 * t)`). Renders honest "insufficient data" state (`data-testid="forecast-insufficient-data"`) inside `data-testid="forecast-chart"` when true sequence data is unavailable.
-   - Real-time FlatBuffers binary WebSocket streaming (`/ws`) and REST APIs.
+```
++-----------------------------------------------------------------------------------------+
+|                                    React Dashboard                                      |
+|  +-----------------------+  +--------------------------+  +--------------------------+  |
+|  | HardwareInspector.jsx |  | ModeToggle (App.jsx)     |  | SustainabilityPanel.jsx  |  |
+|  | - IR Blaster Controls |  | - [Simulation | Real]    |  | - Scope 2 Emissions Card |  |
+|  | - Plug/Relay Actuation|  | - useOperationMode hook  |  | - Carbon Credits Quote   |  |
+|  | - Damper Overrides    |  |                          |  | - Maintenance Alerts     |  |
+|  +-----------+-----------+  +------------+-------------+  +------------+-------------+  |
++--------------|---------------------------|-----------------------------|----------------+
+               |                           |                             |
+      HTTP POST /api/command       GET/POST /api/mode           GET /api/sustainability
+               |                           |                             |
++--------------v---------------------------v-----------------------------v----------------+
+|                                      Go Backend                                         |
+|  +-----------------------------------------------------------------------------------+  |
+|  | REST API Layer (main.go, modeapi.go, commandapi.go, carbon.go)                    |  |
+|  | - isSupportedCommand: allows IR_SEND:, PLUG_ON/OFF, DAMPER=, VAV_SET:             |  |
+|  | - OperationMode: ModeSimulation (0) vs ModeReal (1)                               |  |
+|  +-------------------+-------------------+-------------------------------------------+  |
+|                      |                   |                                              |
+|      MQTT Command    |                   | Real-time Forecast Query                     |
+|      Publishing      |                   | (HTTP -> IPC Fallback)                       |
+|                      v                   v                                              |
+|            +-------------------+   +-------------------------------------------------+  |
+|            | MQTT Broker       |   | Forecast Bridge (forecast.go, forecast_ipc.go)  |  |
+|            | econ/commands/..  |   | - 1. HTTP to http://localhost:8000              |  |
+|            +---------+---------+   | - 2. IPC/exec to backend/forecasting/infer.py   |  |
+|                      |             +------------------------+------------------------+  |
++----------------------|--------------------------------------|---------------------------+
+                       |                                      |
+                       v                                      v
+        +------------------------------+     +----------------------------------+
+        | Edge Node Firmware           |     | Local Python AI Models           |
+        | - ESP32 / Pico (main.cpp)    |     | - backend/forecasting/model.py   |
+        | - IR Blaster (GPIO 19)       |     | - model_weights.pth, scaler.pkl  |
+        | - Plug Relay (GPIO 25)       |     | - timesfm_forecaster.py          |
+        | - Lighting Relay (GPIO 23)   |     | - infer.py (Standalone CLI)      |
+        | - Sensors: ACS712, SHT30..   |     +----------------------------------+
+        +------------------------------+
+```
 
 ## Feature Inventory
 | # | Feature | Description | Milestone | Source |
 |---|---------|-------------|-----------|--------|
-| 1 | Learned Occupancy Metric Baseline | Register "occupancy" in `metricSpecs` in `server/simulation/baselines.go` with variance tracking | M1 | ORIGINAL_REQUEST §R1 |
-| 2 | Statistical Occupancy Recommendation Engine | Replace hardcoded zero check in `recommend.go` with learned threshold scoring ($z \le -1.5$, `Basis: "learned"`) | M1 | ORIGINAL_REQUEST §R1 |
-| 3 | Cold-Start Statistical Fallback | Retain standard basis ($N < 20$, `Basis: "standard"`) during model warm-up ensuring zero regression | M1 | Backend Survey |
-| 4 | Backend Occupancy AI Unit Test Suite | Go unit tests injecting varying occupancy over time asserting learned threshold behavior vs zero-check | M1 | Acceptance Criteria §Backend |
-| 5 | Removal of Synthetic Spline in ForecastChart | Eliminate cubic Hermite curve synthesis (`smooth = t*t*(3-2*t)`) in `dashboard/src/ForecastChart.jsx` | M2 | ORIGINAL_REQUEST §R2 |
-| 6 | Honest Insufficient Data State UI | Render `[data-testid="forecast-insufficient-data"]` badge and 0 curve paths when forecast series is empty/down | M2 | ORIGINAL_REQUEST §R2 |
-| 7 | Backend Forecast Graph Reconciliation | Reconcile `server/forecast.go` to avoid emitting synthetic spline/sine sequences | M2 | Frontend Survey |
-| 8 | Automated Frontend Verification Suite | Scriptable Puppeteer/Node test asserting insufficient data rendering and zero fake curves | M2 | Acceptance Criteria §Frontend |
-| 9 | Firmware CPU Strain Detection & Simulation | Timing-based strain detection ($>15\text{ ms}$) and `simulateCpuStrain` in `NodeConfig` (`edge/esp32/`) | M3 | ORIGINAL_REQUEST §R3 |
-| 10 | Firmware Pass-Through Streaming Mode | Microcontroller bypasses DSP, sets `rawFallback: true`, and streams raw ADC counts in 768-byte buffer | M3 | ORIGINAL_REQUEST §R3 |
-| 11 | C++ High-Strain Verification Harness | Off-target C++ test in `edge/esp32/test/` verifying CPU strain detection and pass-through mode toggle | M3 | Acceptance Criteria §Firmware |
-| 12 | Backend Server-Side Go DSP Engine | Native Go implementation of `CurrentDenoiser` in `server/simulation/dsp.go` matching C++ mathematics | M3 | ORIGINAL_REQUEST §R3 |
-| 13 | Backend Raw Fallback Ingestion & Processing | `server/mqtt.go` detects `rawFallback: true`, applies server-side DSP, and stores clean telemetry | M3 | Acceptance Criteria §Backend |
-| 14 | Hardware Compatibility & Constraints Audit | Audit ADC1 pins, ACS712 voltage divider (0.5), calibration scaling, and Pico USB serial bandwidth | M3 | ORIGINAL_REQUEST §R4 |
-| 15 | Comprehensive Dual-Track Verification & Forensic Audit | Full test suite across Tiers 1-4, 2 Reviewers, 2 Challengers, and 1 Forensic Integrity Auditor | M4 | Project Protocol & Acceptance Criteria |
+| 1 | IR Blaster UI in Hardware Inspector | Expose IR Blaster in `HardwareInspector.jsx` with protocol selector, frequency/bits, hex code input, and manual send button | M1 | Survey 1 / R1 |
+| 2 | Edge Node Firmware Device Support | Ensure all devices in `edge/esp32/src/main.cpp` (IR blaster, plug relays, dampers, lighting relays, sensors) have full library support, topic definitions, and command mappings | M1 | Survey 1 / R1 |
+| 3 | Manual Actuation UI Controls | Add manual actuation buttons to `HardwareInspector.jsx` for all devices (trigger IR blaster, toggle plugs/relays, override VAV dampers, test CPU strain) | M1 | Survey 1 / R1 |
+| 4 | Backend Command Routing & MQTT Actuation | Update `server/main.go:isSupportedCommand` to accept `IR_SEND:`, `PLUG_ON`, `PLUG_OFF`, `DAMPER=`, `VAV_SET:`, `CPU_STRAIN:`, update `applyCommandToZone` to latch twin state, and publish to `econ/commands/<topic>` | M1 | Survey 1 / R1 |
+| 5 | Backend Simulation vs. Real Mode API | Implement `server/modeapi.go` exposing `GET /api/mode` and `POST /api/mode` to read and toggle `engine.Mode()` / `engine.SetMode()` with CORS support | M2 | Survey 2 / R2 |
+| 6 | Frontend Global Mode Toggle | Add `useOperationMode.js` hook and segmented glassmorphic switch `[Simulation | Real]` in top bar of `dashboard/src/App.jsx` | M2 | Survey 2 / R2 |
+| 7 | Mode Segregation & State Synchronization | Verify `ModeReal` rejects mock telemetry and correctly maps `stripW` to plugs and CB to `plugW`, while `ModeSimulation` allows synthetic telemetry | M2 | Survey 2 / R2 |
+| 8 | Backend Sustainability Insights | `server/carbon.go` Scope 2 carbon accounting, space utilization, predictive maintenance alerts, and live carbon credit recommendations via `GET /api/sustainability` | M3 | Survey 2 / R3 |
+| 9 | Sustainability Recommendations Panel | Build `dashboard/src/SustainabilityRecommendationsPanel.jsx` and `useSustainability.js` polling hook, mounted as 5th tab `SUSTAINABILITY` in `dashboard/src/App.jsx` | M3 | Survey 2 / R3 |
+| 10 | Standalone Python Inference CLI Runner | Implement `backend/forecasting/infer.py` (and mirror to `server/modelbundle/infer.py`) to execute PyTorch `PeakLoadLSTM` and fallback/TimesFM predictions directly from disk weights | M4 | Survey 3 / R4 |
+| 11 | Go Backend Live AI Inference Engine Bridge | Update `server/forecast.go` / `server/forecast_ipc.go` with inter-process execution `os/exec` / IPC bindings to run local Python models when HTTP service is unavailable | M4 | Survey 3 / R4 |
+| 12 | Export Bundle Standalone Model Packaging | Include `infer.py` and runnable instructions in `server/modelexport.go` for exported offline models (`forecast-cpu` / `forecast-accel`) | M4 | Survey 3 / R4 |
+| 13 | Comprehensive E2E Testing Suite | Requirement-driven opaque-box tests covering Tiers 1-4 across all 4 requirements, producing `TEST_READY.md` | E2E Track | ORIGINAL_REQUEST |
+| 14 | Final E2E Test Pass & Adversarial Hardening | 100% pass on Tiers 1-4, followed by Tier 5 white-box adversarial stress testing by Challengers, followed by Forensic Integrity Audit | M-Final | Acceptance Criteria |
 
 ## Milestones
 | # | Name | Scope | Dependencies | Status |
 |---|------|-------|-------------|--------|
-| 1 | Genuine Occupancy AI Model (Backend) | Features 1–4: `baselines.go`, `recommend.go`, `recommend_occupancy_test.go` | none | DONE |
-| 2 | Authentic Forecast Chart (Frontend & Backend) | Features 5–8: `ForecastChart.jsx`, `forecast.go`, `verify_forecast_chart.js` | none | IN_PROGRESS |
-| 3 | Edge Compute Offload Fallback (Firmware & Backend) | Features 9–14: `node_config.h`, `main.cpp`, `test_cpu_strain_fallback.cpp`, `dsp.go`, `mqtt.go`, `mqtt_fallback_test.go` | none | DONE |
-| 4 | Dual-Track End-to-End Test Pass & Forensic Integrity Gate | Feature 15: Full test suite execution across firmware, backend, frontend; Reviewers, Challengers, Auditor | M1, M2, M3 | PLANNED |
+| E2E | E2E Testing Track | Design test infra (`TEST_INFRA.md`), build Tiers 1-4 test suite, publish `TEST_READY.md` | None | DONE (`TEST_READY.md` published, 115 tests passing) |
+| M1 | Hardware Inspector & Manual Controls | Firmware library support, backend command routing, IR Blaster & device manual controls UI | None | DONE (Worker M1 handoff: /Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_worker_m1/handoff.md) |
+| M2 | Simulation vs. Real Mode Engine & UI Toggle | `GET/POST /api/mode`, mode segregation verification, global React toggle in `App.jsx` | None | DONE (Worker M2 handoff: /Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_worker_m2/handoff.md) |
+| M3 | Sustainability Recommendations Backend & UI | Scope 2 carbon accounting, maintenance alerts, carbon credit quote, dedicated UI tab | None | DONE (Worker M3 handoff: /Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_worker_m3/handoff.md) |
+| M4 | Local AI Models Live Inference Integration | `infer.py` CLI runner, Go `os/exec` IPC fallback in `forecast.go`, export bundle update | None | DONE (Worker M4 handoff: /Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_worker_m4/handoff.md) |
+| M-Final | Final Integration, 100% E2E Pass & Audit | Execute full E2E test suite (Tiers 1-4), Tier 5 adversarial hardening, Forensic Audit | E2E, M1, M2, M3, M4 | DONE |
 
 ## Interface Contracts
 
-### Edge Firmware ↔ Backend MQTT Raw Offload
-- **Telemetry Topic**: `econ/telemetry/<deviceId>`
-- **Payload Schema (JSON, max 768 bytes)**:
+### 1. Manual Actuation Command Contract (`/api/command`)
+- **Endpoint**: `POST /api/command`
+- **Request Payload**:
   ```json
   {
-    "zone": "zone-office-a",
-    "rawFallback": true,
-    "rawStripSamples": [2048, 2180, 2350, 1920, 1750, 2040],
-    "temperature": 23.5,
-    "humidity": 55.0,
-    "co2": 620.0,
-    "occupancy": 0
+    "device_id": "esp32-zone-01",
+    "command": "IR_SEND:COOLIX:0xB27BE0:32"
   }
   ```
-- **Configuration Topic**: `econ/config/<deviceId>`
-- **Config Payload (JSON)**:
+  Valid commands:
+  - `IR_SEND:<protocol>:<hex>:<bits>` (e.g. `IR_SEND:COOLIX:0xB27BE0:32`)
+  - `SETPOINT=<temp>` or `HVAC_SET:<temp>` (e.g. `SETPOINT=22.5`)
+  - `PLUG_ON` / `PLUG_OFF`
+  - `LIGHTS_ON` / `LIGHTS_OFF`
+  - `DAMPER=<percent>` or `VAV_SET:<percent>` (e.g. `DAMPER=75`)
+  - `CPU_STRAIN:HIGH` / `CPU_STRAIN:NORMAL`
+  - Verbs: `turn_off_ac`, `cool`, `purge`, `precool`, `reset`
+- **MQTT Topic**: `econ/commands/<device_id>`
+- **Response**: `{"status": "ok", "message": "command dispatched"}` (HTTP 200)
+
+### 2. Operation Mode API Contract (`/api/mode`)
+- **Endpoints**:
+  - `GET /api/mode`: Returns current operation mode.
+    ```json
+    {
+      "mode": "simulation",
+      "mode_int": 0,
+      "is_real": false,
+      "description": "Simulation mode (synthetic and mock telemetry accepted)"
+    }
+    ```
+  - `POST /api/mode`: Sets operation mode.
+    ```json
+    {
+      "mode": "real"
+    }
+    ```
+    (Accepts `"simulation"`, `"sim"`, `"0"`, `"real"`, `"1"`)
+    Returns updated mode JSON object (HTTP 200).
+
+### 3. Sustainability API Contract (`/api/sustainability`)
+- **Endpoint**: `GET /api/sustainability`
+- **Response**:
   ```json
   {
-    "simulateCpuStrain": true
+    "scope2_emissions_kg": 42.5,
+    "grid_factor": 0.5,
+    "space_utilization_pct": 78.4,
+    "maintenance_alerts": [
+      {
+        "device": "plug_strip",
+        "type": "power_surge",
+        "severity": "warning",
+        "message": "Power surge detected on plug strip"
+      }
+    ],
+    "carbon_offset_recommendation": {
+      "budget_kg": 50.0,
+      "deficit_kg": 0.0,
+      "needed_certificates": 0,
+      "certificate_cost_usd": 12.5,
+      "total_offset_cost_usd": 0.0,
+      "action_recommended": false
+    }
   }
   ```
 
-### Backend Simulation Engine & Baseline Scoring
-- **Metric**: `"occupancy"`
-- **Distribution Model**: Continuous EWMA ($\alpha = 0.05$), minimum sample count $N \ge 20$ for maturity.
-- **Threshold**: $z \le -1.5$ (statistically significant vacancy relative to zone's historical pattern).
-- **Output Recommendation**:
+### 4. Local Python Inference IPC Contract
+- **CLI Command**: `python3 backend/forecasting/infer.py --model lstm --input '<json_string>'` (or via stdin)
+- **Input JSON**:
   ```json
   {
-    "id": "vacant_ac:zone-office-a",
-    "zone": "zone-office-a",
-    "metric": "occupancy",
-    "severity": "info",
-    "basis": "learned",
-    "samples": 35,
-    "value": 0,
-    "action": "turn_off_ac"
+    "sensor_sequence": [[24.5, 450.0], [24.6, 455.0], ... (12 steps)],
+    "outdoor_temp": 31.0,
+    "outdoor_humidity": 65.0
   }
   ```
-
-### Backend ↔ Frontend Forecast API
-- **Endpoint**: `GET /api/forecast/compare`
-- **Response Schema when no sequence model is available**:
+- **Output JSON**:
   ```json
   {
-    "series": [],
-    "lstmPeakMw": 0.0285,
-    "model": "lstm-scalar-only",
-    "status": "insufficient_data"
+    "predicted_peak_load": 1.85,
+    "outdoor_temp_used": 31.0,
+    "outdoor_humidity_used": 65.0,
+    "engine": "lstm",
+    "status": "ok"
   }
   ```
-- **UI Render Contract**:
-  - Container element `data-testid="forecast-chart"` must be present.
-  - Inner element `data-testid="forecast-insufficient-data"` rendered with informative text.
-  - Zero `.recharts-line-curve` SVG elements rendered.
+- TimesFM query:
+  `python3 backend/forecasting/infer.py --model timesfm --input '{"history": [1.2, 1.3, ...], "horizon": 12}'`
 
 ## Code Layout
-- `server/simulation/baselines.go`: Statistical baseline engine with `"occupancy"` metric spec.
-- `server/simulation/recommend.go`: Statistical anomaly recommendation engine using learned thresholds.
-- `server/simulation/recommend_occupancy_test.go`: Go unit tests for statistical occupancy recommendations.
-- `server/simulation/dsp.go`: Native Go implementation of `CurrentDenoiser`.
-- `server/simulation/dsp_test.go`: Unit tests for Go DSP denoiser matching C++ calculations.
-- `server/mqtt.go`: Telemetry handler detecting `rawFallback` and routing to `server/simulation/dsp.go`.
-- `server/mqtt_fallback_test.go`: Go unit test verifying edge raw fallback detection and DSP application.
-- `server/forecast.go`: Forecast service returning empty series instead of synthetic splines.
-- `dashboard/src/ForecastChart.jsx`: Frontend chart removing fake cubic spline and rendering insufficient data badge.
-- `dashboard/verify_forecast_chart.js`: Automated Puppeteer test verifying authentic forecast rendering.
-- `edge/esp32/src/node_config.h`: Node configuration including `simulateCpuStrain`.
-- `edge/esp32/src/main.cpp`: ESP32 firmware with CPU strain detection and pass-through fallback streaming.
-- `edge/esp32/test/test_cpu_strain_fallback.cpp`: Off-target C++ test for CPU strain pass-through mode.
-- `edge/esp32/test/run_host_tests.sh`: Host test orchestration script.
+- `edge/esp32/src/main.cpp` — Edge node firmware (pins, IR protocols, command parser)
+- `server/main.go` — Backend route registry and command validation
+- `server/modeapi.go` — Operation mode REST API handlers (GET/POST /api/mode)
+- `server/carbon.go` — Scope 2 carbon accounting & sustainability engine
+- `server/forecast.go` & `server/forecast_ipc.go` — Go-to-Python forecasting bridge & IPC execution
+- `server/modelexport.go` — Model bundle packaging (.zip export)
+- `backend/forecasting/infer.py` — Standalone local Python inference script
+- `dashboard/src/HardwareInspector.jsx` — Hardware Inspector UI with manual controls & IR blaster
+- `dashboard/src/App.jsx` — Dashboard navigation, mode toggle switch, and sustainability tab
+- `dashboard/src/useOperationMode.js` — Mode toggle state hook
+- `dashboard/src/SustainabilityRecommendationsPanel.jsx` — Sustainability Recommendations UI panel
+- `dashboard/src/useSustainability.js` — Sustainability data hook

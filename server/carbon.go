@@ -78,26 +78,29 @@ type PredictiveMaintenanceData struct {
 }
 
 type MaintenanceAlert struct {
-	EquipmentId string  `json:"equipmentId"`
-	ZoneId      string  `json:"zoneId"`
-	Type        string  `json:"type"`
-	Severity    string  `json:"severity"`
-	Message     string  `json:"message"`
-	MetricValue float64 `json:"metricValue"`
-	Threshold   float64 `json:"threshold"`
-	Timestamp   string  `json:"timestamp"`
+	EquipmentId     string   `json:"equipmentId"`
+	ZoneId          string   `json:"zoneId"`
+	Type            string   `json:"type"`
+	Severity        string   `json:"severity"`
+	Message         string   `json:"message"`
+	MetricValue     float64  `json:"metricValue"`
+	Threshold       float64  `json:"threshold"`
+	Timestamp       string   `json:"timestamp"`
+	Troubleshooting []string `json:"troubleshooting"`
+	HealthScore     float64  `json:"healthScore"`
 }
 
 type CarbonCreditRecommendationsData struct {
-	CarbonBudgetKgCO2e      float64     `json:"carbonBudgetKgCO2e"`
-	CurrentEmissionsKgCO2e  float64     `json:"currentEmissionsKgCO2e"`
-	OverBudget              bool        `json:"overBudget"`
-	DeficitKgCO2e           float64     `json:"deficitKgCO2e"`
-	CreditsNeededMetricTons float64     `json:"creditsNeededMetricTons"`
-	WholeCertificatesNeeded int         `json:"wholeCertificatesNeeded"`
-	MarketQuote             MarketQuote `json:"marketQuote"`
-	EstimatedCostUSD        float64     `json:"estimatedCostUSD"`
-	Recommendation          string      `json:"recommendation"`
+	CarbonBudgetKgCO2e      float64       `json:"carbonBudgetKgCO2e"`
+	CurrentEmissionsKgCO2e  float64       `json:"currentEmissionsKgCO2e"`
+	OverBudget              bool          `json:"overBudget"`
+	DeficitKgCO2e           float64       `json:"deficitKgCO2e"`
+	CreditsNeededMetricTons float64       `json:"creditsNeededMetricTons"`
+	WholeCertificatesNeeded int           `json:"wholeCertificatesNeeded"`
+	MarketQuote             MarketQuote   `json:"marketQuote"`
+	AlternativeQuotes       []MarketQuote `json:"alternativeQuotes"`
+	EstimatedCostUSD        float64       `json:"estimatedCostUSD"`
+	Recommendation          string        `json:"recommendation"`
 }
 
 type MarketQuote struct {
@@ -131,6 +134,29 @@ func CalculateOffsetRecommendation(cumulativeEmissionsKg float64, budgetKg float
 		CarbonBudgetKgCO2e:     budgetKg,
 		CurrentEmissionsKgCO2e: math.Round(cumulativeEmissionsKg*100.0) / 100.0,
 		MarketQuote:            quote,
+		AlternativeQuotes: []MarketQuote{
+			{
+				Source:                   "Gold Standard VERs",
+				SpotPricePerMetricTonUSD: 18.50,
+				Currency:                 "USD",
+				IsLive:                   false,
+				FetchedAt:                time.Now().UTC().Format(time.RFC3339),
+			},
+			{
+				Source:                   "Puro.earth CORCs (Biochar)",
+				SpotPricePerMetricTonUSD: 140.00,
+				Currency:                 "USD",
+				IsLive:                   false,
+				FetchedAt:                time.Now().UTC().Format(time.RFC3339),
+			},
+			{
+				Source:                   "Moss.Earth MCO2",
+				SpotPricePerMetricTonUSD: 8.75,
+				Currency:                 "USD",
+				IsLive:                   false,
+				FetchedAt:                time.Now().UTC().Format(time.RFC3339),
+			},
+		},
 	}
 
 	if cumulativeEmissionsKg > budgetKg {
@@ -502,7 +528,7 @@ func (t *CarbonTracker) Snapshot(engine *simulation.Engine, now time.Time) Susta
 	}
 
 	totalPowerW := plugW + stripW + acW
-	if dtSec > 0 && totalPowerW > 0 {
+	if dtSec > 0 && totalPowerW > 0 && (engine == nil || engine.IsRealMode()) {
 		_, carbonKg := CalculateScope2Emissions(totalPowerW, dtSec, t.gridFactor)
 		t.cumulativeEmissionsKgCO2e += carbonKg
 	}
@@ -512,70 +538,89 @@ func (t *CarbonTracker) Snapshot(engine *simulation.Engine, now time.Time) Susta
 	// 2. Predictive maintenance diagnostics
 	warnings := make([]MaintenanceAlert, 0)
 
-	for _, eq := range equipList {
-		// Track equipment runtime hours
-		if eq.power > activeEquipmentWattsThreshold && dtSec > 0 {
-			t.equipmentRuntimeHours[eq.equipId] += dtSec / 3600.0
-		}
-
-		// Over-capacity detection
-		if eq.power > eq.threshold {
-			name := "Power strip"
-			if eq.isAc {
-				name = "AC unit"
+	if engine == nil || engine.IsRealMode() {
+		for _, eq := range equipList {
+			// Track equipment runtime hours
+			if eq.power > activeEquipmentWattsThreshold && dtSec > 0 {
+				t.equipmentRuntimeHours[eq.equipId] += dtSec / 3600.0
 			}
-			warnings = append(warnings, MaintenanceAlert{
-				EquipmentId: eq.equipId,
-				ZoneId:      eq.zoneId,
-				Type:        "over_capacity",
-				Severity:    "warning",
-				Message:     fmt.Sprintf("%s load exceeded rated threshold (%.1fW > %.0fW)", name, eq.power, eq.threshold),
-				MetricValue: eq.power,
-				Threshold:   eq.threshold,
-				Timestamp:   now.UTC().Format(time.RFC3339),
-			})
+
+			// Over-capacity detection
+			if eq.power > eq.threshold {
+				name := "Power strip"
+				if eq.isAc {
+					name = "AC unit"
+				}
+				healthScore := 100.0 - ((eq.power / eq.threshold) * 10.0)
+				if healthScore < 0 {
+					healthScore = 0
+				}
+				warnings = append(warnings, MaintenanceAlert{
+					EquipmentId:     eq.equipId,
+					ZoneId:          eq.zoneId,
+					Type:            "over_capacity",
+					Severity:        "warning",
+					Message:         fmt.Sprintf("%s load exceeded rated threshold (%.1fW > %.0fW)", name, eq.power, eq.threshold),
+					MetricValue:     eq.power,
+					Threshold:       eq.threshold,
+					Timestamp:       now.UTC().Format(time.RFC3339),
+					Troubleshooting: []string{"Verify equipment isn't pulling short-circuit current", "Unplug non-essential devices from the circuit", "Inspect power supply for overheating"},
+					HealthScore:     math.Round(healthScore),
+				})
+			}
+
+			// Transient surge detection
+			lastP, exists := t.lastEquipmentPower[eq.equipId]
+			if exists && (eq.power-lastP) > powerSurgeDeltaWatts {
+				delta := eq.power - lastP
+				warnings = append(warnings, MaintenanceAlert{
+					EquipmentId:     eq.equipId,
+					ZoneId:          eq.zoneId,
+					Type:            "power_surge",
+					Severity:        "warning",
+					Message:         fmt.Sprintf("Transient power surge detected on %s: delta +%.1fW exceeds %.0fW threshold (%.1fW -> %.1fW)", eq.equipId, delta, powerSurgeDeltaWatts, lastP, eq.power),
+					MetricValue:     delta,
+					Threshold:       powerSurgeDeltaWatts,
+					Timestamp:       now.UTC().Format(time.RFC3339),
+					Troubleshooting: []string{"Check for compressor stall or heavy inductive load startup", "Inspect capacitors and motor windings", "Deploy power quality analyzer to verify harmonic distortion"},
+					HealthScore:     70.0,
+				})
+			}
+			t.lastEquipmentPower[eq.equipId] = eq.power
 		}
 
-		// Transient surge detection
-		lastP, exists := t.lastEquipmentPower[eq.equipId]
-		if exists && (eq.power-lastP) > powerSurgeDeltaWatts {
-			delta := eq.power - lastP
-			warnings = append(warnings, MaintenanceAlert{
-				EquipmentId: eq.equipId,
-				ZoneId:      eq.zoneId,
-				Type:        "power_surge",
-				Severity:    "warning",
-				Message:     fmt.Sprintf("Transient power surge detected on %s: delta +%.1fW exceeds %.0fW threshold (%.1fW -> %.1fW)", eq.equipId, delta, powerSurgeDeltaWatts, lastP, eq.power),
-				MetricValue: delta,
-				Threshold:   powerSurgeDeltaWatts,
-				Timestamp:   now.UTC().Format(time.RFC3339),
-			})
+		// Runtime hours maintenance check (> 2000 hours)
+		var runtimeEquipIds []string
+		for eqId := range t.equipmentRuntimeHours {
+			runtimeEquipIds = append(runtimeEquipIds, eqId)
 		}
-		t.lastEquipmentPower[eq.equipId] = eq.power
-	}
+		sort.Strings(runtimeEquipIds)
 
-	// Runtime hours maintenance check (> 2000 hours)
-	var runtimeEquipIds []string
-	for eqId := range t.equipmentRuntimeHours {
-		runtimeEquipIds = append(runtimeEquipIds, eqId)
-	}
-	sort.Strings(runtimeEquipIds)
-
-	for _, eqId := range runtimeEquipIds {
-		hours := t.equipmentRuntimeHours[eqId]
-		if hours > runtimeMaintenanceHours {
-			zoneId := strings.TrimPrefix(strings.TrimPrefix(eqId, "strip-"), "ac-")
-			warnings = append(warnings, MaintenanceAlert{
-				EquipmentId: eqId,
-				ZoneId:      zoneId,
-				Type:        "runtime_exceeded",
-				Severity:    "warning",
-				Message:     fmt.Sprintf("Equipment runtime exceeded maintenance threshold (%.1f hours > %.0f hours)", hours, runtimeMaintenanceHours),
-				MetricValue: math.Round(hours*10.0) / 10.0,
-				Threshold:   runtimeMaintenanceHours,
-				Timestamp:   now.UTC().Format(time.RFC3339),
-			})
+		for _, eqId := range runtimeEquipIds {
+			hours := t.equipmentRuntimeHours[eqId]
+			if hours > runtimeMaintenanceHours {
+				zoneId := strings.TrimPrefix(strings.TrimPrefix(eqId, "strip-"), "ac-")
+				healthScore := 100.0 * (runtimeMaintenanceHours / hours)
+				if healthScore < 0 {
+					healthScore = 0
+				}
+				warnings = append(warnings, MaintenanceAlert{
+					EquipmentId:     eqId,
+					ZoneId:          zoneId,
+					Type:            "runtime_exceeded",
+					Severity:        "warning",
+					Message:         fmt.Sprintf("Equipment runtime exceeded maintenance threshold (%.1f hours > %.0f hours)", hours, runtimeMaintenanceHours),
+					MetricValue:     math.Round(hours*10.0) / 10.0,
+					Threshold:       runtimeMaintenanceHours,
+					Timestamp:       now.UTC().Format(time.RFC3339),
+					Troubleshooting: []string{"Schedule preventative maintenance window", "Replace HEPA filters and clean coils", "Check bearings and lubricate moving parts", "Perform IR thermography scan"},
+					HealthScore:     math.Round(healthScore),
+				})
+			}
 		}
+	} else {
+		// Clear surge tracking so we don't get false surges when switching back to RealMode
+		t.lastEquipmentPower = make(map[string]float64)
 	}
 
 	// 3. Space utilization efficiency
@@ -741,6 +786,8 @@ func carbonPersistLoop(tracker *CarbonTracker, engine *simulation.Engine) {
 		if engine != nil {
 			buildingId = engine.BuildingId()
 		}
+		// Maintain background time progression even without client polling.
+		tracker.Snapshot(engine, time.Now())
 		saveSustainabilityState(tracker, buildingId)
 	}
 }

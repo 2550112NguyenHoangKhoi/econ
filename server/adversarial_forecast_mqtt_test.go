@@ -21,6 +21,7 @@ import (
 // reliably constructs valid ForecastGraphData across cold-start, empty history, single sample,
 // threshold boundaries (7 vs 8 samples), and large histories without panic or invalid structures.
 func TestAdversarialRecommendationsAPI_HistoryVariations(t *testing.T) {
+	t.Setenv("FORECAST_DISABLE_IPC", "1")
 	historyCases := []struct {
 		name        string
 		samples     []float64
@@ -106,6 +107,7 @@ func TestAdversarialRecommendationsAPI_HistoryVariations(t *testing.T) {
 // error modes: 500, 503, 422, connection refused, slow response/timeout, corrupt JSON,
 // partial quantiles, empty forecasts.
 func TestAdversarialRecommendationsAPI_BackendFailuresAndChaos(t *testing.T) {
+	t.Setenv("FORECAST_DISABLE_IPC", "1")
 	chaosCases := []struct {
 		name           string
 		tfmStatusCode  int

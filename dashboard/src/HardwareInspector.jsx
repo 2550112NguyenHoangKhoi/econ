@@ -18,6 +18,7 @@ import { API_BASE } from './api';
 import { powerMw } from './units';
 
 const POLL_MS = 2000;
+const mono = 'ui-monospace, SFMono-Regular, Menlo, monospace';
 
 // Field metadata: units, and which build flag puts the field on the wire. The flag is here
 // because the single most common bring-up question is "why is this field missing" and the
@@ -29,6 +30,9 @@ const FIELDS = {
   occupancy:   { unit: '',   flag: 'USE_MMWAVE / USE_PIR' },
   occupancy_2: { unit: '',   flag: 'USE_MMWAVE / USE_PIR' },
   plugW:       { unit: 'W',  flag: 'USE_PLUG' },
+  circuitBreakerW: { unit: 'W', flag: 'USE_CB' },
+  cbW:         { unit: 'W',  flag: 'USE_CB' },
+  stripW:      { unit: 'W',  flag: 'USE_STRIP' },
   supplyC:     { unit: '°C', flag: 'USE_SUPPLY_TEMP' },
   acW:         { unit: 'W',  flag: 'USE_AC_CLAMP' },
   lux:         { unit: 'lx', flag: 'USE_LUX' },
@@ -76,6 +80,505 @@ function Spark({ points, width = 520, height = 90 }) {
           {measured === points.length ? 'all measured' : measured === 0 ? 'all modelled' : `${measured}/${points.length} measured`}
         </span>
       </div>
+    </div>
+  );
+}
+
+const IR_PROTOCOLS = [
+  'COOLIX',
+  'ELECTRA_AC',
+  'DAIKIN',
+  'PANASONIC',
+  'MITSUBISHI',
+  'LG',
+  'SAMSUNG',
+  'TOSHIBA',
+  'GREE',
+  'NEC',
+  'SONY',
+  'RC5',
+  'RC6',
+];
+
+const HARDWARE_LIBRARY = [
+  { device: 'HVAC IR Blaster', pin: 'GPIO 19', bus: 'PWM / IRremoteESP8266', flag: 'USE_IR_AC', desc: 'Commands split-unit ACs (Coolix, Electra, Daikin, etc.) via 940nm IR emitter' },
+  { device: 'Smart Plug Relay', pin: 'GPIO 25', bus: 'Digital Output', flag: 'USE_PLUG', desc: 'Sheds non-critical socket circuits after-hours (APLC automated plug load control)' },
+  { device: 'Lighting Relay', pin: 'GPIO 23', bus: 'Digital Output', flag: 'RELAY_PIN', desc: 'Controls room lighting circuit based on occupancy & manual override' },
+  { device: 'ACS712 Power Strip Meter', pin: 'GPIO 33 (ADC1_CH5)', bus: 'Analog ADC (True-RMS)', flag: 'USE_STRIP', desc: 'True-RMS strip current sensing with compute offload fallback streaming' },
+  { device: 'SCT-013 Plug CT Clamp', pin: 'GPIO 34 (ADC1_CH6)', bus: 'Analog ADC (33Ω burden)', flag: 'USE_PLUG', desc: 'Monitors wall plug circuit current draw (plugW)' },
+  { device: 'SCT-013 AC CT Clamp', pin: 'GPIO 35 (ADC1_CH7)', bus: 'Analog ADC (33Ω burden)', flag: 'USE_AC_CLAMP', desc: 'Measures compressor active power (acW) for thermodynamic model tracking' },
+  { device: 'DS18B20 Supply Air Temp', pin: 'GPIO 26', bus: '1-Wire Digital', flag: 'USE_SUPPLY_TEMP', desc: 'High-precision temperature sensor in AC discharge louvre' },
+  { device: 'SHT30 / ACD1200 / BH1750', pin: 'GPIO 21 (SDA), GPIO 22 (SCL)', bus: 'I2C Bus (400 kHz)', flag: 'USE_SHT30, USE_CO2, USE_LUX', desc: 'Environmental telemetry: air temperature, relative humidity, CO2 ppm, lux' },
+  { device: 'PIR & mmWave Radar', pin: 'GPIO 18', bus: 'Digital Pulse / UART', flag: 'USE_PIR, USE_MMWAVE', desc: 'Passive infrared & 24GHz FMCW presence radar for occupancy verification' },
+];
+
+function DeviceControls({ targetZone = 'zone-office-a', targetDevice = '' }) {
+  const [protocol, setProtocol] = useState('COOLIX');
+  const [hexCode, setHexCode] = useState('0xB27BE0');
+  const [bits, setBits] = useState('32');
+  const [freq, setFreq] = useState('38');
+  const [tempSetpoint, setTempSetpoint] = useState(22.0);
+  const [damperVal, setDamperVal] = useState(75);
+  const [sending, setSending] = useState(false);
+  const [status, setStatus] = useState(null);
+  const [showLib, setShowLib] = useState(false);
+
+  const effectiveZone = targetZone || targetDevice || 'zone-office-a';
+
+  const sendCommand = async (cmd) => {
+    setSending(true);
+    setStatus(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/command`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          zone: effectiveZone,
+          device_id: targetDevice || effectiveZone,
+          command: cmd,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+      setStatus({
+        ok: true,
+        cmd,
+        msg: `Dispatched: "${cmd}" to ${effectiveZone}`,
+        time: new Date().toLocaleTimeString(),
+      });
+    } catch (err) {
+      setStatus({
+        ok: false,
+        cmd,
+        msg: `Failed: ${err.message}`,
+        time: new Date().toLocaleTimeString(),
+      });
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const btnStyle = (variant) => {
+    let bg = '#1f2937';
+    let border = '#374151';
+    let color = '#e5e7eb';
+    if (variant === 'primary') { bg = '#1d4ed8'; border = '#2563eb'; color = '#ffffff'; }
+    if (variant === 'success') { bg = '#065f46'; border = '#059669'; color = '#34d399'; }
+    if (variant === 'warning') { bg = '#78350f'; border = '#d97706'; color = '#fbbf24'; }
+    if (variant === 'danger') { bg = '#7f1d1d'; border = '#dc2626'; color = '#f87171'; }
+    return {
+      background: bg,
+      border: `1px solid ${border}`,
+      color,
+      padding: '5px 12px',
+      borderRadius: 4,
+      cursor: sending ? 'wait' : 'pointer',
+      fontFamily: mono,
+      fontSize: 11,
+      fontWeight: 600,
+      opacity: sending ? 0.6 : 1,
+      transition: 'all 0.15s ease',
+    };
+  };
+
+  return (
+    <div style={{ background: '#0d131c', border: '1px solid #1e293b', borderRadius: 6, padding: 14, marginTop: 12 }}>
+      {/* Target indicator */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, borderBottom: '1px solid #1e293b', paddingBottom: 8, flexWrap: 'wrap', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 13, fontWeight: 700, color: '#60a5fa' }}>Manual Controls & Actuation</span>
+          <span style={S.badge('#3b82f6')}>TARGET: {effectiveZone}</span>
+        </div>
+        <button
+          style={btnStyle('default')}
+          onClick={() => setShowLib(!showLib)}
+        >
+          {showLib ? 'Hide Device Specs' : 'Show Device Library & Pins'}
+        </button>
+      </div>
+
+      {/* Collapsible Device Library */}
+      {showLib && (
+        <div style={{ background: '#080d14', border: '1px solid #1f2937', borderRadius: 4, padding: 10, marginBottom: 14 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: '#f3f4f6', marginBottom: 6 }}>
+            Compiled Edge Node Hardware Library (edge/esp32/src/main.cpp)
+          </div>
+          <table style={S.table}>
+            <thead>
+              <tr>
+                <th style={S.th}>Device</th>
+                <th style={S.th}>GPIO Pin</th>
+                <th style={S.th}>Protocol / Bus</th>
+                <th style={S.th}>Build Flag</th>
+                <th style={S.th}>Function</th>
+              </tr>
+            </thead>
+            <tbody>
+              {HARDWARE_LIBRARY.map((item) => (
+                <tr key={item.device}>
+                  <td style={{ ...S.td, fontWeight: 600, color: '#e5e7eb' }}>{item.device}</td>
+                  <td style={{ ...S.td, color: '#60a5fa' }}><code>{item.pin}</code></td>
+                  <td style={S.td}>{item.bus}</td>
+                  <td style={S.td}><code style={{ color: '#f59e0b' }}>{item.flag}</code></td>
+                  <td style={{ ...S.td, color: '#9ca3af' }}>{item.desc}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14 }}>
+        {/* Section 1: IR Blaster Controls */}
+        <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 4, padding: 12 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+            <span style={{ fontWeight: 700, fontSize: 12, color: '#f3f4f6' }}>HVAC IR Blaster (GPIO 19)</span>
+            <span style={S.badge('#f59e0b')}>USE_IR_AC</span>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div>
+              <label style={{ fontSize: 11, color: '#9ca3af', display: 'block', marginBottom: 3 }}>Protocol:</label>
+              <select
+                data-testid="ir-protocol-select"
+                style={{ ...S.input, width: '100%' }}
+                value={protocol}
+                onChange={(e) => setProtocol(e.target.value)}
+              >
+                {IR_PROTOCOLS.map((p) => (
+                  <option key={p} value={p}>{p}</option>
+                ))}
+              </select>
+            </div>
+
+            <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ flex: 1 }}>
+                <label style={{ fontSize: 11, color: '#9ca3af', display: 'block', marginBottom: 3 }}>Hex Code:</label>
+                <input
+                  data-testid="ir-hex-input"
+                  style={{ ...S.input, width: '100%' }}
+                  value={hexCode}
+                  onChange={(e) => setHexCode(e.target.value)}
+                  placeholder="0xB27BE0"
+                />
+              </div>
+              <div style={{ width: 70 }}>
+                <label style={{ fontSize: 11, color: '#9ca3af', display: 'block', marginBottom: 3 }}>Bits:</label>
+                <input
+                  data-testid="ir-bits-input"
+                  type="number"
+                  style={{ ...S.input, width: '100%' }}
+                  value={bits}
+                  onChange={(e) => setBits(e.target.value)}
+                />
+              </div>
+              <div style={{ width: 70 }}>
+                <label style={{ fontSize: 11, color: '#9ca3af', display: 'block', marginBottom: 3 }}>kHz:</label>
+                <input
+                  data-testid="ir-freq-input"
+                  type="number"
+                  style={{ ...S.input, width: '100%' }}
+                  value={freq}
+                  onChange={(e) => setFreq(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <button
+              data-testid="ir-send-btn"
+              style={{ ...btnStyle('primary'), marginTop: 4, width: '100%' }}
+              onClick={() => sendCommand(`IR_SEND:${protocol}:${hexCode.trim()}:${bits}`)}
+              disabled={sending}
+            >
+              Transmit IR Code ({protocol})
+            </button>
+
+            {/* Quick HVAC controls via IR */}
+            <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px dashed #374151' }}>
+              <label style={{ fontSize: 11, color: '#9ca3af', display: 'block', marginBottom: 4 }}>
+                HVAC Setpoint Override: <strong>{Number(tempSetpoint).toFixed(1)}°C</strong>
+              </label>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input
+                  data-testid="hvac-setpoint-input"
+                  type="number"
+                  step="0.5"
+                  min="16"
+                  max="30"
+                  style={{ ...S.input, width: 70 }}
+                  value={tempSetpoint}
+                  onChange={(e) => setTempSetpoint(e.target.value)}
+                />
+                <button
+                  data-testid="hvac-set-btn"
+                  style={btnStyle('default')}
+                  onClick={() => sendCommand(`SETPOINT=${Number(tempSetpoint).toFixed(1)}`)}
+                >
+                  Set Temp
+                </button>
+                <button
+                  data-testid="hvac-off-btn"
+                  style={btnStyle('danger')}
+                  onClick={() => sendCommand('HVAC_SET:OFF')}
+                >
+                  Turn Off AC
+                </button>
+              </div>
+
+              <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                <button style={{ ...btnStyle('default'), flex: 1 }} onClick={() => sendCommand('SETPOINT=20.0')}>
+                  Cool Mode (20°C)
+                </button>
+                <button style={{ ...btnStyle('warning'), flex: 1 }} onClick={() => sendCommand('SETPOINT=18.0')}>
+                  Purge Air (18°C)
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Section 2: Relays & Plugs */}
+        <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 4, padding: 12 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+            <span style={{ fontWeight: 700, fontSize: 12, color: '#f3f4f6' }}>Relays & Sockets</span>
+            <span style={S.badge('#10b981')}>ACTUATORS</span>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {/* Smart Plug Relay */}
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 600, color: '#9ca3af', marginBottom: 4 }}>
+                Smart Plug Circuit (GPIO 25 / APLC Sockets)
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  data-testid="plug-on-btn"
+                  style={{ ...btnStyle('success'), flex: 1 }}
+                  onClick={() => sendCommand('PLUG_ON')}
+                  disabled={sending}
+                >
+                  Sockets ON (PLUG_ON)
+                </button>
+                <button
+                  data-testid="plug-off-btn"
+                  style={{ ...btnStyle('danger'), flex: 1 }}
+                  onClick={() => sendCommand('PLUG_OFF')}
+                  disabled={sending}
+                >
+                  Sockets OFF (PLUG_OFF)
+                </button>
+              </div>
+            </div>
+
+            {/* Lighting Relay */}
+            <div style={{ paddingTop: 8, borderTop: '1px dashed #374151' }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: '#9ca3af', marginBottom: 4 }}>
+                Lighting Relay (GPIO 23 / Solid State)
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  data-testid="lights-on-btn"
+                  style={{ ...btnStyle('success'), flex: 1 }}
+                  onClick={() => sendCommand('LIGHTS_ON')}
+                  disabled={sending}
+                >
+                  Lights ON (LIGHTS_ON)
+                </button>
+                <button
+                  data-testid="lights-off-btn"
+                  style={{ ...btnStyle('danger'), flex: 1 }}
+                  onClick={() => sendCommand('LIGHTS_OFF')}
+                  disabled={sending}
+                >
+                  Lights OFF (LIGHTS_OFF)
+                </button>
+              </div>
+            </div>
+
+            {/* CPU Strain Fallback Testing */}
+            <div style={{ paddingTop: 8, borderTop: '1px dashed #374151' }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: '#9ca3af', marginBottom: 2 }}>
+                Compute Offload / CPU Strain Test
+              </div>
+              <div style={{ fontSize: 10, color: '#6b7280', marginBottom: 6 }}>
+                Simulates high MCU load to test pass-through raw streaming fallback.
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  data-testid="cpu-strain-high-btn"
+                  style={{ ...btnStyle('warning'), flex: 1 }}
+                  onClick={() => sendCommand('CPU_STRAIN:HIGH')}
+                  disabled={sending}
+                >
+                  Strain HIGH (Offload)
+                </button>
+                <button
+                  data-testid="cpu-strain-normal-btn"
+                  style={{ ...btnStyle('default'), flex: 1 }}
+                  onClick={() => sendCommand('CPU_STRAIN:NORMAL')}
+                  disabled={sending}
+                >
+                  Normal CPU (Clear)
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Section 3: VAV Damper Modulation */}
+        <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 4, padding: 12 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+            <span style={{ fontWeight: 700, fontSize: 12, color: '#f3f4f6' }}>VAV Damper Modulation</span>
+            <span style={S.badge('#60a5fa')}>AIRFLOW</span>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#9ca3af', marginBottom: 4 }}>
+                <span>Damper Position:</span>
+                <strong style={{ color: '#60a5fa' }}>{damperVal}% ({(damperVal / 100).toFixed(2)})</strong>
+              </div>
+              <input
+                data-testid="damper-slider"
+                type="range"
+                min="0"
+                max="100"
+                step="5"
+                style={{ width: '100%', accentColor: '#3b82f6', cursor: 'pointer' }}
+                value={damperVal}
+                onChange={(e) => setDamperVal(Number(e.target.value))}
+              />
+            </div>
+
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <input
+                data-testid="damper-input"
+                type="number"
+                min="0"
+                max="100"
+                style={{ ...S.input, width: 70 }}
+                value={damperVal}
+                onChange={(e) => setDamperVal(Math.max(0, Math.min(100, Number(e.target.value))))}
+              />
+              <span style={{ fontSize: 11, color: '#9ca3af' }}>%</span>
+              <button
+                data-testid="damper-send-btn"
+                style={{ ...btnStyle('primary'), marginLeft: 'auto' }}
+                onClick={() => sendCommand(`DAMPER=${damperVal}`)}
+                disabled={sending}
+              >
+                Apply Damper ({damperVal}%)
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+              <button
+                style={{ ...btnStyle('default'), flex: 1, fontSize: 10 }}
+                onClick={() => { setDamperVal(15); sendCommand('DAMPER=15'); }}
+              >
+                15% (Min Vent)
+              </button>
+              <button
+                style={{ ...btnStyle('default'), flex: 1, fontSize: 10 }}
+                onClick={() => { setDamperVal(50); sendCommand('DAMPER=50'); }}
+              >
+                50% (Nominal)
+              </button>
+              <button
+                style={{ ...btnStyle('default'), flex: 1, fontSize: 10 }}
+                onClick={() => { setDamperVal(100); sendCommand('DAMPER=100'); }}
+              >
+                100% (Full Open)
+              </button>
+            </div>
+
+            <div style={{ fontSize: 10, color: '#6b7280', marginTop: 4, lineHeight: 1.4 }}>
+              Modulates physical actuator position [0.0, 1.0] across Hardy Cross pressure network and dispatches <code>;DAMPER=...</code> to edge nodes.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Action feedback status banner */}
+      {status && (
+        <div
+          data-testid="command-feedback-banner"
+          style={{
+            marginTop: 12,
+            padding: '8px 12px',
+            borderRadius: 4,
+            background: status.ok ? '#065f4622' : '#7f1d1d22',
+            border: `1px solid ${status.ok ? '#05966966' : '#dc262666'}`,
+            color: status.ok ? '#34d399' : '#f87171',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            fontSize: 12,
+          }}
+        >
+          <span>
+            <strong>{status.ok ? '✔ SUCCESS' : '✖ ERROR'}:</strong> {status.msg}
+          </span>
+          <span style={{ fontSize: 10, color: '#9ca3af' }}>{status.time}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ControlsTab({ devices = [] }) {
+  const [selectedTarget, setSelectedTarget] = useState('zone-office-a');
+  const [customTarget, setCustomTarget] = useState('');
+
+  const target = customTarget.trim() || selectedTarget;
+
+  const defaultOptions = [
+    'zone-office-a',
+    'zone-office-b',
+    'zone-conf-b',
+    'zone-north-west-office-lvl4',
+    'esp32-zone-01',
+    'vav-office-a',
+  ];
+  const dynamicOptions = devices.map((d) => d.zone || d.id).filter(Boolean);
+  const targetOptions = Array.from(new Set([...defaultOptions, ...dynamicOptions]));
+
+  return (
+    <div style={S.card}>
+      <div style={{ marginBottom: 14 }}>
+        <h2 style={{ fontSize: 16, margin: '0 0 4px 0', color: '#f3f4f6', fontWeight: 700 }}>
+          Edge Hardware Manual Actuation & Controls
+        </h2>
+        <p style={{ ...S.dim, margin: 0, fontSize: 12, lineHeight: 1.5 }}>
+          Comprehensive manual controls for all edge devices: transmit arbitrary IR codes to mini-split ACs, toggle smart plugs and relays, modulate VAV dampers, and test edge compute offloading via CPU strain simulation.
+        </p>
+      </div>
+
+      <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', background: '#0b0f14', padding: 10, borderRadius: 4, border: '1px solid #1f2937' }}>
+        <label style={{ fontSize: 12, color: '#9ca3af', fontWeight: 600 }}>Target Zone / Device:</label>
+        <select
+          data-testid="target-zone-select"
+          style={{ ...S.input, maxWidth: 260 }}
+          value={selectedTarget}
+          onChange={(e) => { setSelectedTarget(e.target.value); setCustomTarget(''); }}
+        >
+          {targetOptions.map((t) => (
+            <option key={t} value={t}>{t}</option>
+          ))}
+        </select>
+        <span style={{ fontSize: 11, color: '#6b7280' }}>or custom zone/device ID:</span>
+        <input
+          data-testid="custom-target-input"
+          style={{ ...S.input, maxWidth: 180 }}
+          placeholder="e.g. zone-12"
+          value={customTarget}
+          onChange={(e) => setCustomTarget(e.target.value)}
+        />
+      </div>
+
+      <DeviceControls targetZone={target} targetDevice={target} />
     </div>
   );
 }
@@ -189,6 +692,10 @@ function DeviceCard({ dev, staleAfter }) {
         {showRaw ? 'hide' : 'show'} last raw payload
       </button>
       {showRaw && <pre style={S.pre}>{dev.lastJson || '(none)'}</pre>}
+
+      <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid #1f2937' }}>
+        <DeviceControls targetZone={dev.zone || dev.id} targetDevice={dev.id} />
+      </div>
     </div>
   );
 }
@@ -242,8 +749,8 @@ function SustainabilityTab() {
 
       <div style={S.card}>
         <h2 style={{marginTop: 0, color: '#60a5fa'}}>Carbon Credit Recommendations (Live Market)</h2>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-          <div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px' }}>
+          <div style={{ flex: 1, minWidth: '300px' }}>
             <div style={{marginBottom: 8}}><strong>Status:</strong> {data.carbonCreditRecommendations.recommendation}</div>
             {data.carbonCreditRecommendations.overBudget && (
               <>
@@ -253,15 +760,33 @@ function SustainabilityTab() {
               </>
             )}
           </div>
-          <div style={{textAlign: 'right', background: '#111827', padding: '12px', borderRadius: '4px', border: '1px solid #374151'}}>
-            <div style={{fontSize: 10, color: '#9ca3af', textTransform: 'uppercase'}}>Live Quote Source</div>
-            <div style={{fontWeight: 'bold'}}>
-              <a href="https://www.coingecko.com/en/coins/toucan-protocol-base-carbon-tonne" target="_blank" rel="noreferrer" style={{color: '#60a5fa', textDecoration: 'none'}}>
-                {data.carbonCreditRecommendations.marketQuote.source}
-              </a>
+          <div style={{ flex: 1, minWidth: '300px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <div style={{textAlign: 'right', background: '#111827', padding: '12px', borderRadius: '4px', border: '1px solid #374151'}}>
+              <div style={{fontSize: 10, color: '#9ca3af', textTransform: 'uppercase'}}>Live Quote Source</div>
+              <div style={{fontWeight: 'bold'}}>
+                <a href="https://www.coingecko.com/en/coins/toucan-protocol-base-carbon-tonne" target="_blank" rel="noreferrer" style={{color: '#60a5fa', textDecoration: 'none'}}>
+                  {data.carbonCreditRecommendations.marketQuote.source}
+                </a>
+              </div>
+              <div style={{color: '#4ade80', fontSize: 18}}>${data.carbonCreditRecommendations.marketQuote.spotPricePerMetricTonUSD.toFixed(6)} / MT</div>
+              <div style={{fontSize: 10, color: '#9ca3af', marginTop: 4}}>Updated: {new Date(data.carbonCreditRecommendations.marketQuote.fetchedAt).toLocaleTimeString()}</div>
             </div>
-            <div style={{color: '#4ade80', fontSize: 18}}>${data.carbonCreditRecommendations.marketQuote.spotPricePerMetricTonUSD.toFixed(6)} / MT</div>
-            <div style={{fontSize: 10, color: '#9ca3af', marginTop: 4}}>Updated: {new Date(data.carbonCreditRecommendations.marketQuote.fetchedAt).toLocaleTimeString()}</div>
+            
+            {data.carbonCreditRecommendations.alternativeQuotes && data.carbonCreditRecommendations.alternativeQuotes.length > 0 && (
+              <div style={{background: '#111827', padding: '12px', borderRadius: '4px', border: '1px solid #374151'}}>
+                <div style={{fontSize: 10, color: '#9ca3af', textTransform: 'uppercase', marginBottom: '8px'}}>Alternative Market Quotes</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {data.carbonCreditRecommendations.alternativeQuotes.map((alt, idx) => (
+                    <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', background: 'rgba(255,255,255,0.03)', padding: '6px 10px', borderRadius: '4px' }}>
+                      <span style={{ color: '#60a5fa', fontWeight: '600' }}>{alt.source}</span>
+                      <div style={{ fontWeight: 'bold', color: '#34d399', fontFamily: 'monospace', fontSize: '12px' }}>
+                        ${alt.spotPricePerMetricTonUSD.toFixed(2)} <span style={{ fontSize: '9px', color: '#9ca3af', fontWeight: 'normal' }}>{alt.currency} / tCO2e</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -275,8 +800,21 @@ function SustainabilityTab() {
             <div style={{display: 'flex', flexDirection: 'column', gap: '8px'}}>
               {data.predictiveMaintenance.warnings.map((w, i) => (
                 <div key={i} style={{background: '#7f1d1d30', border: '1px solid #ef444450', padding: '8px', borderRadius: '4px'}}>
-                  <div style={{color: '#f87171', fontWeight: 'bold', fontSize: 11, marginBottom: 4}}>[{w.type.toUpperCase()}] {w.equipmentId}</div>
+                  <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start'}}>
+                    <div style={{color: '#f87171', fontWeight: 'bold', fontSize: 11, marginBottom: 4}}>[{w.type.toUpperCase()}] {w.equipmentId}</div>
+                    <div style={{fontSize: 10, color: '#9ca3af'}}>Health: <b style={{color: '#e5e7eb'}}>{w.healthScore !== undefined ? `${w.healthScore}%` : 'N/A'}</b></div>
+                  </div>
                   <div style={{fontSize: 12}}>{w.message}</div>
+                  {w.troubleshooting && w.troubleshooting.length > 0 && (
+                    <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid rgba(239, 68, 68, 0.2)' }}>
+                      <div style={{ fontSize: '10px', color: '#fca5a5', fontWeight: 'bold', marginBottom: '4px' }}>Recommended Troubleshooting:</div>
+                      <ul style={{ margin: 0, paddingLeft: '16px', fontSize: '10px', color: '#fecaca' }}>
+                        {w.troubleshooting.map((step, j) => (
+                          <li key={j}>{step}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -635,7 +1173,7 @@ export default function HardwareInspector() {
       </div>
 
       <div style={S.tabs}>
-        {['devices', 'events', 'quality', 'forecast', 'sustainability', 'usb', 'config'].map((t) => (
+        {['devices', 'controls', 'events', 'quality', 'forecast', 'sustainability', 'usb', 'config'].map((t) => (
           <button key={t} style={S.tab(tab === t)} onClick={() => setTab(t)}>{t}</button>
         ))}
         <a href={window.location.pathname} style={S.back}>← back to console</a>
@@ -663,9 +1201,12 @@ export default function HardwareInspector() {
 
       {tab === 'devices' && (
         devices.length === 0 && !err ? (
-          <div style={S.empty}>
-            No node has published yet. The engine is up but nothing has arrived on
-            <code> econ/telemetry/+</code>. Check the node is powered, on WiFi, and pointed at this broker.
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div style={S.empty}>
+              No physical node has published yet on <code>econ/telemetry/+</code>. The engine is running in simulation/ready state.
+              You can test manual actuation commands directly below or switch to the <strong>controls</strong> tab.
+            </div>
+            <ControlsTab devices={[]} />
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
@@ -684,6 +1225,8 @@ export default function HardwareInspector() {
           </div>
         )
       )}
+
+      {tab === 'controls' && <ControlsTab devices={devices} />}
 
       {tab === 'events' && (
         <div style={S.card}>
@@ -765,7 +1308,6 @@ export default function HardwareInspector() {
   );
 }
 
-const mono = 'ui-monospace, SFMono-Regular, Menlo, monospace';
 /**
  * Sparkline for a FORECAST horizon: evenly-spaced future values, no timestamps and no
  * provenance. Deliberately not the Spark component above — that one colours its stroke by

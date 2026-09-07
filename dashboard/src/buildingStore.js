@@ -22,34 +22,103 @@ let homeData = bundledHome;
 let live = false;
 const listeners = new Set();
 
+export function isMultiLevelBuilding(b) {
+  return Boolean(
+    b &&
+    typeof b === 'object' &&
+    b.buildingId !== 'bldg-econ-house-hcmc' &&
+    Array.isArray(b.floors) &&
+    b.floors.length > 1
+  );
+}
+
+export function isHomeBuilding(b) {
+  return Boolean(
+    b &&
+    typeof b === 'object' &&
+    (b.buildingId === 'bldg-econ-house-hcmc' || (Array.isArray(b.floors) && b.floors.length === 1))
+  );
+}
+
 export function getBuilding() {
-  return activeModelType === 'domestic-home' ? homeData : towerData;
+  if (activeModelType === 'domestic-home') {
+    return isHomeBuilding(homeData) ? homeData : bundledHome;
+  }
+  return isMultiLevelBuilding(towerData) ? towerData : bundledTower;
 }
 
 export function getAllKnownBuildings() {
-  return [towerData, homeData];
+  const t = isMultiLevelBuilding(towerData) ? towerData : bundledTower;
+  const h = isHomeBuilding(homeData) ? homeData : bundledHome;
+  return [t, h];
 }
 
 export function getBuildingModelType() {
   return activeModelType;
 }
 
-export function setBuildingModelType(type) {
-  if (type !== 'multi-level' && type !== 'domestic-home') return;
-  if (activeModelType !== type) {
-    activeModelType = type;
-    // Notify Go backend of the active building model switch
-    fetch(`${API_BASE}/api/building/switch`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: type }),
-    }).catch(() => {
-      // Backend might be offline or running in mock testbed mode
-    });
-    listeners.forEach((fn) => {
-      try { fn(getBuilding(), activeModelType); } catch (e) { console.error(e); }
-    });
+export function setBuildingModelType(type, options = {}) {
+  if (type !== 'multi-level' && type !== 'domestic-home') return getBuilding();
+
+  const force = Boolean(options?.force);
+  const changed = activeModelType !== type;
+
+  if (!changed && !force) {
+    return getBuilding();
   }
+
+  activeModelType = type;
+
+  // Immediate synchronous guarantee: Ensure active model matches context
+  if (type === 'multi-level') {
+    if (!isMultiLevelBuilding(towerData)) {
+      towerData = bundledTower;
+    }
+  } else if (type === 'domestic-home') {
+    if (!isHomeBuilding(homeData)) {
+      homeData = bundledHome;
+    }
+  }
+
+  // Notify listeners immediately
+  listeners.forEach((fn) => {
+    try { fn(getBuilding(), activeModelType); } catch (e) { console.error(e); }
+  });
+
+  // Notify Go backend of the active building model switch
+  fetch(`${API_BASE}/api/building/switch`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: type }),
+  }).catch(() => {
+    // Backend might be offline or running in mock testbed mode
+  });
+
+  // Asynchronously fetch live data with ?model=${type}
+  fetch(`${API_BASE}/api/building-data?model=${encodeURIComponent(type)}`)
+    .then((r) => (r.ok ? r.json() : null))
+    .then((j) => {
+      if (!j) return;
+      let updated = false;
+      if (type === 'multi-level' && isMultiLevelBuilding(j)) {
+        towerData = j;
+        live = true;
+        updated = true;
+      } else if (type === 'domestic-home' && isHomeBuilding(j)) {
+        homeData = j;
+        updated = true;
+      }
+      if (updated && activeModelType === type) {
+        listeners.forEach((fn) => {
+          try { fn(getBuilding(), activeModelType); } catch (e) { console.error(e); }
+        });
+      }
+    })
+    .catch(() => {
+      // Backend unreachable: bundled fallback stands
+    });
+
+  return getBuilding();
 }
 
 export function subscribeBuildingChange(fn) {
@@ -67,16 +136,19 @@ export async function bootBuilding() {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), 5000);
   try {
-    const r = await fetch(`${API_BASE}/api/building-data`, { signal: ctl.signal });
+    const r = await fetch(`${API_BASE}/api/building-data?model=multi-level`, { signal: ctl.signal });
     if (r.ok) {
       const j = await r.json();
-      if (j && Array.isArray(j.floors) && j.floors.length > 0) {
+      if (isMultiLevelBuilding(j)) {
         towerData = j;
         live = true;
+      } else {
+        towerData = bundledTower;
       }
     }
   } catch {
     // Engine unreachable: the bundled fallback stands, flagged via buildingIsLive().
+    towerData = bundledTower;
   } finally {
     clearTimeout(timer);
   }

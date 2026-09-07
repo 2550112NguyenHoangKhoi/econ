@@ -19,13 +19,13 @@
 //     - Multi-cycle recovery: strain resolves and edge returns seamlessly to local DSP.
 // =============================================================================
 
-#include "../edge/esp32/test/arduino_shim.h"
+#include "../../edge/esp32/test/arduino_shim.h"
 #include <ArduinoJson.h>
 
 #define ZONE_LABEL_OVERRIDE "Level 4"
 #define ZONE_TOPIC_OVERRIDE "zone_1"
-#include "../edge/esp32/src/node_config.h"
-#include "../edge/esp32/src/current_denoiser.h"
+#include "../../edge/esp32/src/node_config.h"
+#include "../../edge/esp32/src/current_denoiser.h"
 
 #include <iostream>
 #include <vector>

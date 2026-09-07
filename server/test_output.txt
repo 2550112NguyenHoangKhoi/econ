@@ -1,0 +1,733 @@
+=== RUN   TestAdversarialRecommendationsAPI_HistoryVariations
+=== RUN   TestAdversarialRecommendationsAPI_HistoryVariations/zero_samples_(cold_start)
+2026/09/07 08:44:48 [library] loaded data/programme-library.json v2: 15 programmes (2 critical), fresh-air 10 L/s/person, 8 occupancy profiles
+=== RUN   TestAdversarialRecommendationsAPI_HistoryVariations/single_sample
+=== RUN   TestAdversarialRecommendationsAPI_HistoryVariations/below_min_history_(7_samples)
+=== RUN   TestAdversarialRecommendationsAPI_HistoryVariations/exact_min_history_(8_samples)
+=== RUN   TestAdversarialRecommendationsAPI_HistoryVariations/standard_history_(24_samples)
+=== RUN   TestAdversarialRecommendationsAPI_HistoryVariations/large_history_(500_samples)
+=== RUN   TestAdversarialRecommendationsAPI_HistoryVariations/zero_load_history
+=== RUN   TestAdversarialRecommendationsAPI_HistoryVariations/extreme_high_load_history
+--- PASS: TestAdversarialRecommendationsAPI_HistoryVariations (0.05s)
+    --- PASS: TestAdversarialRecommendationsAPI_HistoryVariations/zero_samples_(cold_start) (0.01s)
+    --- PASS: TestAdversarialRecommendationsAPI_HistoryVariations/single_sample (0.01s)
+    --- PASS: TestAdversarialRecommendationsAPI_HistoryVariations/below_min_history_(7_samples) (0.01s)
+    --- PASS: TestAdversarialRecommendationsAPI_HistoryVariations/exact_min_history_(8_samples) (0.01s)
+    --- PASS: TestAdversarialRecommendationsAPI_HistoryVariations/standard_history_(24_samples) (0.00s)
+    --- PASS: TestAdversarialRecommendationsAPI_HistoryVariations/large_history_(500_samples) (0.00s)
+    --- PASS: TestAdversarialRecommendationsAPI_HistoryVariations/zero_load_history (0.00s)
+    --- PASS: TestAdversarialRecommendationsAPI_HistoryVariations/extreme_high_load_history (0.00s)
+=== RUN   TestAdversarialRecommendationsAPI_BackendFailuresAndChaos
+=== RUN   TestAdversarialRecommendationsAPI_BackendFailuresAndChaos/both_backends_return_500_error
+=== RUN   TestAdversarialRecommendationsAPI_BackendFailuresAndChaos/both_backends_return_corrupted_invalid_JSON
+=== RUN   TestAdversarialRecommendationsAPI_BackendFailuresAndChaos/TimesFM_returns_empty_horizon_array
+=== RUN   TestAdversarialRecommendationsAPI_BackendFailuresAndChaos/TimesFM_unavailable_(503),_LSTM_succeeds
+=== RUN   TestAdversarialRecommendationsAPI_BackendFailuresAndChaos/TimesFM_succeeds_with_custom_decile_heads,_LSTM_fails
+=== RUN   TestAdversarialRecommendationsAPI_BackendFailuresAndChaos/TimesFM_returns_256_horizon_steps_with_full_quantiles
+--- PASS: TestAdversarialRecommendationsAPI_BackendFailuresAndChaos (0.03s)
+    --- PASS: TestAdversarialRecommendationsAPI_BackendFailuresAndChaos/both_backends_return_500_error (0.00s)
+    --- PASS: TestAdversarialRecommendationsAPI_BackendFailuresAndChaos/both_backends_return_corrupted_invalid_JSON (0.00s)
+    --- PASS: TestAdversarialRecommendationsAPI_BackendFailuresAndChaos/TimesFM_returns_empty_horizon_array (0.00s)
+    --- PASS: TestAdversarialRecommendationsAPI_BackendFailuresAndChaos/TimesFM_unavailable_(503),_LSTM_succeeds (0.00s)
+    --- PASS: TestAdversarialRecommendationsAPI_BackendFailuresAndChaos/TimesFM_succeeds_with_custom_decile_heads,_LSTM_fails (0.00s)
+    --- PASS: TestAdversarialRecommendationsAPI_BackendFailuresAndChaos/TimesFM_returns_256_horizon_steps_with_full_quantiles (0.00s)
+=== RUN   TestAdversarialRecommendationsAPI_ConcurrentQueriesRace
+2026/09/07 08:44:48 [edge] node "zone-office-a" bound to zone zone-lobby-33-lvl10 (office, type "open-office")
+--- PASS: TestAdversarialRecommendationsAPI_ConcurrentQueriesRace (0.38s)
+=== RUN   TestAdversarialMQTT_TelemetryFullJSONLogging
+=== RUN   TestAdversarialMQTT_TelemetryFullJSONLogging/unicode_characters_in_zone_and_strings
+=== RUN   TestAdversarialMQTT_TelemetryFullJSONLogging/nested_JSON_structures_and_custom_telemetry_extensions
+=== RUN   TestAdversarialMQTT_TelemetryFullJSONLogging/escaped_quotes,_slashes,_tabs,_newlines_inside_strings
+=== RUN   TestAdversarialMQTT_TelemetryFullJSONLogging/array_fields_and_additional_telemetry_lists
+=== RUN   TestAdversarialMQTT_TelemetryFullJSONLogging/large_8KB_rich_telemetry_payload
+=== RUN   TestAdversarialMQTT_TelemetryFullJSONLogging/all_zero_and_negative_values
+--- PASS: TestAdversarialMQTT_TelemetryFullJSONLogging (0.01s)
+    --- PASS: TestAdversarialMQTT_TelemetryFullJSONLogging/unicode_characters_in_zone_and_strings (0.00s)
+    --- PASS: TestAdversarialMQTT_TelemetryFullJSONLogging/nested_JSON_structures_and_custom_telemetry_extensions (0.00s)
+    --- PASS: TestAdversarialMQTT_TelemetryFullJSONLogging/escaped_quotes,_slashes,_tabs,_newlines_inside_strings (0.00s)
+    --- PASS: TestAdversarialMQTT_TelemetryFullJSONLogging/array_fields_and_additional_telemetry_lists (0.00s)
+    --- PASS: TestAdversarialMQTT_TelemetryFullJSONLogging/large_8KB_rich_telemetry_payload (0.00s)
+    --- PASS: TestAdversarialMQTT_TelemetryFullJSONLogging/all_zero_and_negative_values (0.00s)
+=== RUN   TestAdversarialMQTT_ConcurrentTelemetryHammer
+--- PASS: TestAdversarialMQTT_ConcurrentTelemetryHammer (0.01s)
+=== RUN   TestCheckOriginRejectsForeignOrigin
+=== RUN   TestCheckOriginRejectsForeignOrigin/attacker_site
+2026/09/07 08:44:48 [auth] rejected websocket from Origin "https://evil.example.com" (host "10.0.0.5:8080"). If this is a legitimate deployment, add it to ECON_ALLOWED_ORIGINS.
+=== RUN   TestCheckOriginRejectsForeignOrigin/lookalike_prefix
+2026/09/07 08:44:48 [auth] rejected websocket from Origin "http://10.0.0.5.evil.com" (host "10.0.0.5:8080"). If this is a legitimate deployment, add it to ECON_ALLOWED_ORIGINS.
+=== RUN   TestCheckOriginRejectsForeignOrigin/lookalike_suffix
+2026/09/07 08:44:48 [auth] rejected websocket from Origin "http://evil-10.0.0.5" (host "10.0.0.5:8080"). If this is a legitimate deployment, add it to ECON_ALLOWED_ORIGINS.
+=== RUN   TestCheckOriginRejectsForeignOrigin/null_origin
+2026/09/07 08:44:48 [auth] rejected websocket: unparseable Origin "null"
+--- PASS: TestCheckOriginRejectsForeignOrigin (0.00s)
+    --- PASS: TestCheckOriginRejectsForeignOrigin/attacker_site (0.00s)
+    --- PASS: TestCheckOriginRejectsForeignOrigin/lookalike_prefix (0.00s)
+    --- PASS: TestCheckOriginRejectsForeignOrigin/lookalike_suffix (0.00s)
+    --- PASS: TestCheckOriginRejectsForeignOrigin/null_origin (0.00s)
+=== RUN   TestCheckOriginAcceptsLegitimateClients
+=== RUN   TestCheckOriginAcceptsLegitimateClients/vite_dev_server
+=== RUN   TestCheckOriginAcceptsLegitimateClients/loopback_ip
+=== RUN   TestCheckOriginAcceptsLegitimateClients/phone_on_the_LAN
+=== RUN   TestCheckOriginAcceptsLegitimateClients/built_dashboard_same_host
+=== RUN   TestCheckOriginAcceptsLegitimateClients/non-browser_client_sends_no_Origin
+--- PASS: TestCheckOriginAcceptsLegitimateClients (0.00s)
+    --- PASS: TestCheckOriginAcceptsLegitimateClients/vite_dev_server (0.00s)
+    --- PASS: TestCheckOriginAcceptsLegitimateClients/loopback_ip (0.00s)
+    --- PASS: TestCheckOriginAcceptsLegitimateClients/phone_on_the_LAN (0.00s)
+    --- PASS: TestCheckOriginAcceptsLegitimateClients/built_dashboard_same_host (0.00s)
+    --- PASS: TestCheckOriginAcceptsLegitimateClients/non-browser_client_sends_no_Origin (0.00s)
+=== RUN   TestCheckOriginHonoursAllowlist
+2026/09/07 08:44:48 [auth] rejected websocket from Origin "https://other.example.com" (host "10.0.0.5:8080"). If this is a legitimate deployment, add it to ECON_ALLOWED_ORIGINS.
+--- PASS: TestCheckOriginHonoursAllowlist (0.00s)
+=== RUN   TestParseAuthMessage
+--- PASS: TestParseAuthMessage (0.00s)
+=== RUN   TestEmptyTokenNeverAuthorizesWhenEnforced
+--- PASS: TestEmptyTokenNeverAuthorizesWhenEnforced (0.00s)
+=== RUN   TestDemoModeAcceptsAnyToken
+--- PASS: TestDemoModeAcceptsAnyToken (0.00s)
+=== RUN   TestRequireAdminGatesRESTWrites
+--- PASS: TestRequireAdminGatesRESTWrites (0.00s)
+=== RUN   TestEngineBuildingSwitchingDirect
+2026/09/07 08:44:48 [building] reloaded: 5 zones, 5 VAVs
+2026/09/07 08:44:48 [building] reloaded: 735 zones, 735 VAVs
+--- PASS: TestEngineBuildingSwitchingDirect (0.01s)
+=== RUN   TestBuildingDataAPIQueryParam
+2026/09/07 08:44:48 [building] reloaded: 5 zones, 5 VAVs
+--- PASS: TestBuildingDataAPIQueryParam (0.01s)
+=== RUN   TestBuildingSwitchEndpoints
+2026/09/07 08:44:48 [building] reloaded: 5 zones, 5 VAVs
+2026/09/07 08:44:48 [model-switch] switched active building to "domestic-home" (id=bldg-econ-house-hcmc, 5 zones, 5 vavs)
+2026/09/07 08:44:48 [building] reloaded: 735 zones, 735 VAVs
+2026/09/07 08:44:48 [model-switch] switched active building to "multi-level" (id=bldg-econ-digitized, 735 zones, 735 vavs)
+2026/09/07 08:44:48 [building] reloaded: 5 zones, 5 VAVs
+2026/09/07 08:44:48 [model-switch] switched active building to "domestic-home" (id=bldg-econ-house-hcmc, 5 zones, 5 vavs)
+--- PASS: TestBuildingSwitchEndpoints (0.01s)
+=== RUN   TestWebSocketModelSwitchingCommand
+    building_switching_test.go:321: skipping websocket network test in restricted sandbox: dial tcp 127.0.0.1:63481: connect: operation not permitted
+--- SKIP: TestWebSocketModelSwitchingCommand (0.00s)
+=== RUN   TestFlatBuffersSimStateMatchesSwitchedBuilding
+2026/09/07 08:44:48 [building] reloaded: 5 zones, 5 VAVs
+    building_switching_test.go:433: skipping websocket network test in restricted sandbox: dial tcp 127.0.0.1:63482: connect: operation not permitted
+--- SKIP: TestFlatBuffersSimStateMatchesSwitchedBuilding (0.00s)
+=== RUN   TestChallengerCoreAssertionExact1000W1H
+2026/09/07 08:44:48 [carbon-market] outbound HTTP GET https://api.coingecko.com/api/v3/simple/price?ids=toucan-protocol-base-carbon-tonne&vs_currencies=usd
+2026/09/07 08:44:48 [carbon-market] outbound fetch failed (Get "https://api.coingecko.com/api/v3/simple/price?ids=toucan-protocol-base-carbon-tonne&vs_currencies=usd": tls: failed to verify certificate: x509: “api.coingecko.com” certificate is not trusted); using fallback $12.50/ton
+--- PASS: TestChallengerCoreAssertionExact1000W1H (0.02s)
+=== RUN   TestChallengerMathematicalBoundaries
+=== RUN   TestChallengerMathematicalBoundaries/ZeroWatts
+=== RUN   TestChallengerMathematicalBoundaries/FractionalWatts
+=== RUN   TestChallengerMathematicalBoundaries/LargeCommercialLoads
+=== RUN   TestChallengerMathematicalBoundaries/NegativeDtAndClockSkew
+2026/09/07 08:44:48 [carbon-market] outbound HTTP GET https://api.coingecko.com/api/v3/simple/price?ids=toucan-protocol-base-carbon-tonne&vs_currencies=usd
+2026/09/07 08:44:48 [carbon-market] outbound fetch failed (Get "https://api.coingecko.com/api/v3/simple/price?ids=toucan-protocol-base-carbon-tonne&vs_currencies=usd": tls: failed to verify certificate: x509: “api.coingecko.com” certificate is not trusted); using fallback $12.50/ton
+=== RUN   TestChallengerMathematicalBoundaries/FractionalSecondsAndDrift
+--- PASS: TestChallengerMathematicalBoundaries (0.00s)
+    --- PASS: TestChallengerMathematicalBoundaries/ZeroWatts (0.00s)
+    --- PASS: TestChallengerMathematicalBoundaries/FractionalWatts (0.00s)
+    --- PASS: TestChallengerMathematicalBoundaries/LargeCommercialLoads (0.00s)
+    --- PASS: TestChallengerMathematicalBoundaries/NegativeDtAndClockSkew (0.00s)
+    --- PASS: TestChallengerMathematicalBoundaries/FractionalSecondsAndDrift (0.00s)
+=== RUN   TestChallengerCarbonCreditRecommendations
+=== RUN   TestChallengerCarbonCreditRecommendations/UnderAndExactBudget
+=== RUN   TestChallengerCarbonCreditRecommendations/DeficitAndCertificateRounding
+--- PASS: TestChallengerCarbonCreditRecommendations (0.00s)
+    --- PASS: TestChallengerCarbonCreditRecommendations/UnderAndExactBudget (0.00s)
+    --- PASS: TestChallengerCarbonCreditRecommendations/DeficitAndCertificateRounding (0.00s)
+=== RUN   TestChallengerCarbonMarketHTTPStress
+=== RUN   TestChallengerCarbonMarketHTTPStress/PayloadFormatVariations
+2026/09/07 08:44:48 [carbon-market] outbound HTTP GET http://127.0.0.1:63485
+2026/09/07 08:44:48 [carbon-market] live carbon spot price fetched: $24.85/ton
+2026/09/07 08:44:48 [carbon-market] outbound HTTP GET http://127.0.0.1:63486
+2026/09/07 08:44:48 [carbon-market] live carbon spot price fetched: $30.50/ton
+2026/09/07 08:44:48 [carbon-market] outbound HTTP GET http://127.0.0.1:63487
+2026/09/07 08:44:48 [carbon-market] live carbon spot price fetched: $17.25/ton
+2026/09/07 08:44:48 [carbon-market] outbound HTTP GET http://127.0.0.1:63488
+2026/09/07 08:44:48 [carbon-market] live carbon spot price fetched: $19.99/ton
+2026/09/07 08:44:48 [carbon-market] outbound HTTP GET http://127.0.0.1:63489
+2026/09/07 08:44:48 [carbon-market] live carbon spot price fetched: $25.00/ton
+2026/09/07 08:44:48 [carbon-market] outbound HTTP GET http://127.0.0.1:63490
+2026/09/07 08:44:48 [carbon-market] live carbon spot price fetched: $22.10/ton
+=== RUN   TestChallengerCarbonMarketHTTPStress/ZeroPriceRejection
+2026/09/07 08:44:48 [carbon-market] outbound HTTP GET http://127.0.0.1:63491
+2026/09/07 08:44:48 [carbon-market] outbound fetch failed (could not parse spot price from body: {"toucan-protocol-base-carbon-tonne": {"usd": 0.0}}); using fallback $12.50/ton
+=== RUN   TestChallengerCarbonMarketHTTPStress/NegativePriceRejection
+2026/09/07 08:44:48 [carbon-market] outbound HTTP GET http://127.0.0.1:63492
+2026/09/07 08:44:48 [carbon-market] outbound fetch failed (could not parse spot price from body: {"toucan-protocol-base-carbon-tonne": {"usd": -15.50}}); using fallback $12.50/ton
+=== RUN   TestChallengerCarbonMarketHTTPStress/CorruptedAndAdversarialJSON
+2026/09/07 08:44:48 [carbon-market] outbound HTTP GET http://127.0.0.1:63493
+2026/09/07 08:44:48 [carbon-market] outbound fetch failed (could not parse spot price from body: {"toucan-protocol-base-carbon-tonne": {); using fallback $12.50/ton
+2026/09/07 08:44:48 [carbon-market] outbound HTTP GET http://127.0.0.1:63494
+2026/09/07 08:44:48 [carbon-market] outbound fetch failed (could not parse spot price from body: <!DOCTYPE html><html><body>502 Bad Gateway</body></html>); using fallback $12.50/ton
+2026/09/07 08:44:48 [carbon-market] outbound HTTP GET http://127.0.0.1:63495
+2026/09/07 08:44:48 [carbon-market] outbound fetch failed (could not parse spot price from body: {"usd": "free"}); using fallback $12.50/ton
+2026/09/07 08:44:48 [carbon-market] outbound HTTP GET http://127.0.0.1:63496
+2026/09/07 08:44:48 [carbon-market] outbound fetch failed (could not parse spot price from body: {"usd": null}); using fallback $12.50/ton
+2026/09/07 08:44:48 [carbon-market] outbound HTTP GET http://127.0.0.1:63497
+2026/09/07 08:44:48 [carbon-market] outbound fetch failed (could not parse spot price from body: {}); using fallback $12.50/ton
+2026/09/07 08:44:48 [carbon-market] outbound HTTP GET http://127.0.0.1:63498
+2026/09/07 08:44:48 [carbon-market] outbound fetch failed (could not parse spot price from body: [12.5, 14.2]); using fallback $12.50/ton
+2026/09/07 08:44:48 [carbon-market] outbound HTTP GET http://127.0.0.1:63499
+2026/09/07 08:44:48 [carbon-market] outbound fetch failed (could not parse spot price from body: {"usd": NaN}); using fallback $12.50/ton
+=== RUN   TestChallengerCarbonMarketHTTPStress/HTTPErrorStatusCodes
+2026/09/07 08:44:48 [carbon-market] outbound HTTP GET http://127.0.0.1:63500
+2026/09/07 08:44:48 [carbon-market] outbound fetch failed (unexpected HTTP status 500); using fallback $12.50/ton
+2026/09/07 08:44:48 [carbon-market] outbound HTTP GET http://127.0.0.1:63501
+2026/09/07 08:44:48 [carbon-market] outbound fetch failed (unexpected HTTP status 502); using fallback $12.50/ton
+2026/09/07 08:44:48 [carbon-market] outbound HTTP GET http://127.0.0.1:63502
+2026/09/07 08:44:48 [carbon-market] outbound fetch failed (unexpected HTTP status 503); using fallback $12.50/ton
+2026/09/07 08:44:48 [carbon-market] outbound HTTP GET http://127.0.0.1:63503
+2026/09/07 08:44:48 [carbon-market] outbound fetch failed (unexpected HTTP status 404); using fallback $12.50/ton
+2026/09/07 08:44:48 [carbon-market] outbound HTTP GET http://127.0.0.1:63504
+2026/09/07 08:44:48 [carbon-market] outbound fetch failed (unexpected HTTP status 429); using fallback $12.50/ton
+=== RUN   TestChallengerCarbonMarketHTTPStress/SlowResponseTimeout
+2026/09/07 08:44:48 [carbon-market] outbound HTTP GET http://mock-market.local
+2026/09/07 08:44:49 [carbon-market] outbound fetch failed (Get "http://mock-market.local": context deadline exceeded (Client.Timeout exceeded while awaiting headers)); using fallback $12.50/ton
+=== RUN   TestChallengerCarbonMarketHTTPStress/Default8SecondTimeoutBehavior
+=== RUN   TestChallengerCarbonMarketHTTPStress/CacheHitAndHighConcurrency
+2026/09/07 08:44:49 [carbon-market] outbound HTTP GET http://127.0.0.1:63505
+2026/09/07 08:44:49 [carbon-market] live carbon spot price fetched: $15.00/ton
+--- PASS: TestChallengerCarbonMarketHTTPStress (0.10s)
+    --- PASS: TestChallengerCarbonMarketHTTPStress/PayloadFormatVariations (0.00s)
+    --- PASS: TestChallengerCarbonMarketHTTPStress/ZeroPriceRejection (0.00s)
+    --- PASS: TestChallengerCarbonMarketHTTPStress/NegativePriceRejection (0.00s)
+    --- PASS: TestChallengerCarbonMarketHTTPStress/CorruptedAndAdversarialJSON (0.00s)
+    --- PASS: TestChallengerCarbonMarketHTTPStress/HTTPErrorStatusCodes (0.00s)
+    --- PASS: TestChallengerCarbonMarketHTTPStress/SlowResponseTimeout (0.05s)
+    --- PASS: TestChallengerCarbonMarketHTTPStress/Default8SecondTimeoutBehavior (0.05s)
+    --- PASS: TestChallengerCarbonMarketHTTPStress/CacheHitAndHighConcurrency (0.00s)
+=== RUN   TestChallengeSpaceUtilizationBoundaries
+--- PASS: TestChallengeSpaceUtilizationBoundaries (0.00s)
+=== RUN   TestChallengeNonOccupiableZonesExclusion
+--- PASS: TestChallengeNonOccupiableZonesExclusion (0.00s)
+=== RUN   TestChallengePredictiveMaintenanceDiagnostics
+=== RUN   TestChallengePredictiveMaintenanceDiagnostics/PowerStripOverloadBoundary
+2026/09/07 08:44:49 [carbon-market] outbound HTTP GET https://api.coingecko.com/api/v3/simple/price?ids=toucan-protocol-base-carbon-tonne&vs_currencies=usd
+2026/09/07 08:44:49 [carbon-market] outbound fetch failed (Get "https://api.coingecko.com/api/v3/simple/price?ids=toucan-protocol-base-carbon-tonne&vs_currencies=usd": tls: failed to verify certificate: x509: “api.coingecko.com” certificate is not trusted); using fallback $12.50/ton
+2026/09/07 08:44:49 [carbon-market] outbound HTTP GET https://api.coingecko.com/api/v3/simple/price?ids=toucan-protocol-base-carbon-tonne&vs_currencies=usd
+2026/09/07 08:44:49 [carbon-market] outbound fetch failed (Get "https://api.coingecko.com/api/v3/simple/price?ids=toucan-protocol-base-carbon-tonne&vs_currencies=usd": tls: failed to verify certificate: x509: “api.coingecko.com” certificate is not trusted); using fallback $12.50/ton
+=== RUN   TestChallengePredictiveMaintenanceDiagnostics/ACOverloadBoundary
+2026/09/07 08:44:49 [carbon-market] outbound HTTP GET https://api.coingecko.com/api/v3/simple/price?ids=toucan-protocol-base-carbon-tonne&vs_currencies=usd
+2026/09/07 08:44:49 [carbon-market] outbound fetch failed (Get "https://api.coingecko.com/api/v3/simple/price?ids=toucan-protocol-base-carbon-tonne&vs_currencies=usd": tls: failed to verify certificate: x509: “api.coingecko.com” certificate is not trusted); using fallback $12.50/ton
+2026/09/07 08:44:49 [carbon-market] outbound HTTP GET https://api.coingecko.com/api/v3/simple/price?ids=toucan-protocol-base-carbon-tonne&vs_currencies=usd
+2026/09/07 08:44:49 [carbon-market] outbound fetch failed (Get "https://api.coingecko.com/api/v3/simple/price?ids=toucan-protocol-base-carbon-tonne&vs_currencies=usd": tls: failed to verify certificate: x509: “api.coingecko.com” certificate is not trusted); using fallback $12.50/ton
+=== RUN   TestChallengePredictiveMaintenanceDiagnostics/TransientSurgeBoundary
+2026/09/07 08:44:49 [carbon-market] outbound HTTP GET https://api.coingecko.com/api/v3/simple/price?ids=toucan-protocol-base-carbon-tonne&vs_currencies=usd
+2026/09/07 08:44:49 [carbon-market] outbound fetch failed (Get "https://api.coingecko.com/api/v3/simple/price?ids=toucan-protocol-base-carbon-tonne&vs_currencies=usd": tls: failed to verify certificate: x509: “api.coingecko.com” certificate is not trusted); using fallback $12.50/ton
+2026/09/07 08:44:49 [carbon-market] outbound HTTP GET https://api.coingecko.com/api/v3/simple/price?ids=toucan-protocol-base-carbon-tonne&vs_currencies=usd
+2026/09/07 08:44:49 [carbon-market] outbound fetch failed (Get "https://api.coingecko.com/api/v3/simple/price?ids=toucan-protocol-base-carbon-tonne&vs_currencies=usd": tls: failed to verify certificate: x509: “api.coingecko.com” certificate is not trusted); using fallback $12.50/ton
+2026/09/07 08:44:49 [carbon-market] outbound HTTP GET https://api.coingecko.com/api/v3/simple/price?ids=toucan-protocol-base-carbon-tonne&vs_currencies=usd
+2026/09/07 08:44:49 [carbon-market] outbound fetch failed (Get "https://api.coingecko.com/api/v3/simple/price?ids=toucan-protocol-base-carbon-tonne&vs_currencies=usd": tls: failed to verify certificate: x509: “api.coingecko.com” certificate is not trusted); using fallback $12.50/ton
+2026/09/07 08:44:49 [carbon-market] outbound HTTP GET https://api.coingecko.com/api/v3/simple/price?ids=toucan-protocol-base-carbon-tonne&vs_currencies=usd
+2026/09/07 08:44:49 [carbon-market] outbound fetch failed (Get "https://api.coingecko.com/api/v3/simple/price?ids=toucan-protocol-base-carbon-tonne&vs_currencies=usd": tls: failed to verify certificate: x509: “api.coingecko.com” certificate is not trusted); using fallback $12.50/ton
+=== RUN   TestChallengePredictiveMaintenanceDiagnostics/CumulativeRuntimeHoursBoundary
+2026/09/07 08:44:49 [carbon-market] outbound HTTP GET https://api.coingecko.com/api/v3/simple/price?ids=toucan-protocol-base-carbon-tonne&vs_currencies=usd
+2026/09/07 08:44:49 [carbon-market] outbound fetch failed (Get "https://api.coingecko.com/api/v3/simple/price?ids=toucan-protocol-base-carbon-tonne&vs_currencies=usd": tls: failed to verify certificate: x509: “api.coingecko.com” certificate is not trusted); using fallback $12.50/ton
+2026/09/07 08:44:49 [carbon-market] outbound HTTP GET https://api.coingecko.com/api/v3/simple/price?ids=toucan-protocol-base-carbon-tonne&vs_currencies=usd
+2026/09/07 08:44:49 [carbon-market] outbound fetch failed (Get "https://api.coingecko.com/api/v3/simple/price?ids=toucan-protocol-base-carbon-tonne&vs_currencies=usd": tls: failed to verify certificate: x509: “api.coingecko.com” certificate is not trusted); using fallback $12.50/ton
+2026/09/07 08:44:49 [carbon-market] outbound HTTP GET https://api.coingecko.com/api/v3/simple/price?ids=toucan-protocol-base-carbon-tonne&vs_currencies=usd
+2026/09/07 08:44:49 [carbon-market] outbound fetch failed (Get "https://api.coingecko.com/api/v3/simple/price?ids=toucan-protocol-base-carbon-tonne&vs_currencies=usd": tls: failed to verify certificate: x509: “api.coingecko.com” certificate is not trusted); using fallback $12.50/ton
+2026/09/07 08:44:49 [carbon-market] outbound HTTP GET https://api.coingecko.com/api/v3/simple/price?ids=toucan-protocol-base-carbon-tonne&vs_currencies=usd
+2026/09/07 08:44:49 [carbon-market] outbound fetch failed (Get "https://api.coingecko.com/api/v3/simple/price?ids=toucan-protocol-base-carbon-tonne&vs_currencies=usd": tls: failed to verify certificate: x509: “api.coingecko.com” certificate is not trusted); using fallback $12.50/ton
+--- PASS: TestChallengePredictiveMaintenanceDiagnostics (0.01s)
+    --- PASS: TestChallengePredictiveMaintenanceDiagnostics/PowerStripOverloadBoundary (0.00s)
+    --- PASS: TestChallengePredictiveMaintenanceDiagnostics/ACOverloadBoundary (0.00s)
+    --- PASS: TestChallengePredictiveMaintenanceDiagnostics/TransientSurgeBoundary (0.00s)
+    --- PASS: TestChallengePredictiveMaintenanceDiagnostics/CumulativeRuntimeHoursBoundary (0.00s)
+=== RUN   TestChallengeSustainabilityEndpointPayloadAndCORS
+=== RUN   TestChallengeSustainabilityEndpointPayloadAndCORS/CORSPreflightOPTIONS
+=== RUN   TestChallengeSustainabilityEndpointPayloadAndCORS/MethodNotAllowed
+=== RUN   TestChallengeSustainabilityEndpointPayloadAndCORS/GETSuccessAndSchemaValidation
+2026/09/07 08:44:49 [carbon-market] outbound HTTP GET https://api.coingecko.com/api/v3/simple/price?ids=toucan-protocol-base-carbon-tonne&vs_currencies=usd
+2026/09/07 08:44:49 [carbon-market] outbound fetch failed (Get "https://api.coingecko.com/api/v3/simple/price?ids=toucan-protocol-base-carbon-tonne&vs_currencies=usd": tls: failed to verify certificate: x509: “api.coingecko.com” certificate is not trusted); using fallback $12.50/ton
+--- PASS: TestChallengeSustainabilityEndpointPayloadAndCORS (0.00s)
+    --- PASS: TestChallengeSustainabilityEndpointPayloadAndCORS/CORSPreflightOPTIONS (0.00s)
+    --- PASS: TestChallengeSustainabilityEndpointPayloadAndCORS/MethodNotAllowed (0.00s)
+    --- PASS: TestChallengeSustainabilityEndpointPayloadAndCORS/GETSuccessAndSchemaValidation (0.00s)
+=== RUN   TestCarbonCalculationExact1000W1H
+--- PASS: TestCarbonCalculationExact1000W1H (0.00s)
+=== RUN   TestOutboundLiveCarbonMarketPricing
+2026/09/07 08:44:49 [carbon-market] outbound HTTP GET http://127.0.0.1:63520
+2026/09/07 08:44:49 [carbon-market] live carbon spot price fetched: $18.75/ton
+--- PASS: TestOutboundLiveCarbonMarketPricing (0.00s)
+=== RUN   TestCarbonMarketClientCachingBehavior
+2026/09/07 08:44:49 [carbon-market] outbound HTTP GET http://127.0.0.1:63521
+2026/09/07 08:44:49 [carbon-market] live carbon spot price fetched: $14.50/ton
+2026/09/07 08:44:49 [carbon-market] outbound HTTP GET http://127.0.0.1:63521
+2026/09/07 08:44:49 [carbon-market] live carbon spot price fetched: $14.50/ton
+--- PASS: TestCarbonMarketClientCachingBehavior (0.00s)
+=== RUN   TestCarbonMarketClientGracefulFallback
+2026/09/07 08:44:49 [carbon-market] outbound HTTP GET http://127.0.0.1:63522
+2026/09/07 08:44:49 [carbon-market] outbound fetch failed (unexpected HTTP status 500); using fallback $12.50/ton
+2026/09/07 08:44:49 [carbon-market] outbound HTTP GET http://127.0.0.1:63523
+2026/09/07 08:44:49 [carbon-market] outbound fetch failed (could not parse spot price from body: {not valid json); using fallback $12.50/ton
+2026/09/07 08:44:49 [carbon-market] outbound HTTP GET http://127.0.0.1:59998/nonexistent
+2026/09/07 08:44:49 [carbon-market] outbound fetch failed (Get "http://127.0.0.1:59998/nonexistent": dial tcp 127.0.0.1:59998: connect: operation not permitted); using fallback $12.50/ton
+--- PASS: TestCarbonMarketClientGracefulFallback (0.00s)
+=== RUN   TestPredictiveMaintenanceAlertGeneration
+2026/09/07 08:44:49 [carbon-market] outbound HTTP GET https://api.coingecko.com/api/v3/simple/price?ids=toucan-protocol-base-carbon-tonne&vs_currencies=usd
+2026/09/07 08:44:49 [carbon-market] outbound fetch failed (Get "https://api.coingecko.com/api/v3/simple/price?ids=toucan-protocol-base-carbon-tonne&vs_currencies=usd": tls: failed to verify certificate: x509: “api.coingecko.com” certificate is not trusted); using fallback $12.50/ton
+2026/09/07 08:44:49 [carbon-market] outbound HTTP GET https://api.coingecko.com/api/v3/simple/price?ids=toucan-protocol-base-carbon-tonne&vs_currencies=usd
+2026/09/07 08:44:49 [carbon-market] outbound fetch failed (Get "https://api.coingecko.com/api/v3/simple/price?ids=toucan-protocol-base-carbon-tonne&vs_currencies=usd": tls: failed to verify certificate: x509: “api.coingecko.com” certificate is not trusted); using fallback $12.50/ton
+2026/09/07 08:44:49 [carbon-market] outbound HTTP GET https://api.coingecko.com/api/v3/simple/price?ids=toucan-protocol-base-carbon-tonne&vs_currencies=usd
+2026/09/07 08:44:49 [carbon-market] outbound fetch failed (Get "https://api.coingecko.com/api/v3/simple/price?ids=toucan-protocol-base-carbon-tonne&vs_currencies=usd": tls: failed to verify certificate: x509: “api.coingecko.com” certificate is not trusted); using fallback $12.50/ton
+--- PASS: TestPredictiveMaintenanceAlertGeneration (0.00s)
+=== RUN   TestSpaceUtilizationCalculation
+--- PASS: TestSpaceUtilizationCalculation (0.00s)
+=== RUN   TestCarbonCreditRecommendationsMath
+--- PASS: TestCarbonCreditRecommendationsMath (0.00s)
+=== RUN   TestSustainabilityAPIEndpoint
+2026/09/07 08:44:49 [carbon-market] outbound HTTP GET https://api.coingecko.com/api/v3/simple/price?ids=toucan-protocol-base-carbon-tonne&vs_currencies=usd
+2026/09/07 08:44:49 [carbon-market] outbound fetch failed (Get "https://api.coingecko.com/api/v3/simple/price?ids=toucan-protocol-base-carbon-tonne&vs_currencies=usd": tls: failed to verify certificate: x509: “api.coingecko.com” certificate is not trusted); using fallback $12.50/ton
+--- PASS: TestSustainabilityAPIEndpoint (0.00s)
+=== RUN   TestChallenger2_PyTorchVarianceAndRealExecution
+    challenger2_ai_sustainability_test.go:76: [cold_idle] -> predicted_peak_load: 2.2270 MW
+    challenger2_ai_sustainability_test.go:76: [moderate_cool] -> predicted_peak_load: 2.2397 MW
+panic: test timed out after 5s
+	running tests:
+		TestChallenger2_PyTorchVarianceAndRealExecution (4s)
+
+goroutine 12595 [running]:
+testing.(*M).startAlarm.func1()
+	/usr/local/go/src/testing/testing.go:2802 +0x2cc
+created by time.goFunc
+	/usr/local/go/src/time/sleep.go:215 +0x38
+
+goroutine 1 [chan receive]:
+testing.(*T).Run(0x4f96916da248, {0x104a6f218?, 0x19c03d48047f03c0?}, 0x104e3dea0)
+	/usr/local/go/src/testing/testing.go:2109 +0x3bc
+testing.runTests.func1(0x4f96916da248)
+	/usr/local/go/src/testing/testing.go:2585 +0x40
+testing.tRunner(0x4f96916da248, 0x4f969179fc48)
+	/usr/local/go/src/testing/testing.go:2036 +0xc4
+testing.runTests({0x104a51713, 0x4}, {0x104a51713, 0x4}, 0x4f9691690390, {0x104eb5100, 0x6a, 0x6a}, {0x8080808080112438?, 0x104a561c5?, ...})
+	/usr/local/go/src/testing/testing.go:2583 +0x3f0
+testing.(*M).Run(0x4f969168f0e0)
+	/usr/local/go/src/testing/testing.go:2443 +0x578
+main.main()
+	_testmain.go:256 +0x80
+
+goroutine 12574 [syscall]:
+syscall.syscalln(0x104788ef0, {0x4f969166f648, 0x6, 0x6})
+	/usr/local/go/src/runtime/sys_darwin.go:38 +0x20
+syscall.syscall6(0x90010191948140?, 0x12defe090?, 0x106fd2de0?, 0x90?, 0x4f9691600808?, 0x4f969182c000?, 0x4f969166f6e8?)
+	/usr/local/go/src/syscall/syscall_darwin.go:388 +0x28
+syscall.wait4(0x4f969166f718?, 0x1047a52ac?, 0x90?, 0x104e29c20?)
+	/usr/local/go/src/syscall/zsyscall_darwin_arm64.go:44 +0x4c
+syscall.Wait4(0x4f9691740150?, 0x4f969166f754, 0x4f9691948140?, 0x4f96917400e0?)
+	/usr/local/go/src/syscall/syscall_bsd.go:144 +0x28
+os.(*Process).pidWait.func1(...)
+	/usr/local/go/src/os/exec_unix.go:64
+os.ignoringEINTR2[...](...)
+	/usr/local/go/src/os/file_posix.go:266
+os.(*Process).pidWait(0x4f969180c140)
+	/usr/local/go/src/os/exec_unix.go:63 +0x9c
+os.(*Process).wait(0x106fd2de0?)
+	/usr/local/go/src/os/exec_unix.go:28 +0x24
+os.(*Process).Wait(...)
+	/usr/local/go/src/os/exec.go:346
+os/exec.(*Cmd).Wait(0x4f9691638680)
+	/usr/local/go/src/os/exec/exec.go:930 +0x38
+os/exec.(*Cmd).Run(0x4f9691638680)
+	/usr/local/go/src/os/exec/exec.go:632 +0x38
+econ.executePythonInfer({0x104e46500, 0x4f9691a5f570}, {0x104a5177b, 0x4}, {0x104dc7560, 0x4f96915de450})
+	/Users/nguyenhoangkhoi/Documents/econ/server/forecast_ipc.go:162 +0x518
+econ.ExecuteLocalInference({0x104e46500, 0x4f9691a5f570}, {0x104a5177b, 0x4}, {0x4f9691812000, 0xc1, 0xd0})
+	/Users/nguyenhoangkhoi/Documents/econ/server/forecast_ipc.go:180 +0xfc
+econ.TestChallenger2_PyTorchVarianceAndRealExecution(0x4f96915e6fc8)
+	/Users/nguyenhoangkhoi/Documents/econ/server/challenger2_ai_sustainability_test.go:57 +0x4ac
+testing.tRunner(0x4f96915e6fc8, 0x104e3dea0)
+	/usr/local/go/src/testing/testing.go:2036 +0xc4
+created by testing.(*T).Run in goroutine 1
+	/usr/local/go/src/testing/testing.go:2101 +0x3a8
+
+goroutine 12594 [select]:
+os/exec.(*Cmd).watchCtx(0x4f9691638680, 0x4f9691902000)
+	/usr/local/go/src/os/exec/exec.go:797 +0x74
+created by os/exec.(*Cmd).Start in goroutine 12574
+	/usr/local/go/src/os/exec/exec.go:783 +0x69c
+
+goroutine 12160 [IO wait]:
+internal/poll.runtime_pollWait(0x12de56200, 0x72)
+	/usr/local/go/src/runtime/netpoll.go:351 +0xa0
+internal/poll.(*pollDesc).wait(0x4f969181a120?, 0x4f969162a200?, 0x1)
+	/usr/local/go/src/internal/poll/fd_poll_runtime.go:84 +0x28
+internal/poll.(*pollDesc).waitRead(...)
+	/usr/local/go/src/internal/poll/fd_poll_runtime.go:89
+internal/poll.(*FD).Read(0x4f969181a120, {0x4f969162a200, 0x200, 0x200})
+	/usr/local/go/src/internal/poll/fd_unix.go:165 +0x234
+os.(*File).read(...)
+	/usr/local/go/src/os/file_posix.go:29
+os.(*File).Read(0x4f969154e0f0, {0x4f969162a200?, 0x19d9247bea4db?, 0x0?})
+	/usr/local/go/src/os/file.go:144 +0x68
+bytes.(*Buffer).ReadFrom(0x4f96915dea50, {0x104e425d8, 0x4f969154e0f0})
+	/usr/local/go/src/bytes/buffer.go:229 +0x90
+io.copyBuffer({0x104e427c0, 0x4f96915dea50}, {0x104e425d8, 0x4f969154e0f0}, {0x0, 0x0, 0x0})
+	/usr/local/go/src/io/io.go:415 +0x14c
+io.Copy(...)
+	/usr/local/go/src/io/io.go:388
+os.genericWriteTo(0x4f9691890e01?, {0x104e427c0?, 0x4f96915dea50?})
+	/usr/local/go/src/os/file.go:295 +0x44
+os.(*File).WriteTo(0x104ea5f40?, {0x104e427c0?, 0x4f96915dea50?})
+	/usr/local/go/src/os/file.go:273 +0x5c
+io.copyBuffer({0x104e427c0, 0x4f96915dea50}, {0x104e42698, 0x4f969154e0f0}, {0x0, 0x0, 0x0})
+	/usr/local/go/src/io/io.go:411 +0x98
+io.Copy(...)
+	/usr/local/go/src/io/io.go:388
+os/exec.(*Cmd).writerDescriptor.func1()
+	/usr/local/go/src/os/exec/exec.go:602 +0x40
+os/exec.(*Cmd).Start.func2(0x4f9691970110?)
+	/usr/local/go/src/os/exec/exec.go:757 +0x30
+created by os/exec.(*Cmd).Start in goroutine 12574
+	/usr/local/go/src/os/exec/exec.go:756 +0x6c8
+
+goroutine 12593 [IO wait]:
+internal/poll.runtime_pollWait(0x12de55e00, 0x72)
+	/usr/local/go/src/runtime/netpoll.go:351 +0xa0
+internal/poll.(*pollDesc).wait(0x4f969181a1e0?, 0x4f96919b2400?, 0x1)
+	/usr/local/go/src/internal/poll/fd_poll_runtime.go:84 +0x28
+internal/poll.(*pollDesc).waitRead(...)
+	/usr/local/go/src/internal/poll/fd_poll_runtime.go:89
+internal/poll.(*FD).Read(0x4f969181a1e0, {0x4f96919b2400, 0x200, 0x200})
+	/usr/local/go/src/internal/poll/fd_unix.go:165 +0x234
+os.(*File).read(...)
+	/usr/local/go/src/os/file_posix.go:29
+os.(*File).Read(0x4f969154e100, {0x4f96919b2400?, 0x19d9247bea846?, 0x0?})
+	/usr/local/go/src/os/file.go:144 +0x68
+bytes.(*Buffer).ReadFrom(0x4f96915dea80, {0x104e425d8, 0x4f969154e100})
+	/usr/local/go/src/bytes/buffer.go:229 +0x90
+io.copyBuffer({0x104e427c0, 0x4f96915dea80}, {0x104e425d8, 0x4f969154e100}, {0x0, 0x0, 0x0})
+	/usr/local/go/src/io/io.go:415 +0x14c
+io.Copy(...)
+	/usr/local/go/src/io/io.go:388
+os.genericWriteTo(0x4f9691890e01?, {0x104e427c0?, 0x4f96915dea80?})
+	/usr/local/go/src/os/file.go:295 +0x44
+os.(*File).WriteTo(0x104ea5f40?, {0x104e427c0?, 0x4f96915dea80?})
+	/usr/local/go/src/os/file.go:273 +0x5c
+io.copyBuffer({0x104e427c0, 0x4f96915dea80}, {0x104e42698, 0x4f969154e100}, {0x0, 0x0, 0x0})
+	/usr/local/go/src/io/io.go:411 +0x98
+io.Copy(...)
+	/usr/local/go/src/io/io.go:388
+os/exec.(*Cmd).writerDescriptor.func1()
+	/usr/local/go/src/os/exec/exec.go:602 +0x40
+os/exec.(*Cmd).Start.func2(0x4f9691970110?)
+	/usr/local/go/src/os/exec/exec.go:757 +0x30
+created by os/exec.(*Cmd).Start in goroutine 12574
+	/usr/local/go/src/os/exec/exec.go:756 +0x6c8
+FAIL	econ	5.280s
+?   	econ/cli	[no test files]
+?   	econ/schema/Telemetry	[no test files]
+=== RUN   TestAdversarial_OccupancyVarianceZero
+=== RUN   TestAdversarial_OccupancyVarianceZero/ConstantNonZeroOccupancy_VarZero
+=== RUN   TestAdversarial_OccupancyVarianceZero/ZeroConstantOccupancy_AC_Left_Running
+    adversarial_challenger1_test.go:134: Empirical result for normally-empty room with AC running: issuedTurnOffAc = true
+--- PASS: TestAdversarial_OccupancyVarianceZero (0.00s)
+    --- PASS: TestAdversarial_OccupancyVarianceZero/ConstantNonZeroOccupancy_VarZero (0.00s)
+    --- PASS: TestAdversarial_OccupancyVarianceZero/ZeroConstantOccupancy_AC_Left_Running (0.00s)
+=== RUN   TestAdversarial_BoundaryN19vsN20
+=== RUN   TestAdversarial_BoundaryN19vsN20/VacancyAtN19vsN20_Mean8
+--- PASS: TestAdversarial_BoundaryN19vsN20 (0.00s)
+    --- PASS: TestAdversarial_BoundaryN19vsN20/VacancyAtN19vsN20_Mean8 (0.00s)
+=== RUN   TestAdversarial_ExtremeOutlierOccupancy
+=== RUN   TestAdversarial_ExtremeOutlierOccupancy/ObservationPoisoning_ExtremeHighValue
+    adversarial_challenger1_test.go:254: After 1,000,000 outlier: Mean = 28.571429, Var = 1.111224e+04, Std = 105.414633
+    adversarial_challenger1_test.go:265: Deviation for occ=0 after poison: -0.271039
+    adversarial_challenger1_test.go:272: Empirical result for occ=0 after 1M poison: triggered = true
+=== RUN   TestAdversarial_ExtremeOutlierOccupancy/ReadingOutlier_NegativeOccupancy
+    adversarial_challenger1_test.go:294: Negative occupancy (-100) produced: Deviation = -210.000000, Severity = warning
+=== RUN   TestAdversarial_ExtremeOutlierOccupancy/ReadingOutlier_ExtremePositiveOccupancy
+=== RUN   TestAdversarial_ExtremeOutlierOccupancy/ObservationOutlier_NaN_Inf_HandledSafely
+--- PASS: TestAdversarial_ExtremeOutlierOccupancy (0.00s)
+    --- PASS: TestAdversarial_ExtremeOutlierOccupancy/ObservationPoisoning_ExtremeHighValue (0.00s)
+    --- PASS: TestAdversarial_ExtremeOutlierOccupancy/ReadingOutlier_NegativeOccupancy (0.00s)
+    --- PASS: TestAdversarial_ExtremeOutlierOccupancy/ReadingOutlier_ExtremePositiveOccupancy (0.00s)
+    --- PASS: TestAdversarial_ExtremeOutlierOccupancy/ObservationOutlier_NaN_Inf_HandledSafely (0.00s)
+=== RUN   TestAdversarial_AcAlreadyOffScenarios
+=== RUN   TestAdversarial_AcAlreadyOffScenarios/IrState_OFF_Exact
+    adversarial_challenger1_test.go:402: [IrState_OFF_Exact] IrState=OFF -> issuedTurnOffAc=false (expected skip: true)
+=== RUN   TestAdversarial_AcAlreadyOffScenarios/IrState_Nil_Unknown
+    adversarial_challenger1_test.go:402: [IrState_Nil_Unknown] IrState=<nil> -> issuedTurnOffAc=true (expected skip: false)
+=== RUN   TestAdversarial_AcAlreadyOffScenarios/IrState_off_Lowercase
+    adversarial_challenger1_test.go:402: [IrState_off_Lowercase] IrState=off -> issuedTurnOffAc=false (expected skip: true)
+=== RUN   TestAdversarial_AcAlreadyOffScenarios/IrState_Off_MixedCase
+    adversarial_challenger1_test.go:402: [IrState_Off_MixedCase] IrState=Off -> issuedTurnOffAc=false (expected skip: true)
+=== RUN   TestAdversarial_AcAlreadyOffScenarios/IrState_STANDBY
+    adversarial_challenger1_test.go:402: [IrState_STANDBY] IrState=STANDBY -> issuedTurnOffAc=true (expected skip: false)
+=== RUN   TestAdversarial_AcAlreadyOffScenarios/IrState_COOL_22
+    adversarial_challenger1_test.go:402: [IrState_COOL_22] IrState=COOL_22 -> issuedTurnOffAc=true (expected skip: false)
+--- PASS: TestAdversarial_AcAlreadyOffScenarios (0.00s)
+    --- PASS: TestAdversarial_AcAlreadyOffScenarios/IrState_OFF_Exact (0.00s)
+    --- PASS: TestAdversarial_AcAlreadyOffScenarios/IrState_Nil_Unknown (0.00s)
+    --- PASS: TestAdversarial_AcAlreadyOffScenarios/IrState_off_Lowercase (0.00s)
+    --- PASS: TestAdversarial_AcAlreadyOffScenarios/IrState_Off_MixedCase (0.00s)
+    --- PASS: TestAdversarial_AcAlreadyOffScenarios/IrState_STANDBY (0.00s)
+    --- PASS: TestAdversarial_AcAlreadyOffScenarios/IrState_COOL_22 (0.00s)
+=== RUN   TestAdversarial_DSP_AdcRailAllZeroesAndAll4095
+    adversarial_challenger1_test.go:434: ProcessWindow(all 0s) = 0.000000 A
+    adversarial_challenger1_test.go:446: ProcessWindow(all 4095s) = 0.000000 A
+--- PASS: TestAdversarial_DSP_AdcRailAllZeroesAndAll4095 (0.00s)
+=== RUN   TestAdversarial_DSP_SampleStarvation
+--- PASS: TestAdversarial_DSP_SampleStarvation (0.00s)
+=== RUN   TestAdversarial_DSP_SpikeFilteringFidelity
+    adversarial_challenger1_test.go:535: ampsClean = 1.439832 A, ampsSpiked = 1.434265 A, diff = 0.005567 A
+--- PASS: TestAdversarial_DSP_SpikeFilteringFidelity (0.00s)
+=== RUN   TestAdversarial_DSP_ExactCppParity
+    adversarial_challenger1_test.go:578: SINE_2A: Go = 1.956525, C++ = 1.956525, diff = 0.000000
+    adversarial_challenger1_test.go:593: SINE_2A_SPIKED: Go = 1.949971, C++ = 1.949971, diff = 0.000000
+--- PASS: TestAdversarial_DSP_ExactCppParity (0.00s)
+=== RUN   TestAdversarialSolarGeometryArbitraryTimesAndExtremes
+--- PASS: TestAdversarialSolarGeometryArbitraryTimesAndExtremes (0.01s)
+=== RUN   TestSolarGeometryEquatorialNoonVersusMidnight
+--- PASS: TestSolarGeometryEquatorialNoonVersusMidnight (0.00s)
+=== RUN   TestAdversarialChillerCopAcrossExtremeThermalLift
+2026/09/07 08:44:48 [library] loaded ../data/programme-library.json v2: 15 programmes (2 critical), fresh-air 10 L/s/person, 8 occupancy profiles
+--- PASS: TestAdversarialChillerCopAcrossExtremeThermalLift (0.00s)
+=== RUN   TestAdversarialSupplyAirBoundsUnderErraticCoilLoads
+--- PASS: TestAdversarialSupplyAirBoundsUnderErraticCoilLoads (0.01s)
+=== RUN   TestAdversarialCompleteSensorOmission10000Ticks
+=== RUN   TestAdversarialCompleteSensorOmission10000Ticks/Commercial_Office_Tower
+2026/09/07 08:44:48 [building] reloaded: 735 zones, 735 VAVs
+=== RUN   TestAdversarialCompleteSensorOmission10000Ticks/Domestic_House
+2026/09/07 08:44:52 [building] reloaded: 5 zones, 5 VAVs
+--- PASS: TestAdversarialCompleteSensorOmission10000Ticks (4.33s)
+    --- PASS: TestAdversarialCompleteSensorOmission10000Ticks/Commercial_Office_Tower (4.29s)
+    --- PASS: TestAdversarialCompleteSensorOmission10000Ticks/Domestic_House (0.04s)
+=== RUN   TestAdversarialConcurrentBuildingSwitches
+2026/09/07 08:44:52 [building] reloaded: 5 zones, 5 VAVs
+2026/09/07 08:44:52 [building] reloaded: 735 zones, 735 VAVs
+2026/09/07 08:44:52 [edge] node "zone-office-lvl1" bound to zone zone-lobby-33-lvl10 (office, type "open-office")
+2026/09/07 08:44:52 [building] reloaded: 5 zones, 5 VAVs
+2026/09/07 08:44:52 [building] reloaded: 735 zones, 735 VAVs
+2026/09/07 08:44:52 [edge] node "zone-office-lvl1" bound to zone zone-lobby-33-lvl10 (office, type "open-office")
+2026/09/07 08:44:52 [building] reloaded: 5 zones, 5 VAVs
+2026/09/07 08:44:52 [building] reloaded: 735 zones, 735 VAVs
+2026/09/07 08:44:52 [edge] node "zone-office-lvl1" bound to zone zone-lobby-33-lvl10 (office, type "open-office")
+2026/09/07 08:44:52 [building] reloaded: 5 zones, 5 VAVs
+2026/09/07 08:44:52 [building] reloaded: 735 zones, 735 VAVs
+2026/09/07 08:44:52 [edge] node "zone-office-lvl1" bound to zone zone-lobby-33-lvl10 (office, type "open-office")
+2026/09/07 08:44:52 [building] reloaded: 5 zones, 5 VAVs
+2026/09/07 08:44:52 [building] reloaded: 735 zones, 735 VAVs
+2026/09/07 08:44:52 [edge] node "zone-office-lvl1" bound to zone zone-lobby-33-lvl10 (office, type "open-office")
+2026/09/07 08:44:52 [building] reloaded: 5 zones, 5 VAVs
+2026/09/07 08:44:52 [building] reloaded: 735 zones, 735 VAVs
+2026/09/07 08:44:52 [edge] node "zone-office-lvl1" bound to zone zone-lobby-33-lvl10 (office, type "open-office")
+2026/09/07 08:44:52 [building] reloaded: 5 zones, 5 VAVs
+2026/09/07 08:44:52 [building] reloaded: 735 zones, 735 VAVs
+2026/09/07 08:44:52 [edge] node "zone-office-lvl1" bound to zone zone-lobby-33-lvl10 (office, type "open-office")
+2026/09/07 08:44:52 [building] reloaded: 5 zones, 5 VAVs
+2026/09/07 08:44:53 [building] reloaded: 735 zones, 735 VAVs
+2026/09/07 08:44:53 [edge] node "zone-office-lvl1" bound to zone zone-lobby-33-lvl10 (office, type "open-office")
+2026/09/07 08:44:53 [building] reloaded: 5 zones, 5 VAVs
+2026/09/07 08:44:53 [building] reloaded: 735 zones, 735 VAVs
+2026/09/07 08:44:53 [edge] node "zone-office-lvl1" bound to zone zone-lobby-33-lvl10 (office, type "open-office")
+2026/09/07 08:44:53 [building] reloaded: 5 zones, 5 VAVs
+2026/09/07 08:44:53 [building] reloaded: 735 zones, 735 VAVs
+2026/09/07 08:44:53 [edge] node "zone-office-lvl1" bound to zone zone-lobby-33-lvl10 (office, type "open-office")
+2026/09/07 08:44:53 [building] reloaded: 5 zones, 5 VAVs
+2026/09/07 08:44:53 [building] reloaded: 735 zones, 735 VAVs
+2026/09/07 08:44:53 [edge] node "zone-office-lvl1" bound to zone zone-lobby-33-lvl10 (office, type "open-office")
+2026/09/07 08:44:53 [building] reloaded: 5 zones, 5 VAVs
+2026/09/07 08:44:53 [building] reloaded: 735 zones, 735 VAVs
+2026/09/07 08:44:53 [edge] node "zone-office-lvl1" bound to zone zone-lobby-33-lvl10 (office, type "open-office")
+2026/09/07 08:44:53 [building] reloaded: 5 zones, 5 VAVs
+2026/09/07 08:44:53 [building] reloaded: 735 zones, 735 VAVs
+2026/09/07 08:44:53 [edge] node "zone-office-lvl1" bound to zone zone-lobby-33-lvl10 (office, type "open-office")
+2026/09/07 08:44:53 [building] reloaded: 5 zones, 5 VAVs
+2026/09/07 08:44:53 [building] reloaded: 735 zones, 735 VAVs
+2026/09/07 08:44:53 [edge] node "zone-office-lvl1" bound to zone zone-lobby-33-lvl10 (office, type "open-office")
+2026/09/07 08:44:53 [building] reloaded: 5 zones, 5 VAVs
+2026/09/07 08:44:53 [building] reloaded: 735 zones, 735 VAVs
+2026/09/07 08:44:53 [edge] node "zone-office-lvl1" bound to zone zone-lobby-33-lvl10 (office, type "open-office")
+2026/09/07 08:44:53 [building] reloaded: 5 zones, 5 VAVs
+2026/09/07 08:44:53 [building] reloaded: 735 zones, 735 VAVs
+2026/09/07 08:44:53 [edge] node "zone-office-lvl1" bound to zone zone-lobby-33-lvl10 (office, type "open-office")
+2026/09/07 08:44:53 [building] reloaded: 5 zones, 5 VAVs
+2026/09/07 08:44:53 [building] reloaded: 735 zones, 735 VAVs
+2026/09/07 08:44:53 [edge] node "zone-office-lvl1" bound to zone zone-lobby-33-lvl10 (office, type "open-office")
+2026/09/07 08:44:53 [building] reloaded: 5 zones, 5 VAVs
+2026/09/07 08:44:53 [building] reloaded: 735 zones, 735 VAVs
+2026/09/07 08:44:53 [edge] node "zone-office-lvl1" bound to zone zone-lobby-33-lvl10 (office, type "open-office")
+2026/09/07 08:44:53 [building] reloaded: 5 zones, 5 VAVs
+2026/09/07 08:44:53 [building] reloaded: 735 zones, 735 VAVs
+2026/09/07 08:44:53 [edge] node "zone-office-lvl1" bound to zone zone-lobby-33-lvl10 (office, type "open-office")
+2026/09/07 08:44:53 [building] reloaded: 5 zones, 5 VAVs
+panic: test timed out after 5s
+	running tests:
+		TestAdversarialConcurrentBuildingSwitches (1s)
+
+goroutine 107 [running]:
+testing.(*M).startAlarm.func1()
+	/usr/local/go/src/testing/testing.go:2802 +0x2cc
+created by time.goFunc
+	/usr/local/go/src/time/sleep.go:215 +0x38
+
+goroutine 1 [chan receive]:
+testing.(*T).Run(0x938c2da248, {0x103189f3d?, 0x18aed130030323e0?}, 0x103412bb8)
+	/usr/local/go/src/testing/testing.go:2109 +0x3bc
+testing.runTests.func1(0x938c2da248)
+	/usr/local/go/src/testing/testing.go:2585 +0x40
+testing.tRunner(0x938c2da248, 0x938c28ac48)
+	/usr/local/go/src/testing/testing.go:2036 +0xc4
+testing.runTests({0x103179c4b, 0x4}, {0x10317d584, 0xf}, 0x938c290390, {0x103479940, 0x8f, 0x8f}, {0x808080808080540a?, 0x10317d5b1?, ...})
+	/usr/local/go/src/testing/testing.go:2583 +0x3f0
+testing.(*M).Run(0x938c28e960)
+	/usr/local/go/src/testing/testing.go:2443 +0x578
+main.main()
+	_testmain.go:330 +0x80
+
+goroutine 72 [sync.WaitGroup.Wait]:
+sync.runtime_SemacquireWaitGroup(0x102f8fb50?, 0x70?)
+	/usr/local/go/src/runtime/sema.go:114 +0x38
+sync.(*WaitGroup).Wait(0x938c1d4d60)
+	/usr/local/go/src/sync/waitgroup.go:206 +0xa8
+econ/simulation.TestAdversarialConcurrentBuildingSwitches(0x938c552008)
+	/Users/nguyenhoangkhoi/Documents/econ/server/simulation/adversarial_physics_stress_test.go:533 +0x2c4
+testing.tRunner(0x938c552008, 0x103412bb8)
+	/usr/local/go/src/testing/testing.go:2036 +0xc4
+created by testing.(*T).Run in goroutine 1
+	/usr/local/go/src/testing/testing.go:2101 +0x3a8
+
+goroutine 73 [sleep]:
+time.Sleep(0x4c4b40)
+	/usr/local/go/src/runtime/time.go:363 +0x150
+econ/simulation.TestAdversarialConcurrentBuildingSwitches.func1()
+	/Users/nguyenhoangkhoi/Documents/econ/server/simulation/adversarial_physics_stress_test.go:449 +0x5c
+created by econ/simulation.TestAdversarialConcurrentBuildingSwitches in goroutine 72
+	/Users/nguyenhoangkhoi/Documents/econ/server/simulation/adversarial_physics_stress_test.go:439 +0x168
+
+goroutine 74 [sleep]:
+time.Sleep(0x989680)
+	/usr/local/go/src/runtime/time.go:363 +0x150
+econ/simulation.TestAdversarialConcurrentBuildingSwitches.func2()
+	/Users/nguyenhoangkhoi/Documents/econ/server/simulation/adversarial_physics_stress_test.go:490 +0x98
+created by econ/simulation.TestAdversarialConcurrentBuildingSwitches in goroutine 72
+	/Users/nguyenhoangkhoi/Documents/econ/server/simulation/adversarial_physics_stress_test.go:455 +0x214
+
+goroutine 75 [sleep]:
+time.Sleep(0xf4240)
+	/usr/local/go/src/runtime/time.go:363 +0x150
+econ/simulation.TestAdversarialConcurrentBuildingSwitches.func3()
+	/Users/nguyenhoangkhoi/Documents/econ/server/simulation/adversarial_physics_stress_test.go:528 +0x10c
+created by econ/simulation.TestAdversarialConcurrentBuildingSwitches in goroutine 72
+	/Users/nguyenhoangkhoi/Documents/econ/server/simulation/adversarial_physics_stress_test.go:499 +0x23c
+
+goroutine 76 [sleep]:
+time.Sleep(0xf4240)
+	/usr/local/go/src/runtime/time.go:363 +0x150
+econ/simulation.TestAdversarialConcurrentBuildingSwitches.func3()
+	/Users/nguyenhoangkhoi/Documents/econ/server/simulation/adversarial_physics_stress_test.go:528 +0x10c
+created by econ/simulation.TestAdversarialConcurrentBuildingSwitches in goroutine 72
+	/Users/nguyenhoangkhoi/Documents/econ/server/simulation/adversarial_physics_stress_test.go:499 +0x23c
+
+goroutine 77 [runnable]:
+math/rand.(*Rand).Intn(0x938c3d3f50?, 0x7?)
+	/usr/local/go/src/math/rand/rand.go:178 +0x74
+econ/simulation.TestAdversarialConcurrentBuildingSwitches.func3()
+	/Users/nguyenhoangkhoi/Documents/econ/server/simulation/adversarial_physics_stress_test.go:504 +0x128
+created by econ/simulation.TestAdversarialConcurrentBuildingSwitches in goroutine 72
+	/Users/nguyenhoangkhoi/Documents/econ/server/simulation/adversarial_physics_stress_test.go:499 +0x23c
+
+goroutine 78 [sleep]:
+time.Sleep(0xf4240)
+	/usr/local/go/src/runtime/time.go:363 +0x150
+econ/simulation.TestAdversarialConcurrentBuildingSwitches.func3()
+	/Users/nguyenhoangkhoi/Documents/econ/server/simulation/adversarial_physics_stress_test.go:528 +0x10c
+created by econ/simulation.TestAdversarialConcurrentBuildingSwitches in goroutine 72
+	/Users/nguyenhoangkhoi/Documents/econ/server/simulation/adversarial_physics_stress_test.go:499 +0x23c
+
+goroutine 79 [sleep]:
+time.Sleep(0xf4240)
+	/usr/local/go/src/runtime/time.go:363 +0x150
+econ/simulation.TestAdversarialConcurrentBuildingSwitches.func3()
+	/Users/nguyenhoangkhoi/Documents/econ/server/simulation/adversarial_physics_stress_test.go:528 +0x10c
+created by econ/simulation.TestAdversarialConcurrentBuildingSwitches in goroutine 72
+	/Users/nguyenhoangkhoi/Documents/econ/server/simulation/adversarial_physics_stress_test.go:499 +0x23c
+
+goroutine 80 [sleep]:
+time.Sleep(0xf4240)
+	/usr/local/go/src/runtime/time.go:363 +0x150
+econ/simulation.TestAdversarialConcurrentBuildingSwitches.func3()
+	/Users/nguyenhoangkhoi/Documents/econ/server/simulation/adversarial_physics_stress_test.go:528 +0x10c
+created by econ/simulation.TestAdversarialConcurrentBuildingSwitches in goroutine 72
+	/Users/nguyenhoangkhoi/Documents/econ/server/simulation/adversarial_physics_stress_test.go:499 +0x23c
+
+goroutine 97 [sleep]:
+time.Sleep(0xf4240)
+	/usr/local/go/src/runtime/time.go:363 +0x150
+econ/simulation.TestAdversarialConcurrentBuildingSwitches.func3()
+	/Users/nguyenhoangkhoi/Documents/econ/server/simulation/adversarial_physics_stress_test.go:528 +0x10c
+created by econ/simulation.TestAdversarialConcurrentBuildingSwitches in goroutine 72
+	/Users/nguyenhoangkhoi/Documents/econ/server/simulation/adversarial_physics_stress_test.go:499 +0x23c
+
+goroutine 98 [sleep]:
+time.Sleep(0xf4240)
+	/usr/local/go/src/runtime/time.go:363 +0x150
+econ/simulation.TestAdversarialConcurrentBuildingSwitches.func3()
+	/Users/nguyenhoangkhoi/Documents/econ/server/simulation/adversarial_physics_stress_test.go:528 +0x10c
+created by econ/simulation.TestAdversarialConcurrentBuildingSwitches in goroutine 72
+	/Users/nguyenhoangkhoi/Documents/econ/server/simulation/adversarial_physics_stress_test.go:499 +0x23c
+
+goroutine 99 [sleep]:
+time.Sleep(0xf4240)
+	/usr/local/go/src/runtime/time.go:363 +0x150
+econ/simulation.TestAdversarialConcurrentBuildingSwitches.func3()
+	/Users/nguyenhoangkhoi/Documents/econ/server/simulation/adversarial_physics_stress_test.go:528 +0x10c
+created by econ/simulation.TestAdversarialConcurrentBuildingSwitches in goroutine 72
+	/Users/nguyenhoangkhoi/Documents/econ/server/simulation/adversarial_physics_stress_test.go:499 +0x23c
+
+goroutine 100 [sleep]:
+time.Sleep(0xf4240)
+	/usr/local/go/src/runtime/time.go:363 +0x150
+econ/simulation.TestAdversarialConcurrentBuildingSwitches.func3()
+	/Users/nguyenhoangkhoi/Documents/econ/server/simulation/adversarial_physics_stress_test.go:528 +0x10c
+created by econ/simulation.TestAdversarialConcurrentBuildingSwitches in goroutine 72
+	/Users/nguyenhoangkhoi/Documents/econ/server/simulation/adversarial_physics_stress_test.go:499 +0x23c
+
+goroutine 101 [sleep]:
+time.Sleep(0xf4240)
+	/usr/local/go/src/runtime/time.go:363 +0x150
+econ/simulation.TestAdversarialConcurrentBuildingSwitches.func3()
+	/Users/nguyenhoangkhoi/Documents/econ/server/simulation/adversarial_physics_stress_test.go:528 +0x10c
+created by econ/simulation.TestAdversarialConcurrentBuildingSwitches in goroutine 72
+	/Users/nguyenhoangkhoi/Documents/econ/server/simulation/adversarial_physics_stress_test.go:499 +0x23c
+
+goroutine 102 [sleep]:
+time.Sleep(0xf4240)
+	/usr/local/go/src/runtime/time.go:363 +0x150
+econ/simulation.TestAdversarialConcurrentBuildingSwitches.func3()
+	/Users/nguyenhoangkhoi/Documents/econ/server/simulation/adversarial_physics_stress_test.go:528 +0x10c
+created by econ/simulation.TestAdversarialConcurrentBuildingSwitches in goroutine 72
+	/Users/nguyenhoangkhoi/Documents/econ/server/simulation/adversarial_physics_stress_test.go:499 +0x23c
+
+goroutine 103 [sleep]:
+time.Sleep(0xf4240)
+	/usr/local/go/src/runtime/time.go:363 +0x150
+econ/simulation.TestAdversarialConcurrentBuildingSwitches.func3()
+	/Users/nguyenhoangkhoi/Documents/econ/server/simulation/adversarial_physics_stress_test.go:528 +0x10c
+created by econ/simulation.TestAdversarialConcurrentBuildingSwitches in goroutine 72
+	/Users/nguyenhoangkhoi/Documents/econ/server/simulation/adversarial_physics_stress_test.go:499 +0x23c
+
+goroutine 104 [sleep]:
+time.Sleep(0xf4240)
+	/usr/local/go/src/runtime/time.go:363 +0x150
+econ/simulation.TestAdversarialConcurrentBuildingSwitches.func3()
+	/Users/nguyenhoangkhoi/Documents/econ/server/simulation/adversarial_physics_stress_test.go:528 +0x10c
+created by econ/simulation.TestAdversarialConcurrentBuildingSwitches in goroutine 72
+	/Users/nguyenhoangkhoi/Documents/econ/server/simulation/adversarial_physics_stress_test.go:499 +0x23c
+
+goroutine 105 [sleep]:
+time.Sleep(0xf4240)
+	/usr/local/go/src/runtime/time.go:363 +0x150
+econ/simulation.TestAdversarialConcurrentBuildingSwitches.func3()
+	/Users/nguyenhoangkhoi/Documents/econ/server/simulation/adversarial_physics_stress_test.go:528 +0x10c
+created by econ/simulation.TestAdversarialConcurrentBuildingSwitches in goroutine 72
+	/Users/nguyenhoangkhoi/Documents/econ/server/simulation/adversarial_physics_stress_test.go:499 +0x23c
+
+goroutine 106 [sleep]:
+time.Sleep(0xf4240)
+	/usr/local/go/src/runtime/time.go:363 +0x150
+econ/simulation.TestAdversarialConcurrentBuildingSwitches.func3()
+	/Users/nguyenhoangkhoi/Documents/econ/server/simulation/adversarial_physics_stress_test.go:528 +0x10c
+created by econ/simulation.TestAdversarialConcurrentBuildingSwitches in goroutine 72
+	/Users/nguyenhoangkhoi/Documents/econ/server/simulation/adversarial_physics_stress_test.go:499 +0x23c
+FAIL	econ/simulation	5.260s
+FAIL

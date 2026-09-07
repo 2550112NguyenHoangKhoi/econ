@@ -13,12 +13,26 @@ running ECON digital twin from your building's own telemetry.
 | `recommender.py` | A dependency-free (**Python 3 standard library only**) recommender that reproduces the engine's σ-scoring. Feed it your current readings; it prints the same recommendations and alerts the dashboard shows. |
 | `sample_readings.json` | An example input so you can try it immediately. |
 | `forecaster/` | The trained **LSTM peak-load forecaster** (`model_weights.pth`, `scaler.pkl`, `config.json`) — present when the forecasting service was reachable at export time. Running it needs PyTorch; the recommender does not. |
+| `infer.py` | Standalone CLI & stdin runner for the local models (LSTM and TimesFM). |
 | `MANIFEST.json` | Provenance: when it was exported, the model's maturity, and which pieces are included. |
 
 ## Run it
 
+### 1. Offline Anomaly Recommender
 ```bash
 python3 recommender.py sample_readings.json
+```
+
+### 2. Standalone Peak-Load Forecaster (`infer.py`)
+```bash
+# Run LSTM inference on sensor sequence
+python3 infer.py --model lstm --input '{"sensor_sequence": [[24.5, 0.4], [25.0, 0.5], [25.2, 0.6], [25.5, 0.7], [26.0, 0.8], [26.2, 0.8], [26.5, 0.9], [26.8, 0.9], [27.0, 1.0], [27.2, 1.0], [27.5, 1.0], [28.0, 1.0]], "outdoor_temp": 32.0, "outdoor_humidity": 65.0}'
+
+# Or pipe JSON via standard input
+cat input.json | python3 infer.py
+
+# Run TimesFM zero-shot foundation model (if available)
+python3 infer.py --model timesfm --input '{"history": [1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9], "horizon": 12}'
 ```
 
 - **stdout** is machine-readable JSON (pipe it into your monitoring).

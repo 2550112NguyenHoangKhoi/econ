@@ -40,7 +40,7 @@ import (
 const (
 	plugActiveWPerOcc  = 65.0 // W per present occupant (coincidence-weighted average draw)
 	plugStandbyWPerM2  = 1.2  // W/m² of always-on phantom load (idle equipment, standby)
-	plugSwitchableFrac = 0.7   // portion of standby on sweepable circuits; the rest
+	plugSwitchableFrac = 0.7  // portion of standby on sweepable circuits; the rest
 	// (network gear, fridges, anything on the critical way) stays energized
 	plugDefaultAreaM2 = 25.0 // fallback when a zone has no usable polygon
 )
@@ -116,14 +116,18 @@ func (z *ZoneSim) plugFresh() bool {
 }
 
 // plugNowW returns the zone's current plug draw and the standby component of it.
-// A live clamp measurement wins outright; otherwise the model: always-on standby
-// (reduced to the non-switchable floor while shed) plus per-occupant active load.
+// When stripW is reporting (ACS712 power strip sensor), it maps directly to plugs draw.
+// Otherwise, a live clamp measurement wins; falling back to the baseline model if stale.
 func (z *ZoneSim) plugNowW() (total, standby float64) {
 	standby = z.PlugStandbyW
 	if z.PlugShed {
 		standby = z.PlugStandbyW * (1 - plugSwitchableFrac)
 	}
 	total = standby + float64(z.Occupancy)*plugActiveWPerOcc
+	if z.stripFresh() {
+		// Strip measurement represents active plug load draw (ACS712 power strip sensor)
+		return z.HwStripW, math.Min(z.HwStripW, standby)
+	}
 	if z.plugFresh() {
 		// Measured circuits report what the clamp reads; the standby attribution is
 		// capped by the measurement so the split can never exceed reality.
@@ -220,7 +224,7 @@ func (e *Engine) PlugSnapshot(topN int) PlugStatus {
 			s.ShedZones++
 			s.ShedKw += z.PlugStandbyW * plugSwitchableFrac / 1000
 		}
-		measured := z.plugFresh()
+		measured := z.stripFresh() || z.plugFresh()
 		if measured {
 			s.MeteredZones++
 		}

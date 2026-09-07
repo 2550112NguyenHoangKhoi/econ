@@ -186,6 +186,7 @@ func TestChallengePredictiveMaintenanceDiagnostics(t *testing.T) {
 				"zone-strip": {Type: "open-office", AreaM2: 50.0, HwStripW: 2000.0},
 			},
 		}
+		engineAtBoundary.SetMode(simulation.ModeReal)
 		tracker := newCarbonTracker(engineAtBoundary)
 		snap := tracker.Snapshot(engineAtBoundary, now)
 		for _, w := range snap.PredictiveMaintenance.Warnings {
@@ -200,6 +201,7 @@ func TestChallengePredictiveMaintenanceDiagnostics(t *testing.T) {
 				"zone-strip": {Type: "open-office", AreaM2: 50.0, HwStripW: 2000.1},
 			},
 		}
+		engineOver.SetMode(simulation.ModeReal)
 		snapOver := tracker.Snapshot(engineOver, now.Add(time.Second))
 		found := false
 		for _, w := range snapOver.PredictiveMaintenance.Warnings {
@@ -226,6 +228,7 @@ func TestChallengePredictiveMaintenanceDiagnostics(t *testing.T) {
 				"zone-ac": {Type: "open-office", AreaM2: 50.0, HwAcW: 3500.0},
 			},
 		}
+		engineAtBoundary.SetMode(simulation.ModeReal)
 		tracker := newCarbonTracker(engineAtBoundary)
 		snap := tracker.Snapshot(engineAtBoundary, now)
 		for _, w := range snap.PredictiveMaintenance.Warnings {
@@ -240,6 +243,7 @@ func TestChallengePredictiveMaintenanceDiagnostics(t *testing.T) {
 				"zone-ac": {Type: "open-office", AreaM2: 50.0, HwAcW: 3500.1},
 			},
 		}
+		engineOver.SetMode(simulation.ModeReal)
 		snapOver := tracker.Snapshot(engineOver, now.Add(time.Second))
 		found := false
 		for _, w := range snapOver.PredictiveMaintenance.Warnings {
@@ -265,6 +269,7 @@ func TestChallengePredictiveMaintenanceDiagnostics(t *testing.T) {
 				"zone-surge": {Type: "open-office", AreaM2: 50.0, HwStripW: 300.0},
 			},
 		}
+		engine.SetMode(simulation.ModeReal)
 		tracker := newCarbonTracker(engine)
 		// Tick 1: establish baseline 300W
 		_ = tracker.Snapshot(engine, now)
@@ -315,6 +320,7 @@ func TestChallengePredictiveMaintenanceDiagnostics(t *testing.T) {
 				"zone-rt": {Type: "open-office", AreaM2: 50.0, HwStripW: 100.0},
 			},
 		}
+		engine.SetMode(simulation.ModeReal)
 		tracker := newCarbonTracker(engine)
 
 		// Sub-case: runtime = 2000.0h exact boundary -> NO alert
@@ -386,6 +392,7 @@ func TestChallengeSustainabilityEndpointPayloadAndCORS(t *testing.T) {
 			},
 		},
 	}
+	engine.SetMode(simulation.ModeReal)
 	tracker := newCarbonTracker(engine)
 	tracker.SetCumulativeEmissions(62.5) // over budget (> 50 kg)
 	tracker.SetCarbonBudget(50.0)
