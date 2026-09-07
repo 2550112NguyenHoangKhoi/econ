@@ -28,6 +28,22 @@ OV7670Driver::~OV7670Driver() {}
 
 bool OV7670Driver::init() {
 #if defined(ESP32) && !defined(HOST_TEST)
+  // First, probe the OV7670 on I2C to see if it's physically present.
+  // This avoids calling esp_camera_init() when no camera is attached,
+  // which hangs indefinitely and triggers a watchdog reset.
+  Wire.begin(PIN_CAM_SIOD, PIN_CAM_SIOC, 100000);
+  Wire.beginTransmission(OV7670_I2C_ADDR); // 0x21
+  uint8_t i2c_err = Wire.endTransmission();
+  if (i2c_err != 0) {
+    Serial.printf("[camera] OV7670 not found on I2C (addr=0x%02X, err=%d) -> Simulation Mode\n",
+                  OV7670_I2C_ADDR, i2c_err);
+    state_ = DRIVER_SIMULATION_MODE;
+    hardware_present_ = false;
+    mock_mode_ = true;
+    return true;
+  }
+  Serial.println("[camera] OV7670 detected on I2C, initializing esp_camera...");
+
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
   config.ledc_timer = LEDC_TIMER_0;
@@ -61,9 +77,6 @@ bool OV7670Driver::init() {
     mock_mode_ = true;
     return true;
   }
-  
-  // esp_camera reconfigures I2C pins, so we must safely let Wire coexist
-  // Wire.begin is called in main.cpp after this init!
   
   Serial.println("[camera] esp_camera Initialized Successfully (QQVGA Grayscale 160x120)");
   state_ = DRIVER_HARDWARE_OK;
