@@ -99,6 +99,20 @@ func loadForecastHandler(engine *simulation.Engine) http.HandlerFunc {
 		body, _ := json.Marshal(loadForecastRequest{History: history, Horizon: horizon})
 		resp, err := client.Post(base+"/forecast/load", "application/json", bytes.NewReader(body))
 		if err != nil {
+			if isIPCEnabled() {
+				if ipcRes, ipcErr := queryTimesFMIPC(engine, horizon, history); ipcErr == nil && ipcRes.Available {
+					out := map[string]interface{}{
+						"forecast":        ipcRes.Series,
+						"quantiles":       ipcRes.Quantiles,
+						"engine":          "timesfm",
+						"history_samples": len(history),
+						"step_minutes":    int(histIntervalMinutes),
+						"horizon_minutes": horizon * int(histIntervalMinutes),
+					}
+					json.NewEncoder(w).Encode(out)
+					return
+				}
+			}
 			log.Printf("[forecast] TimesFM service unreachable at %s: %v", base, err)
 			w.WriteHeader(http.StatusServiceUnavailable)
 			json.NewEncoder(w).Encode(map[string]string{
@@ -313,12 +327,22 @@ func queryLSTM(engine *simulation.Engine, client *http.Client, base string) engi
 	body, _ := json.Marshal(req)
 	resp, err := client.Post(base+"/predict", "application/json", bytes.NewReader(body))
 	if err != nil {
+		if isIPCEnabled() {
+			if ipcRes, ipcErr := queryLSTMIPC(engine, req, realSamples); ipcErr == nil && ipcRes.Available {
+				return ipcRes
+			}
+		}
 		res.Error = "forecasting service unreachable: " + err.Error()
 		return res
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		if isIPCEnabled() {
+			if ipcRes, ipcErr := queryLSTMIPC(engine, req, realSamples); ipcErr == nil && ipcRes.Available {
+				return ipcRes
+			}
+		}
 		// 503 here means train.py has not been run — the honest and common case.
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		res.Error = fmt.Sprintf("forecaster returned %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
@@ -355,12 +379,22 @@ func queryTimesFM(engine *simulation.Engine, client *http.Client, base string, h
 	body, _ := json.Marshal(loadForecastRequest{History: history, Horizon: horizon})
 	resp, err := client.Post(base+"/forecast/load", "application/json", bytes.NewReader(body))
 	if err != nil {
+		if isIPCEnabled() {
+			if ipcRes, ipcErr := queryTimesFMIPC(engine, horizon, history); ipcErr == nil && ipcRes.Available {
+				return ipcRes
+			}
+		}
 		res.Error = "forecasting service unreachable: " + err.Error()
 		return res
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		if isIPCEnabled() {
+			if ipcRes, ipcErr := queryTimesFMIPC(engine, horizon, history); ipcErr == nil && ipcRes.Available {
+				return ipcRes
+			}
+		}
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		res.Error = fmt.Sprintf("forecaster returned %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
 		return res
@@ -540,6 +574,27 @@ func forecastHandler(engine *simulation.Engine) http.HandlerFunc {
 		body, _ := json.Marshal(req)
 		resp, err := client.Post(base+"/predict", "application/json", bytes.NewReader(body))
 		if err != nil {
+			if isIPCEnabled() {
+				if ipcRes, ipcErr := queryLSTMIPC(engine, req, realSamples); ipcErr == nil && ipcRes.Available && ipcRes.PeakMw != nil {
+					out := map[string]interface{}{
+						"predicted_peak_load": *ipcRes.PeakMw,
+						"window_real_samples": realSamples,
+						"window_len":          forecastWindowLen,
+						"weather_source":      "local_ipc",
+						"engine":              "lstm",
+					}
+					lo, hi, n := engine.ObservedLoadRange()
+					checkPlausible(&ipcRes, lo, hi, n)
+					out["implausible"] = ipcRes.Implausible
+					out["plausibility_judged"] = ipcRes.Judged
+					if ipcRes.Plausibility != "" {
+						out["plausibility"] = ipcRes.Plausibility
+					}
+					out["observed_min_mw"], out["observed_max_mw"], out["observed_samples"] = lo, hi, n
+					json.NewEncoder(w).Encode(out)
+					return
+				}
+			}
 			log.Printf("[forecast] service unreachable at %s: %v", base, err)
 			w.WriteHeader(http.StatusServiceUnavailable)
 			json.NewEncoder(w).Encode(map[string]string{

@@ -12,6 +12,7 @@ import MaintenanceDrawer from './MaintenanceDrawer';
 import BlueprintImportPanel from './BlueprintImportPanel';
 import AiInsightsPanel from './AiInsightsPanel';
 import PlugLoadPanel from './PlugLoadPanel';
+import SustainabilityRecommendationsPanel from './SustainabilityRecommendationsPanel';
 import * as flatbuffers from 'flatbuffers';
 import MobileImpactScreen from './MobileImpactScreen';
 import LiveWeatherBackground from './LiveWeatherBackground';
@@ -28,6 +29,7 @@ import StreamStatus from './StreamStatus';
 import CanvasErrorBoundary from './CanvasErrorBoundary';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Canvas } from '@react-three/fiber';
+import { useOperationMode } from './useOperationMode';
 
 
 // --- P&ID ENGINEERING CUSTOM NODES ---
@@ -327,6 +329,7 @@ function App() {
   const [isLeftPanelOpen, setIsLeftPanelOpen] = useState(true);
   const [leftPanelSize, setLeftPanelSize] = useState({ w: 380 });
   const [showWindSim, setShowWindSim] = useState(true);
+  const { mode: operationMode, isReal: isRealMode, setMode: setOperationMode } = useOperationMode();
 
   useEffect(() => {
     const unsub = subscribeBuildingChange((b, type) => {
@@ -341,8 +344,14 @@ function App() {
     return unsub;
   }, []);
 
+  useEffect(() => {
+    if (isRealMode && activeLeftTab === 'sustainability') {
+      setActiveLeftTab('ai');
+    }
+  }, [isRealMode, activeLeftTab]);
+
   const handleToggleBuildingModel = (type) => {
-    setBuildingModelType(type);
+    setBuildingModelType(type, { force: true });
     setBuildingModelTypeState(type);
     const newBld = getBuilding();
     setCurrentBuilding(newBld);
@@ -1085,10 +1094,41 @@ function App() {
               >
                 PLUGS
               </button>
+              {!isRealMode && (
+                <button
+                  data-testid="tab-sustainability"
+                  onClick={() => setActiveLeftTab('sustainability')}
+                  style={{
+                    flex: '1 1 auto',
+                    padding: '10px 6px',
+                    background: activeLeftTab === 'sustainability' ? 'rgba(16, 185, 129, 0.12)' : 'transparent',
+                    color: activeLeftTab === 'sustainability' ? '#10b981' : 'var(--text-secondary)',
+                    border: 'none',
+                    borderBottom: activeLeftTab === 'sustainability' ? '2px solid #10b981' : '2px solid transparent',
+                    cursor: 'pointer',
+                    fontWeight: 'bold',
+                    fontSize: '11px',
+                    whiteSpace: 'nowrap',
+                    letterSpacing: '0.02em',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    minWidth: 'fit-content',
+                    transition: 'all 0.15s ease'
+                  }}
+                >
+                  SUSTAINABILITY
+                </button>
+              )}
             </div>
             
             <div style={{ flex: 1, overflowY: 'auto', padding: '16px' }}>
-              {activeLeftTab === 'plugs' ? (
+              {activeLeftTab === 'sustainability' ? (
+                <SustainabilityRecommendationsPanel
+                  simData={simData}
+                  sendManualOverride={sendManualOverride}
+                />
+              ) : activeLeftTab === 'plugs' ? (
                 <PlugLoadPanel simData={simData} />
               ) : activeLeftTab === 'logs' ? (
                 <TelemetryLogs simData={simData} />
@@ -1146,7 +1186,7 @@ function App() {
         />
       )}
 
-      {/* VIEW MODE TOGGLE (Floating Top Center-Left) */}
+      {/* VIEW & OPERATION MODE CONTROLS (Floating Top Center) */}
       <div style={{
         position: 'absolute',
         top: '1.5rem',
@@ -1154,9 +1194,10 @@ function App() {
         transform: 'translateX(-50%)',
         zIndex: 20,
         display: 'flex', 
-        gap: '4px', 
+        alignItems: 'center',
+        gap: '6px', 
         background: 'rgba(0,0,0,0.6)', 
-        padding: '4px', 
+        padding: '4px 6px', 
         borderRadius: '8px', 
         border: '1px solid var(--border-glass)',
         backdropFilter: 'blur(10px)'
@@ -1179,6 +1220,60 @@ function App() {
         >
           LOGICAL
         </button>
+
+        {/* OPERATION MODE TOGGLE: [🧪 Simulation | ⚡ Real] */}
+        <div
+          data-testid="operation-mode-toggle"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '3px',
+            background: 'rgba(15, 23, 42, 0.75)',
+            padding: '3px 4px',
+            borderRadius: '6px',
+            border: '1px solid rgba(255, 255, 255, 0.1)',
+            borderLeft: '1px solid var(--border-glass)',
+            marginLeft: '4px'
+          }}
+        >
+          <button
+            data-testid="toggle-mode-simulation"
+            onClick={() => setOperationMode('simulation')}
+            title="Simulation Mode: Accepts synthetic, mock, and simulated telemetry"
+            style={{
+              padding: '5px 10px',
+              fontSize: '11px',
+              borderRadius: '4px',
+              border: 'none',
+              cursor: 'pointer',
+              background: !isRealMode ? 'var(--accent-blue, #0284c7)' : 'transparent',
+              color: !isRealMode ? '#ffffff' : 'var(--text-secondary, #94a3b8)',
+              fontWeight: 'bold',
+              transition: 'all 0.15s ease'
+            }}
+          >
+            🧪 Simulation
+          </button>
+          <button
+            data-testid="toggle-mode-real"
+            onClick={() => setOperationMode('real')}
+            title="Real Mode: Strictly ingests genuine physical hardware telemetry and rejects mock data"
+            style={{
+              padding: '5px 10px',
+              fontSize: '11px',
+              borderRadius: '4px',
+              border: 'none',
+              cursor: 'pointer',
+              background: isRealMode ? 'var(--accent-green, #10b981)' : 'transparent',
+              color: isRealMode ? '#ffffff' : 'var(--text-secondary, #94a3b8)',
+              fontWeight: 'bold',
+              transition: 'all 0.15s ease'
+            }}
+          >
+            ⚡ Real
+          </button>
+        </div>
+
         <button
           onClick={() => setShowImport(true)}
           title="Digitize a DXF / PDF / scanned floorplan into a new building"

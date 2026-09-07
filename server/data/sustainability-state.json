@@ -1,7 +1,5 @@
 {
   "buildingId": "bldg-econ-house-hcmc",
-  "cumulativeEmissionsKg": 1.42703206701412,
-  "equipmentRuntimeHours": {
-    "strip-zone-office-lvl1": 1.745967639745277
-  }
+  "cumulativeEmissionsKg": 0.8337783157043371,
+  "equipmentRuntimeHours": {}
 }

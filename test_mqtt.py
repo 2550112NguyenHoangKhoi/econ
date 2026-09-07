@@ -1,13 +1,15 @@
 import paho.mqtt.client as mqtt
 import json
-import time
 
 client = mqtt.Client()
-client.connect("127.0.0.1", 1883, 60)
-client.loop_start()
-
-client.publish("econ/status/pico_1", "online", retain=True)
-payload = {"zone": "Pico Lab", "occupancy": 1, "occupancy_2": 2, "source": "pico"}
-client.publish("econ/telemetry/pico_1", json.dumps(payload))
-time.sleep(1)
+client.connect("localhost", 1883)
+payload = {
+    "zone": "zone-test",
+    "circuitBreakerW": 1380.0,
+    "plugW": 0.0,
+    "stripW": 0.0,
+    "source": "esp32",
+    "tempReal": True
+}
+client.publish("econ/telemetry/esp32_test", json.dumps(payload))
 client.loop_stop()

@@ -1,44 +1,37 @@
-# Sentinel Handoff / Final Status Report
+# Sentinel Handoff Report
 
 ## Observation
-- Received user request to:
-  1. Replace heuristic occupancy recommendation rule in the backend with a genuine statistical model (R1).
-  2. Remove synthetic cubic spline forecast curve in frontend, honestly reflecting absence of data if no model forecast is available (R2).
-  3. Implement compute-offloading fallback for ESP32/Pico edge hardware to stream raw unprocessed sensor data to backend when strained, with server-side DSP (R3).
-  4. Perform hardware compatibility audit verifying backend models, compute-offloading logic, and frontend telemetry consumption match physical hardware constraints (R4).
-- Project root: `/Users/nguyenhoangkhoi/Documents/econ`
-- Integrity mode: `benchmark`
+The user requested the full implementation and integration of 4 core capabilities for the ECON Digital Twin platform:
+1. **R1**: Hardware Inspector expansion with IR Blaster fields across firmware device libraries, and manual control overrides (IR send, plugs/relays, dampers).
+2. **R2**: Global React UI toggle for Simulation Mode vs. Real Mode with backend engine mode switching and strict real-mode mock rejection.
+3. **R3**: Dedicated Sustainability Recommendations UI section aggregating Scope 2 operational carbon, space utilization, predictive maintenance alerts, and live carbon credit recommendations.
+4. **R4**: Offline Local AI Models (LSTM & TimesFM) integrated via inter-process subprocess streaming in the Go backend for real-time live inference.
+
+Per the Sentinel Routing Decision Table, the task was classified as **General** and routed to `teamwork_preview_orchestrator`. Two monitoring crons were scheduled. Following initial milestone completions, a temporary resource quota disruption was resolved through orchestrator succession (`orchestrator_11`). Iteration 1 of the milestone verification gate caught a legacy test concurrency isolation issue, which was resolved in Iteration 2. Upon completion reporting, an independent `teamwork_preview_victory_auditor` was spawned.
 
 ## Logic Chain
-- Logged verbatim request in `ORIGINAL_REQUEST.md` (root and `.agents/`).
-- Routing Decision: General (`teamwork_preview_orchestrator`) selected for multi-tier full-stack project across edge C++ firmware, Go backend, and React dashboard.
-- Orchestrator coordinated specialist subagents to implement, review, and challenge:
-  - M1 Backend Occupancy AI (`server/simulation/baselines.go`, `server/simulation/recommend.go`, `server/simulation/recommend_occupancy_test.go`, `server/simulation/adversarial_challenger1_test.go`).
-  - M2 Authentic Forecast Chart (`dashboard/src/ForecastChart.jsx`, `server/forecast.go`, `dashboard/verify_forecast_chart.js`).
-  - M3 Edge Compute Offload Fallback (`edge/esp32/src/main.cpp`, `node_config.h`, `edge/esp32/test/test_cpu_strain_fallback.cpp`, `server/mqtt.go`, `server/simulation/dsp.go`, `server/mqtt_fallback_test.go`).
-  - R4 Hardware Compatibility Audit (`TEST_READY.md`, `edge/esp32/test/test_adversarial_r4_challenger2.cpp`).
-- Internal Verification Gate:
-  - Reviewer 1 & 2: APPROVE
-  - Challenger 1: APPROVE (after addressing zero-mean vacancy edge case and variance bounds clamping)
-  - Challenger 2: APPROVE
-  - Forensic Auditor: CLEAN
-- Orchestrator claimed completion.
-- Sentinel spawned independent Victory Auditor (`teamwork_preview_victory_auditor`, `2e5bdc35-6a3f-4c82-aded-f60bcf7dc8fa`) with zero shared context.
-- Victory Auditor executed independent 3-phase verification:
-  - Phase A: Timeline & provenance audit — PASS (zero anomalies)
-  - Phase B: Source code integrity audit — PASS (zero hardcoded bypasses, genuine mathematical models, strict domain clamping)
-  - Phase C: Scratch test execution — PASS (100% test pass rate across Go backend, C++ edge firmware, and Puppeteer dashboard)
-- Verdict: **VICTORY CONFIRMED**.
-- Cleanup: Cancelled monitoring crons and terminated all subagents per protocol.
+- **Requirement 1**: `HardwareInspector.jsx` exposed protocol selector (13 protocols), hex codes, frequency, bits, transmit button, plug/relay switches, VAV damper slider ($[0.0, 1.0]$), and strain buttons. The Go backend (`server/main.go`, `server/simulation/engine.go`) receives overrides via `/api/command`, latches a 15-minute operator override window, and dispatches to edge nodes over MQTT topic `econ/commands/<topic>`. The ESP32 firmware (`edge/esp32/src/main.cpp`) handles `IR_SEND:`, GPIO 25, and GPIO 23.
+- **Requirement 2**: `server/modeapi.go` provides `GET /api/mode` and `POST /api/mode` with permissive parsing. In `ModeReal`, mock telemetry is rejected (`isMock()` check) with zero digital twin state corruption, while real power strip data is mapped to `z.HwStripW` and zone Circuit Breaker power to `z.HwPlugW`. `App.jsx` mounts a global segmented toggle switch.
+- **Requirement 3**: `server/carbon.go` provides numerical integration of Scope 2 carbon ($P_{\text{watts}} \times \Delta t / 3.6\times 10^6 \times \text{gridFactor}$), tracks space utilization against design capacity, flags equipment power surges for predictive maintenance, and computes whole-certificate carbon credit purchase offsets ($\lceil \text{deficit}/1000 \rceil$) with live Toucan Base Carbon Tonne market pricing. `SustainabilityRecommendationsPanel.jsx` is mounted under a dedicated `SUSTAINABILITY` tab.
+- **Requirement 4**: `backend/forecasting/infer.py` loads binary PyTorch weights (`model_weights.pth`) and fitted StandardScaler (`scaler.pkl`) for supervised `PeakLoadLSTM` regression (2.2441 MW), and runs Google `TimesFM 2.0-500m` autoregressive foundation model inference on Apple Silicon `mps` accelerator with 9 uncertainty quantiles. `server/forecast_ipc.go` provides an automated `os/exec` subprocess bridge fallbacking to local Python models when HTTP services are unavailable.
 
 ## Caveats
-- None. All requirements and acceptance criteria have been verified independently from scratch.
+- Production deployment of TimesFM on non-Apple-Silicon hardware will automatically fall back to CPU device mapping without loss of precision.
+- Carbon market live pricing requires outbound internet access to CoinGecko; if offline, it gracefully falls back to the static $12.50/ton baseline.
+- Operator manual overrides latch for 15 minutes by design before autonomous control resumes.
 
 ## Conclusion
-- Project successfully implemented, hardened, and independently audited.
-- Final completion ready to be reported.
+The Independent Victory Auditor completed all 3 phases (Timeline, Integrity, and Independent Test Execution) with a verdict of **VICTORY CONFIRMED**.
+- Phase A (Timeline): PASS — authentic artifact provenance.
+- Phase B (Integrity): PASS — zero bypasses, zero mock facades, authentic binary neural net weights.
+- Phase C (Independent Tests): PASS — 100% pass across Go E2E test suites (50/50), Go server test suite (100%), frontend E2E automated controls (41/41), mode toggle tests (23/23), clean Vite production build (0 errors), firmware offload host test (21/21), standalone LSTM regression (2.2441 MW), and TimesFM zero-shot forecast (12 steps, 9 quantiles).
+All background tasks and subagents have been terminated and cleaned up.
 
 ## Verification Method
-- Firmware: `edge/esp32/test/run_host_tests.sh` (all suites pass, exit code 0), `test_cpu_strain_fallback.cpp` (36/36 pass), `test_adversarial_r4_challenger2.cpp` (36/36 pass).
-- Backend: `cd server && go test -v -count=1 ./...` (all packages PASS), `TestMQTTFallback` (4/4 pass), `TestOccupancy` (6/6 pass), `TestAdversarial_` (all pass).
-- Frontend: `cd dashboard && npm run build && node verify_forecast_chart.js` (4/4 suites pass in headless Chrome).
+1. `cd /Users/nguyenhoangkhoi/Documents/econ/e2e_tests && go test -v -count=1 .` -> 50/50 PASS (100%).
+2. `cd /Users/nguyenhoangkhoi/Documents/econ/server && go test -v -count=1 ./...` -> 100% PASS across `econ` and `econ/simulation`.
+3. `cd /Users/nguyenhoangkhoi/Documents/econ/dashboard && node verify_e2e_controls.js` -> 41/41 PASS.
+4. `cd /Users/nguyenhoangkhoi/Documents/econ/dashboard && node verify_mode_toggle.js` -> 23/23 PASS.
+5. `cd /Users/nguyenhoangkhoi/Documents/econ/dashboard && npm run build` -> Clean compilation with 0 errors in 3.31s.
+6. `python3 backend/forecasting/infer.py --model lstm --input '...'` -> Status "ok", peak load 2.2441 MW.
+7. `python3 backend/forecasting/infer.py --model timesfm --input '...'` -> Status "ok", 12 steps, 9 quantiles.

@@ -80,9 +80,9 @@ type ZoneSim struct {
 	LastBroadcastTemp   float64
 	LastBroadcastLights bool // last lighting state sent to clients (change forces a re-send)
 	// Occupancy-driven control (real data arrives over MQTT from the CV/edge layer)
-	Live          bool      // true once real occupancy has been received for this zone
-	VacantTicks   int       // consecutive ticks at 0 occupancy (safety delay before setback)
-	LightsOn      bool      // last actuated lighting state
+	Live             bool      // true once real occupancy has been received for this zone
+	VacantTicks      int       // consecutive ticks at 0 occupancy (safety delay before setback)
+	LightsOn         bool      // last actuated lighting state
 	MqttTopic        string    // telemetry suffix this zone was seen on (commands route back here)
 	DetectedProtocol string    // dynamic IR protocol discovered by edge cameras (e.g. "PANASONIC_AC")
 	OverrideUntil    time.Time // Latch manual overrides so optimizer doesn't overwrite
@@ -98,17 +98,17 @@ type ZoneSim struct {
 	HwHumAt  time.Time // when HwHum arrived; zero = no humidity sensor has ever reported
 	HwCo2    float64   // last measured CO2 (ppm), valid while HwCo2At is fresh
 	// Measured replacements for values the model otherwise assumes.
-	HwSupplyC  float64 // AC discharge temperature (DS18B20) — supersedes supplyAirDesignC
-	HwSupplyAt time.Time
-	HwAcW      float64 // air-conditioner power (SCT-013) — the real cooling drive term
-	HwAcAt     time.Time
-	HwLux      float64 // ambient illuminance (BH1750) — a real irradiance proxy
-	HwLuxAt    time.Time
-	HwCo2At    time.Time // when HwCo2 arrived; zero = no NDIR sensor has ever reported
-	HwOnline   bool      // broker LWT verdict from econ/status/<topic>
-	CameraEvent  *string
-	PirState     *bool
-	IrState      *string
+	HwSupplyC   float64 // AC discharge temperature (DS18B20) — supersedes supplyAirDesignC
+	HwSupplyAt  time.Time
+	HwAcW       float64 // air-conditioner power (SCT-013) — the real cooling drive term
+	HwAcAt      time.Time
+	HwLux       float64 // ambient illuminance (BH1750) — a real irradiance proxy
+	HwLuxAt     time.Time
+	HwCo2At     time.Time // when HwCo2 arrived; zero = no NDIR sensor has ever reported
+	HwOnline    bool      // broker LWT verdict from econ/status/<topic>
+	CameraEvent *string
+	PirState    *bool
+	IrState     *string
 
 	// Automated Plug Load Control (see plugs.go). PlugStandbyW is sized from the zone's
 	// real floor area at build time; PlugShed flips when the after-hours sweep cuts the
@@ -121,6 +121,8 @@ type ZoneSim struct {
 	HwPlugAt              time.Time
 	HwStripW              float64
 	HwStripAt             time.Time
+	HwCircuitBreakerW     float64
+	HwCircuitBreakerAt    time.Time
 	LastBroadcastPlugShed bool
 	// Physics-grounded AFDD (roadmap challenge 2): while a real sensor pins this zone,
 	// ShadowTemp keeps integrating the pure 2R1C model with NO sensor pull. The smoothed
@@ -138,6 +140,9 @@ type ZoneSim struct {
 	AdjacentZones []string
 	// Dynamic mass balance CO2 concentration (ppm) when NDIR sensor is omitted
 	Co2Sim float64
+	// Actuator & manual override twin states
+	DamperPos float64 // manual or actuated damper position in [0.0, 1.0]
+	CpuStrain bool    // test flag: forced CPU strain offload fallback active
 }
 
 type VavSim struct {
@@ -145,20 +150,76 @@ type VavSim struct {
 	Resistance float64
 	// DesignResistance is what the box is SIZED at — fixed for the life of the building,
 	// derived from the zone's own volume at the library's design air-change rate.
-	// Resistance is that value times Damper, and Damper is what the control modulates.
-	//
-	// Splitting the two is what lets a box be sized physically at all. When the control
-	// moved Resistance directly, its step (±0.05) and its limits (0.01…100) only made
-	// sense on the scale it was initialised at — 1.0 for every box in every building — and
-	// a physically-derived resistance of ~30,000 was clamped straight back down to 100.
+	// Splitting the two is what lets a box be sized physically at all.
 	DesignResistance float64
-	// Damper is the relative restriction: 1.0 is the design position, below 1 is opened
-	// past design, above 1 is throttled. Dimensionless, so it means the same thing in a
-	// house and a tower.
-	Damper            float64
-	Flow              float64
-	NominalFlow       float64 // flow at default resistance; cooling is sized against this
-	LastBroadcastFlow float64
+	// Damper is the relative restriction multiplier (legacy compatibility: 1.0 = design).
+	Damper float64
+	// DamperPos is the physical actuator position in [0.0, 1.0] (1.0 = 100% open, 0.0 = closed).
+	DamperPos float64
+	// Position is an alias of DamperPos for test and API compatibility.
+	Position float64
+	// TargetDamperPos is the desired actuator position commanded by auto-pilot in [0.0, 1.0].
+	TargetDamperPos float64
+	// TargetPosition is an alias of TargetDamperPos.
+	TargetPosition      float64
+	Flow                float64
+	NominalFlow         float64 // flow at default resistance; cooling is sized against this
+	LastBroadcastFlow   float64
+	LastBroadcastDamper float64
+}
+
+func (v *VavSim) ensureInitialized() {
+	if v.DamperPos == 0 && v.TargetDamperPos == 0 && v.Position == 0 && v.TargetPosition == 0 {
+		v.DamperPos = 1.0
+		v.Position = 1.0
+		v.TargetDamperPos = 1.0
+		v.TargetPosition = 1.0
+		if v.Damper == 0 {
+			v.Damper = 1.0
+		}
+	} else {
+		if v.Position != v.DamperPos {
+			if v.Position != 0 {
+				v.DamperPos = v.Position
+			} else {
+				v.Position = v.DamperPos
+			}
+		}
+		if v.TargetPosition != v.TargetDamperPos {
+			if v.TargetPosition != 0 {
+				v.TargetDamperPos = v.TargetPosition
+			} else {
+				v.TargetPosition = v.TargetDamperPos
+			}
+		}
+	}
+	if v.DesignResistance <= 0 {
+		if v.Resistance > 0 {
+			v.DesignResistance = v.Resistance
+		} else {
+			v.DesignResistance = 1.0
+			v.Resistance = 1.0
+		}
+	}
+	if v.Resistance <= 0 {
+		v.Resistance = v.DesignResistance
+	}
+}
+
+// UpdateResistance calculates active aerodynamic resistance from physical damper position:
+// R_v(theta) = R_design / max(0.01, theta^2)
+func (v *VavSim) UpdateResistance() {
+	v.ensureInitialized()
+	pos := math.Max(MinDamperPos, math.Min(MaxDamperPos, v.DamperPos))
+	v.DamperPos = pos
+	v.Position = pos
+	v.TargetPosition = v.TargetDamperPos
+
+	eff := math.Max(0.01, pos*pos)
+	v.Resistance = v.DesignResistance / eff
+	if v.DesignResistance > 0 {
+		v.Damper = v.Resistance / v.DesignResistance
+	}
 }
 
 type Engine struct {
@@ -249,6 +310,8 @@ type Engine struct {
 	// dynamicsPruned is the zone count the room models were last reconciled against, so
 	// the eviction sweep runs on a building change rather than on every tick.
 	dynamicsPruned int
+	// mode represents whether the engine operates on mock/simulated data (default) or strictly real telemetry.
+	mode OperationMode
 }
 
 // histSample is one forecaster timestep: building-average room temperature and
@@ -275,6 +338,13 @@ const (
 	damperMin  = 0.25 // opened past design
 	damperMax  = 50.0 // effectively shut
 
+	// Physical damper actuator constraints
+	MinDamperPos            = 0.0
+	MaxDamperPos            = 1.0
+	MinVentDamperFloor      = 0.15       // Continuous fresh air ventilation floor (ASHRAE 62.1 / QCVN 09:2017/BXD)
+	MaxDamperSlewRate       = 1.0 / 60.0 // Actuator full stroke travel 60s (~0.0167 s^-1)
+	MaxSafeStaticPressurePa = 650.0      // Duct structural safety limit (Pa)
+
 	// Airflow telemetry noise and broadcast dedupe, as fractions of a box's NOMINAL flow.
 	// 1.5% is a realistic flow-station accuracy; the dedupe sits above it so ordinary
 	// noise does not by itself count as a change worth streaming.
@@ -300,6 +370,7 @@ func NewEngine() *Engine {
 		AutoPilot:  true,
 		baselines:  NewBaselines(),
 		dynamics:   NewDynamics(),
+		mode:       ParseOperationMode(os.Getenv("ECON_MODE")),
 	}
 
 	// Local-first (datapath.go): a deployment that has imported its own blueprint reads
@@ -347,6 +418,10 @@ func (e *Engine) buildFromJSON(data []byte) error {
 					TargetZone:       z.ZoneId,
 					DesignResistance: dr,
 					Damper:           1.0,
+					DamperPos:        1.0,
+					Position:         1.0,
+					TargetDamperPos:  1.0,
+					TargetPosition:   1.0,
 					Resistance:       dr,
 					Flow:             0,
 				}
@@ -584,9 +659,26 @@ func (e *Engine) sizeFanToBuilding() {
 }
 
 func (e *Engine) doHardyCross() {
+	needsSizing := false
+	for _, v := range e.Vavs {
+		if v.Resistance <= 0 || v.DesignResistance <= 0 {
+			v.ensureInitialized()
+			v.UpdateResistance()
+			needsSizing = true
+		}
+	}
+	if needsSizing {
+		e.sizeFanToBuilding()
+	}
+
 	sumInvSqrtR := 0.0
 	for _, v := range e.Vavs {
-		sumInvSqrtR += 1.0 / math.Sqrt(v.Resistance)
+		if v.Resistance > 0 {
+			sumInvSqrtR += 1.0 / math.Sqrt(v.Resistance)
+		}
+	}
+	if sumInvSqrtR <= 0 {
+		return
 	}
 	R_system := 1.0 / (sumInvSqrtR * sumInvSqrtR)
 
@@ -594,8 +686,73 @@ func (e *Engine) doHardyCross() {
 	e.AhuPressure = R_system * Q_total_sq
 
 	for _, v := range e.Vavs {
-		v.Flow = math.Sqrt(math.Max(0, e.AhuPressure) / v.Resistance)
+		if v.Resistance > 0 {
+			v.Flow = math.Sqrt(math.Max(0, e.AhuPressure) / v.Resistance)
+		}
 	}
+}
+
+// enforceStaticPressureSafety ensures duct static pressure does not exceed structural safety limit (650 Pa).
+// If P_ahu > 650 Pa, dampers are commanded open to relieve pressure, and if necessary fan speed is modulated down.
+func (e *Engine) enforceStaticPressureSafety() {
+	if e.AhuPressure <= MaxSafeStaticPressurePa {
+		return
+	}
+	// Relieve duct static pressure by commanding dampers open
+	relieved := false
+	for _, v := range e.Vavs {
+		if v.DamperPos < MaxDamperPos {
+			v.DamperPos = math.Min(MaxDamperPos, v.DamperPos+0.15)
+			v.Position = v.DamperPos
+			if v.TargetDamperPos < v.DamperPos {
+				v.TargetDamperPos = v.DamperPos
+				v.TargetPosition = v.TargetDamperPos
+			}
+			v.UpdateResistance()
+			relieved = true
+		}
+	}
+	if relieved {
+		e.doHardyCross()
+	}
+	// If still above safety ceiling after commanding dampers open, modulate fan down
+	if e.AhuPressure > MaxSafeStaticPressurePa {
+		ratio := MaxSafeStaticPressurePa / e.AhuPressure
+		e.PMax *= ratio
+		e.doHardyCross()
+		if e.AhuPressure > MaxSafeStaticPressurePa {
+			e.AhuPressure = MaxSafeStaticPressurePa
+		}
+	}
+}
+
+func (e *Engine) getZoneToVavMap() map[string]*VavSim {
+	m := make(map[string]*VavSim, len(e.Vavs))
+	for _, v := range e.Vavs {
+		if v.TargetZone != "" {
+			m[v.TargetZone] = v
+		}
+	}
+	return m
+}
+
+func (e *Engine) findVavForZone(zoneId string, zoneToVav map[string]*VavSim) *VavSim {
+	if zoneToVav != nil {
+		if v, ok := zoneToVav[zoneId]; ok {
+			return v
+		}
+	}
+	if v, ok := e.Vavs[zoneId]; ok {
+		return v
+	}
+	if v, ok := e.Vavs["vav-"+zoneId]; ok {
+		return v
+	}
+	trimmed := strings.TrimPrefix(zoneId, "zone-")
+	if v, ok := e.Vavs["vav-"+trimmed]; ok {
+		return v
+	}
+	return nil
 }
 
 // demoZoneAlias maps inbound MQTT identifiers (demo node names / aliases) to a real
@@ -611,39 +768,68 @@ var demoZoneAlias = map[string]string{
 // opposed to a firmware's simulated placeholder — only real temperatures may pin the
 // zone's physics to the sensor.
 type Measurement struct {
-	Occupancy  *int
-	Occupancy2 *int
-	Temp       *float64
-	Humidity   *float64
-	Co2        *float64
-	SupplyC    *float64
-	AcW        *float64
-	Lux        *float64
-	PlugW      *float64 // measured plug-circuit draw (SCT-013 clamp), watts
-	StripW     *float64 // measured power-strip draw (ACS712 sensor), watts
-	Source    string
-	TempReal  bool
+	Occupancy       *int
+	Occupancy2      *int
+	Temp            *float64
+	Humidity        *float64
+	Co2             *float64
+	SupplyC         *float64
+	AcW             *float64
+	Lux             *float64
+	PlugW           *float64 // measured plug-circuit draw (SCT-013 clamp), watts
+	StripW          *float64 // measured power-strip draw (ACS712 sensor), watts
+	CircuitBreakerW *float64 // measured zone Circuit Breaker (CB) power, watts
+	CbW             *float64 // alias for CircuitBreakerW
+	Source          string
+	TempReal        bool
 	// AcReal reports whether the node's setpoint commands actually reach an air
 	// conditioner, or are merely parsed and logged. A pointer because "not reported"
 	// (firmware older than the field) must stay distinct from a node that positively
 	// says its IR control is absent.
-	AcReal *bool
+	AcReal      *bool
 	CameraEvent *string
 	PirState    *bool
 	IrState     *string
+	Mock        *bool // explicit mock payload flag
+	Simulated   *bool // explicit simulated payload flag
+}
 
+// IsMock reports whether the measurement represents mock, simulated, or synthetic data.
+func (m Measurement) IsMock() bool {
+	if m.Mock != nil && *m.Mock {
+		return true
+	}
+	if m.Simulated != nil && *m.Simulated {
+		return true
+	}
+	src := strings.ToLower(strings.TrimSpace(m.Source))
+	switch src {
+	case "mock", "sim", "simulation", "synthetic", "test":
+		return true
+	}
+	if m.Temp != nil && !m.TempReal {
+		return true
+	}
+	return false
 }
 
 // IngestTelemetry ingests one sample from the CV/edge layer (MQTT) and marks the zone
 // "live" so the physics + optimizer use real data instead of the random seed. This is
 // what makes the twin genuinely sensor-driven.
-func (e *Engine) IngestTelemetry(zoneRef, topicSuffix string, m Measurement) {
+func (e *Engine) IngestTelemetry(zoneRef, topicSuffix string, m Measurement) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+
+	// In Real Mode, strictly reject mock payloads without mutating zone state.
+	if e.mode == ModeReal && m.IsMock() {
+		log.Printf("[telemetry] REJECTED mock payload for zone %q in Real Mode (source=%q, tempReal=%v)", zoneRef, m.Source, m.TempReal)
+		return fmt.Errorf("mock payload strictly rejected in real mode for zone %s", zoneRef)
+	}
+
 	z := e.resolveZone(zoneRef)
 	if z == nil {
 		log.Printf("[telemetry] no zone matches %q; ignoring", zoneRef)
-		return
+		return fmt.Errorf("no zone matches %q", zoneRef)
 	}
 	if m.Occupancy != nil || m.Occupancy2 != nil {
 		occ := 0
@@ -697,10 +883,23 @@ func (e *Engine) IngestTelemetry(zoneRef, topicSuffix string, m Measurement) {
 		z.HwCo2 = *m.Co2
 		z.HwCo2At = time.Now()
 	}
-	if m.PlugW != nil {
+
+	// Map zone Circuit Breaker power to HwPlugW (CB clamp measures total branch power).
+	// In Real Mode, zone CB telemetry directly maps to HwPlugW.
+	cb := m.CircuitBreakerW
+	if cb == nil {
+		cb = m.CbW
+	}
+	if cb != nil {
+		z.HwCircuitBreakerW = *cb
+		z.HwCircuitBreakerAt = time.Now()
+		z.HwPlugW = *cb
+		z.HwPlugAt = time.Now()
+	} else if m.PlugW != nil {
 		z.HwPlugW = *m.PlugW
 		z.HwPlugAt = time.Now()
 	}
+
 	if m.StripW != nil {
 		z.HwStripW = *m.StripW
 		z.HwStripAt = time.Now()
@@ -730,6 +929,7 @@ func (e *Engine) IngestTelemetry(zoneRef, topicSuffix string, m Measurement) {
 		z.HwLux = *m.Lux
 		z.HwLuxAt = time.Now()
 	}
+	return nil
 }
 
 // SetZoneOccupancy keeps the original CV-layer entry point (yolo_tracker.py publishes
@@ -873,7 +1073,25 @@ const (
 //     published ONLY to zones with a real device listening (MqttTopic set) — a pure-sim
 //     zone changes state in the engine but we don't spray commands onto topics no board
 //     subscribes to.
+//
+// ActuateAirflow runs the auto-pilot control loop with a specified time step dt,
+// enforcing physical constraints and solving fluid dynamics.
+func (e *Engine) ActuateAirflow(dt float64) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.actuateWithDt(dt)
+}
+
 func (e *Engine) actuate() {
+	e.actuateWithDt(1.0)
+}
+
+func (e *Engine) actuateWithDt(dt float64) {
+	if dt <= 0 {
+		dt = 0.033
+	}
+	zoneToVav := e.getZoneToVavMap()
+
 	if !e.AutoPilot {
 		// Suspended: release the optimizer's setbacks so the operator is handed a
 		// normally-conditioned building at its occupied baseline, not zones stranded in
@@ -887,13 +1105,19 @@ func (e *Engine) actuate() {
 			z.LightsOn = true
 		}
 		e.zonesInSetback = 0
+		e.doHardyCross()
 		return
 	}
 	preCool := time.Now().Before(e.PreCoolUntil)
 	// One ambient for the recovery calculation, hoisted out of the zone loop.
 	tOutForSetback, _ := e.outdoorNow()
 	setback := 0
+
+	updatedVavs := make(map[*VavSim]bool, len(e.Vavs))
+
 	for id, z := range e.Zones {
+		v := e.findVavForZone(id, zoneToVav)
+
 		if time.Now().Before(z.OverrideUntil) {
 			if z.Setpoint > z.BaseSetpoint+0.01 {
 				setback++ // a manual veto can itself be a setback; still count it
@@ -914,12 +1138,18 @@ func (e *Engine) actuate() {
 		if IsCritical(z.Type) {
 			z.Setpoint = z.BaseSetpoint
 			z.LightsOn = true
+			if v != nil {
+				v.TargetDamperPos = MaxDamperPos
+				v.TargetPosition = MaxDamperPos
+			}
 			continue
 		}
 		vacant := z.Occupancy <= 0 && z.VacantTicks >= vacancyDelayTicks
 
 		desiredLights := !vacant
 		desiredSp := z.BaseSetpoint
+		targetDamper := 1.0
+
 		if vacant {
 			// Setback depth is asked of the room's own identified physics rather than
 			// being the same number everywhere: how far can THIS room drift and still be
@@ -935,13 +1165,26 @@ func (e *Engine) actuate() {
 			}
 			desiredSp = z.BaseSetpoint + delta
 			setback++
+			// Vacant zone: throttle damper to minimum ventilation floor to save cooling energy
+			targetDamper = MinVentDamperFloor
 		} else if preCool {
 			// Forecast says a demand peak is coming: run occupied zones slightly cold
 			// now (cheap thermal-mass charge) so chillers can shed load at the peak.
 			desiredSp = z.BaseSetpoint - preCoolDelta
+			tempErr := z.Temp - desiredSp
+			targetDamper = math.Max(MinVentDamperFloor, math.Min(MaxDamperPos, 0.6+0.25*tempErr))
+		} else {
+			// Occupied zone: modulate damper based on thermal error (Temp - Setpoint)
+			tempErr := z.Temp - z.Setpoint
+			targetDamper = math.Max(MinVentDamperFloor, math.Min(MaxDamperPos, 0.5+0.25*tempErr))
 		}
 		z.Setpoint = desiredSp
 		z.LightsOn = desiredLights
+
+		if v != nil {
+			v.TargetDamperPos = math.Max(MinVentDamperFloor, math.Min(MaxDamperPos, targetDamper))
+			v.TargetPosition = v.TargetDamperPos
+		}
 
 		lightStr := "OFF"
 		if desiredLights {
@@ -953,7 +1196,6 @@ func (e *Engine) actuate() {
 		if vacant || (z.PirState != nil && !*z.PirState) {
 			if z.IrState == nil || *z.IrState != "OFF" {
 				cmd = "HVAC_SET:OFF"
-				// If we override cmd to just turn off the AC, we might still want to turn off lights
 				cmd = fmt.Sprintf("LIGHTS_%s;%s", lightStr, cmd)
 			}
 		}
@@ -961,6 +1203,27 @@ func (e *Engine) actuate() {
 		if z.DetectedProtocol != "" {
 			cmd = fmt.Sprintf("PROTOCOL=%s;%s", z.DetectedProtocol, cmd)
 		}
+
+		// Append ;DAMPER=%.2f to MQTT commands
+		damperVal := 1.0
+		if v != nil {
+			maxTravel := MaxDamperSlewRate * dt
+			diff := v.TargetDamperPos - v.DamperPos
+			if math.Abs(diff) <= maxTravel {
+				v.DamperPos = v.TargetDamperPos
+			} else if diff > 0 {
+				v.DamperPos += maxTravel
+			} else {
+				v.DamperPos -= maxTravel
+			}
+			v.DamperPos = math.Max(MinDamperPos, math.Min(MaxDamperPos, v.DamperPos))
+			v.Position = v.DamperPos
+			v.UpdateResistance()
+			damperVal = v.DamperPos
+			updatedVavs[v] = true
+		}
+		cmd = fmt.Sprintf("%s;DAMPER=%.2f", cmd, damperVal)
+
 		if e.lastCmd[id] != cmd {
 			e.lastCmd[id] = cmd
 			// Only command zones a real device is bound to; sim zones just changed state.
@@ -970,6 +1233,34 @@ func (e *Engine) actuate() {
 			}
 		}
 	}
+
+	// Update slew rate and resistance for any VAVs not matched directly to a zone loop iteration
+	for _, v := range e.Vavs {
+		if updatedVavs[v] {
+			continue
+		}
+		if v.DamperPos != v.TargetDamperPos {
+			maxTravel := MaxDamperSlewRate * dt
+			diff := v.TargetDamperPos - v.DamperPos
+			if math.Abs(diff) <= maxTravel {
+				v.DamperPos = v.TargetDamperPos
+			} else if diff > 0 {
+				v.DamperPos += maxTravel
+			} else {
+				v.DamperPos -= maxTravel
+			}
+			v.DamperPos = math.Max(MinDamperPos, math.Min(MaxDamperPos, v.DamperPos))
+			v.Position = v.DamperPos
+			v.UpdateResistance()
+		}
+	}
+
+	// Dynamic fluid network coupling: solve Hardy Cross
+	e.doHardyCross()
+
+	// Enforce static pressure safety ceiling (<= 650 Pa)
+	e.enforceStaticPressureSafety()
+
 	e.zonesInSetback = setback
 }
 
@@ -1768,7 +2059,7 @@ type HardwareNode struct {
 	AcReal         bool `json:"acReal"`
 	AcControlKnown bool `json:"acControlKnown"`
 	// [GEMINI IMPLEMENTATION START]
-	DetectedProtocol string `json:"detectedProtocol"`
+	DetectedProtocol string  `json:"detectedProtocol"`
 	PirState         *bool   `json:"pirState"`
 	CameraEvent      *string `json:"cameraEvent"`
 	IrState          *string `json:"irState"`
@@ -1874,6 +2165,14 @@ func (e *Engine) SetScenario(s string) {
 
 		v.Damper = math.Max(damperMin, math.Min(damperMax, v.Damper))
 		v.Resistance = v.DesignResistance * v.Damper
+		if v.DesignResistance > 0 && v.Resistance > 0 {
+			eff := v.DesignResistance / v.Resistance
+			eff = math.Max(0.01, math.Min(1.0, eff))
+			v.DamperPos = math.Sqrt(eff)
+			v.Position = v.DamperPos
+			v.TargetDamperPos = v.DamperPos
+			v.TargetPosition = v.DamperPos
+		}
 	}
 	e.doHardyCross()
 }
@@ -2013,7 +2312,7 @@ func (e *Engine) Start() {
 		e.simClock += dt
 
 		// Occupancy-driven optimizer + edge actuation (publishes only on state change).
-		e.actuate()
+		e.actuateWithDt(dt)
 		e.applyHardware()
 
 		// Who is in each room, on the library's diurnal schedule. Runs before the plug
@@ -2783,12 +3082,16 @@ func (e *Engine) broadcast() {
 			scale = math.Max(v.Flow, 0.05)
 		}
 		noiseFlow := math.Max(0, v.Flow+getNoise(flowNoiseFrac*scale))
-		if math.Abs(noiseFlow-v.LastBroadcastFlow) > flowDedupeFrac*scale {
+		flowChanged := math.Abs(noiseFlow-v.LastBroadcastFlow) > flowDedupeFrac*scale
+		damperChanged := math.Abs(v.DamperPos-v.LastBroadcastDamper) > 0.01
+		if flowChanged || damperChanged {
 			v.LastBroadcastFlow = noiseFlow
+			v.LastBroadcastDamper = v.DamperPos
 			idStr := builder.CreateString(id)
 			Telemetry.VavDataStart(builder)
 			Telemetry.VavDataAddId(builder, idStr)
 			Telemetry.VavDataAddAirflow(builder, float32(noiseFlow))
+			Telemetry.VavDataAddDamper(builder, float32(v.DamperPos))
 			vavOffsets = append(vavOffsets, Telemetry.VavDataEnd(builder))
 		}
 	}
@@ -2894,35 +3197,111 @@ func (e *Engine) PublishCommand(action, zoneRef string) {
 		// the latch, not only after the optimizer reasserts control.
 		applyCommandToZone(z, cmd)
 	}
+
+	// Mirror damper override to VavSim if target is a zone or vav
+	upperCmd := strings.ToUpper(cmd)
+	if strings.Contains(upperCmd, "DAMPER=") || strings.Contains(upperCmd, "VAV_SET:") {
+		vav := e.findVavForZone(zoneRef, nil)
+		if vav == nil && z != nil {
+			for zid, zone := range e.Zones {
+				if zone == z {
+					vav = e.findVavForZone(zid, nil)
+					break
+				}
+			}
+		}
+		if vav != nil {
+			for _, tok := range strings.Split(cmd, ";") {
+				tok = strings.TrimSpace(tok)
+				upperTok := strings.ToUpper(tok)
+				valStr := ""
+				if strings.HasPrefix(upperTok, "DAMPER=") {
+					valStr = tok[len("DAMPER="):]
+				} else if strings.HasPrefix(upperTok, "VAV_SET:") {
+					valStr = tok[len("VAV_SET:"):]
+				}
+				if valStr != "" {
+					if v, err := strconv.ParseFloat(valStr, 64); err == nil {
+						if v > 1.0 {
+							v = v / 100.0
+						}
+						if v < 0.0 {
+							v = 0.0
+						} else if v > 1.0 {
+							v = 1.0
+						}
+						vav.DamperPos = v
+						vav.Position = v
+						vav.TargetDamperPos = v
+						vav.TargetPosition = v
+						vav.Damper = v
+					}
+				}
+			}
+		}
+	}
+
 	log.Printf("[override] manual command %q (from %q) to %s (latched 15m)", cmd, action, topic)
 	if e.Publish != nil {
 		e.Publish("econ/commands/"+topic, cmd)
 	}
 }
 
-
-
 // applyCommandToZone applies a firmware-format command string to the engine's zone
 // state. Mirrors the edge firmware's parser: ;-separated LIGHTS_x / SETPOINT= /
-// HVAC_SET: tokens, unknown tokens ignored. Lock held by the caller.
+// HVAC_SET: / IR_SEND: / PLUG_x / DAMPER= / VAV_SET: / CPU_STRAIN: tokens, unknown tokens ignored. Lock held by the caller.
 func applyCommandToZone(z *ZoneSim, cmd string) {
 	for _, tok := range strings.Split(cmd, ";") {
 		tok = strings.TrimSpace(tok)
+		upper := strings.ToUpper(tok)
 		switch {
-		case tok == "LIGHTS_ON":
+		case tok == "LIGHTS_ON" || upper == "LIGHTS_ON":
 			z.LightsOn = true
-		case tok == "LIGHTS_OFF":
+		case tok == "LIGHTS_OFF" || upper == "LIGHTS_OFF":
 			z.LightsOn = false
-		case strings.HasPrefix(tok, "SETPOINT="):
+		case tok == "PLUG_ON" || upper == "PLUG_ON":
+			z.PlugShed = false
+		case tok == "PLUG_OFF" || upper == "PLUG_OFF":
+			z.PlugShed = true
+		case tok == "CPU_STRAIN:HIGH" || upper == "CPU_STRAIN:HIGH":
+			z.CpuStrain = true
+		case tok == "CPU_STRAIN:NORMAL" || upper == "CPU_STRAIN:NORMAL":
+			z.CpuStrain = false
+		case strings.HasPrefix(upper, "SETPOINT="):
 			if v, err := strconv.ParseFloat(tok[len("SETPOINT="):], 64); err == nil {
 				z.Setpoint = v
 			}
-		case strings.HasPrefix(tok, "HVAC_SET:"):
-			if tok == "HVAC_SET:OFF" || strings.ToUpper(tok) == "HVAC_SET:OFF" {
+		case strings.HasPrefix(upper, "HVAC_SET:"):
+			if upper == "HVAC_SET:OFF" {
 				off := "OFF"
 				z.IrState = &off
 			} else if v, err := strconv.ParseFloat(tok[len("HVAC_SET:"):], 64); err == nil {
 				z.Setpoint = v
+			}
+		case strings.HasPrefix(upper, "IR_SEND:"):
+			parts := strings.Split(tok, ":")
+			if len(parts) >= 2 && parts[1] != "" {
+				z.DetectedProtocol = parts[1]
+			}
+			irStr := tok
+			z.IrState = &irStr
+		case strings.HasPrefix(upper, "DAMPER=") || strings.HasPrefix(upper, "VAV_SET:"):
+			valStr := ""
+			if strings.HasPrefix(upper, "DAMPER=") {
+				valStr = tok[len("DAMPER="):]
+			} else {
+				valStr = tok[len("VAV_SET:"):]
+			}
+			if v, err := strconv.ParseFloat(valStr, 64); err == nil {
+				if v > 1.0 {
+					v = v / 100.0
+				}
+				if v < 0.0 {
+					v = 0.0
+				} else if v > 1.0 {
+					v = 1.0
+				}
+				z.DamperPos = v
 			}
 		}
 	}
@@ -2934,7 +3313,14 @@ func applyCommandToZone(z *ZoneSim, cmd string) {
 func normalizeOverride(action string, z *ZoneSim) string {
 	a := strings.TrimSpace(action)
 	upper := strings.ToUpper(a)
-	if strings.HasPrefix(upper, "LIGHTS_") || strings.HasPrefix(upper, "SETPOINT=") || strings.HasPrefix(upper, "HVAC_SET:") {
+	if strings.HasPrefix(upper, "LIGHTS_") ||
+		strings.HasPrefix(upper, "SETPOINT=") ||
+		strings.HasPrefix(upper, "HVAC_SET:") ||
+		strings.HasPrefix(upper, "IR_SEND:") ||
+		upper == "PLUG_ON" || upper == "PLUG_OFF" ||
+		strings.HasPrefix(upper, "DAMPER=") ||
+		strings.HasPrefix(upper, "VAV_SET:") ||
+		strings.HasPrefix(upper, "CPU_STRAIN:") {
 		return a // already a firmware command
 	}
 
@@ -2968,4 +3354,3 @@ func (e *Engine) BroadcastOnce() {
 }
 
 // [GEMINI IMPLEMENTATION END]
-

@@ -1,225 +1,240 @@
-# Handoff Report: Milestone M1 (Requirement R1) Implementation
+# Handoff Report: Milestone M1 (Hardware Section Expansion & Manual Controls)
 
 **Agent**: `teamwork_preview_worker_m1`  
-**Working Directory**: `d:\ECON1\econ\.agents\teamwork_preview_worker_m1`  
+**Working Directory**: `/Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_worker_m1`  
 **Handoff Type**: Hard (Milestone M1 complete)  
+**Date**: 2026-09-06T15:20:00Z  
 
 ---
 
 ## 1. Observation
 
-1. **Assigned Files Modified**:
-   - `edge/esp32/src/node_config.h`:
-     - Lines 70–72: Defined `#ifndef STRIP_CAL_A_PER_V` default `15.0f` (ACS712 30A sensitivity ~66 mV/A -> ~15.15 A/V).
-     - Line 100: Added `float stripCalAPerV;` to `struct NodeConfig`.
-     - Line 120: Initialized `c.stripCalAPerV = (float)STRIP_CAL_A_PER_V;` in `cfgDefaults()`.
-     - Lines 163–164: Added physical range validation `if (!(c.stripCalAPerV >= 1.0f && c.stripCalAPerV <= 500.0f))` in `cfgValidate()`.
-     - Line 257: Added JSON parsing `if (doc.containsKey("stripCalAPerV")) next.stripCalAPerV = doc["stripCalAPerV"];` in `cfgApplyJson()`, logged in `Serial.printf`.
-     - Lines 298, 312: Added state serialization `out["stripCalAPerV"] = gCfg.stripCalAPerV;` and override tracking `if (gCfg.stripCalAPerV != d.stripCalAPerV) ov.add("stripCalAPerV");` in `cfgSerializeState()`.
-   - `edge/esp32/src/main.cpp`:
-     - Lines 147–151: Defined `#ifndef USE_STRIP #define USE_STRIP 1 #endif`.
-     - Lines 174–178: Defined `#ifndef STRIP_ADC_PIN #define STRIP_ADC_PIN 35 #endif`.
-     - Lines 596–617: Implemented `readStripAmps()` using the 100 ms True-RMS window algorithm (`sum` and `sumSq`, dynamic mean subtraction removing ACS712 ~2.5 V DC offset, noise floor check `< 0.10 ? 0.0f : amps`, starvation guard `n < 100 -> -1`).
-     - Line 725: Expanded `StaticJsonDocument<256> doc;` to `StaticJsonDocument<384> doc;` in `readAndPublish()`.
-     - Lines 809–816: Added telemetry reading and JSON assignment:
-       ```cpp
-       #if USE_STRIP
-         float stripAmps = readStripAmps();
-         if (stripAmps >= 0) {
-           doc["stripW"] = round(stripAmps * gCfg.plugMainsV * 10) / 10.0;
-         } else {
-           Serial.println("[strip] ADC window starved -> omitted (engine keeps modelling)");
-         }
-       #endif
-       ```
-     - Line 848: Expanded `char buf[288];` to `char buf[384];` in `readAndPublish()`.
-     - Lines 979–983: Added setup logging:
-       ```cpp
-       #if USE_STRIP
-         analogReadResolution(12);
-         Serial.printf("[strip] ACS712 on GPIO%d (cal %.1f A/V) — power strip metering\n",
-                       STRIP_ADC_PIN, (double)gCfg.stripCalAPerV);
-       #endif
-       ```
-   - `edge/esp32/test/host_config_test.cpp`:
-     - Added test checks for default `stripCalAPerV == 15.0f`.
-     - Added test checks for runtime JSON update `stripCalAPerV: 15.2`.
-     - Added boundary rejection checks: `stripCalAPerV: 0.5` (< 1.0) and `501.0` (> 500.0) refused.
-     - Added boundary acceptance checks: `1.0` and `500.0` accepted.
-     - Added state document test checking `overrides` array contains `"stripCalAPerV"`.
-     - Added factory reset test confirming `stripCalAPerV` restores to default 15.0 A/V.
+### 1.1 Requirements & Assigned Files
+As specified in `DISPATCH.md` and `PROJECT.md` (Feature 1, 2, 3, 4):
+1. Expose the IR Blaster in the Hardware Inspector dashboard (`dashboard/src/HardwareInspector.jsx`) with protocol selector, frequency/bits, hex code input, and manual send button.
+2. Add full library support and comprehensive manual controls for all edge devices (trigger IR blaster, toggle plugs/relays, override VAV dampers, simulate CPU strain).
+3. Update Go backend command validation (`server/main.go`) to accept `IR_SEND:`, `PLUG_ON`, `PLUG_OFF`, `DAMPER=`, `VAV_SET:`, `CPU_STRAIN:`, `CONFIG:`, compounds, and verbs, update the digital twin state immediately in `applyCommandToZone` (`server/simulation/engine.go`), and route to edge nodes via MQTT (`econ/commands/<topic>`).
+4. Write and verify unit tests confirming command routing and UI tests for manual controls.
 
-2. **Verification Tool Outputs**:
-   - **Host Unit Test Execution**:
-     ```powershell
-     g++ -std=c++17 -Wall -I .pio/libdeps/esp32dev/ArduinoJson/src -I src -I test test/host_config_test.cpp -o test/host_config_test.exe ; .\test\host_config_test.exe
-     ```
-     Result verbatim:
-     ```
-     node_config: defaults
-       ok   publish interval defaults to the old 5000 ms
-       ok   plug calibration defaults to the -000 + 33ohm figure
-       ok   plug mains defaults to Vietnam 230 V
-       ok   strip calibration defaults to 15.0 A/V
-       ok   touch hysteresis defaults to the observed 62/82
-       ok   a node that was never configured is at rev 0
-       ok   the compiled defaults are themselves valid
-     node_config: accepts a real recalibration
-     [config] applied -> rev 1 (interval 5000ms, plug 42.60 A/V @ 230 V, ac 60.60 A/V @ 220 V, strip 15.00 A/V, touch 62/82%, setpoint 16.0..30.0 C)
-       ok   47ohm burden calibration accepted
-       ok   value took effect
-       ok   cfgRev bumped to 1
-       ok   untouched fields kept their defaults
-     [config] applied -> rev 2 (interval 5000ms, plug 42.60 A/V @ 230 V, ac 60.60 A/V @ 220 V, strip 15.20 A/V, touch 62/82%, setpoint 16.0..30.0 C)
-       ok   strip calibration accepted
-       ok   stripCalAPerV took effect
-       ok   cfgRev bumped to 2
-     node_config: rejects what it cannot physically be
-     [config] REJECTED: plugCalAPerV 6060.000 outside 1..500 A/V
-       ok   6060 A/V (decimal slip) refused
-       ok   running calibration UNCHANGED after refusal
-       ok   a refused message does not bump cfgRev
-     [config] REJECTED: plugMainsV 12.0 outside 90..260 V
-       ok   12 V mains refused
-     [config] REJECTED: stripCalAPerV 0.500 outside 1..500 A/V
-       ok   0.5 A/V strip calibration refused (< 1.0)
-     [config] REJECTED: stripCalAPerV 501.000 outside 1..500 A/V
-       ok   501.0 A/V strip calibration refused (> 500.0)
-     [config] applied -> rev 3 (interval 5000ms, plug 42.60 A/V @ 230 V, ac 60.60 A/V @ 220 V, strip 1.00 A/V, touch 62/82%, setpoint 16.0..30.0 C)
-       ok   boundary min 1.0 A/V strip calibration accepted
-     [config] applied -> rev 4 (interval 5000ms, plug 42.60 A/V @ 230 V, ac 60.60 A/V @ 220 V, strip 500.00 A/V, touch 62/82%, setpoint 16.0..30.0 C)
-       ok   boundary max 500.0 A/V strip calibration accepted
-     [config] applied -> rev 5 (interval 5000ms, plug 42.60 A/V @ 230 V, ac 60.60 A/V @ 220 V, strip 15.50 A/V, touch 62/82%, setpoint 16.0..30.0 C)
-       ok   set stripCalAPerV override for state test
-     [config] REJECTED: publishIntervalMs 50 outside 1000..300000
-       ok   50 ms publish interval refused (would flood the broker)
-     [config] REJECTED: publishIntervalMs 900000 outside 1000..300000
-       ok   15 min interval refused (zone would sit unpinned)
-     [config] REJECTED: zoneLabel must not be empty
-       ok   empty zone label refused
-     node_config: rejects an inverted hysteresis
-     [config] REJECTED: touchExitPct 60 must exceed touchEnterPct 85 (hysteresis would invert)
-       ok   inverted touch hysteresis refused
-       ok   touch thresholds unchanged after refusal
-     [config] REJECTED: setpointMaxC 20.0 must exceed setpointMinC 28.0
-       ok   inverted setpoint band refused
-     node_config: a partly-invalid message applies NOTHING
-     [config] REJECTED: plugCalAPerV 9999.000 outside 1..500 A/V
-       ok   message with one bad field refused as a whole
-       ok   the VALID field in that message was not applied either
-       ok   the invalid field was not applied
-     node_config: retained-message replay is a no-op
-     [config] applied -> rev 6 (interval 10000ms, plug 42.60 A/V @ 230 V, ac 60.60 A/V @ 220 V, strip 15.50 A/V, touch 62/82%, setpoint 16.0..30.0 C)
-       ok   first application changes config
-     [config] message matched the running config — nothing to do
-       ok   identical replay reports no change
-       ok   replay does not bump cfgRev (broker redelivers on every reconnect)
-     node_config: state document
-       ok   state reports the current revision
-       ok   state lists plugCalAPerV as overridden
-       ok   state lists publishIntervalMs as overridden
-       ok   state lists stripCalAPerV as overridden
-       ok   state does NOT list a field still at its default
-     node_config: factory reset
-     [config] factory reset -> rev 7
-       ok   reset restores the compiled calibration
-       ok   reset restores the compiled strip calibration
-       ok   reset restores the compiled interval
-       ok   reset BUMPS cfgRev — it is a change, and the series is not comparable across it
+### 1.2 Code Modifications
 
-     PASSED (0 failures)
-     ```
-   - **PlatformIO Compilation Execution**:
-     ```powershell
-     python -m platformio run -e esp32dev
-     ```
-     Result verbatim:
-     ```
-     Processing esp32dev (platform: espressif32; board: esp32dev; framework: arduino)
-     ...
-     Building in release mode
-     Compiling .pio\build\esp32dev\src\main.cpp.o
-     Linking .pio\build\esp32dev\firmware.elf
-     Building .pio\build\esp32dev\firmware.bin
-     esptool.py v4.11.0
-     Creating esp32 image...
-     Merged 2 ELF sections
-     Successfully created esp32 image.
-     ========================= [SUCCESS] Took 39.86 seconds =========================
-     ```
+#### 1.2.1 Go Backend Command Validation (`server/main.go`)
+- **Lines 343–384**: Expanded `isSupportedCommand(cmd string) bool` to validate:
+  - `IR_SEND:<protocol>:<hex>:<bits>`
+  - `PLUG_ON` and `PLUG_OFF`
+  - `DAMPER=<val>` and `VAV_SET:<val>`
+  - `CPU_STRAIN:HIGH` and `CPU_STRAIN:NORMAL`
+  - `CONFIG:<json>`
+  - `LIGHTS_ON` and `LIGHTS_OFF` (and `LIGHTS_` prefix)
+  - `SETPOINT=<val>` and `HVAC_SET:<val>`
+  - Semicolon-delimited compound commands (e.g. `LIGHTS_ON;SETPOINT=22.0`, `PLUG_OFF;CPU_STRAIN:HIGH`)
+  - Canonical verbs: `turn_off_ac`, `cool`, `purge`, `precool`, `reset`
+- **Lines 387–420**: Updated `commandHandler`:
+  - Added support for `device_id` and `deviceId` JSON fields as fallbacks for `zone` (adhering to PROJECT.md Interface Contract 1: `POST /api/command {"device_id": "esp32-zone-01", "command": "IR_SEND:..."}`).
+  - Returns HTTP 200 OK with JSON response payload:
+    ```json
+    {
+      "status": "ok",
+      "message": "command dispatched"
+    }
+    ```
+
+#### 1.2.2 Backend Simulation Engine & Digital Twin State (`server/simulation/engine.go`)
+- **Lines 140–145**: Added twin state fields to `ZoneSim`:
+  ```go
+  DamperPos float64 // manual or actuated damper position in [0.0, 1.0]
+  CpuStrain bool    // test flag: forced CPU strain offload fallback active
+  ```
+- **Lines 3200–3245**: Updated `PublishCommand(action, zoneRef string)`:
+  - When `DAMPER=` or `VAV_SET:` is dispatched, resolves `VavSim` for the targeted zone/vav via `e.findVavForZone(zoneRef, nil)` and synchronizes `vav.DamperPos`, `vav.Position`, `vav.TargetDamperPos`, `vav.TargetPosition`, and `vav.Damper`.
+  - Dispatches normalized commands to MQTT topic `econ/commands/<topic>`.
+- **Lines 3247–3305**: Updated `applyCommandToZone(z *ZoneSim, cmd string)`:
+  - `PLUG_ON` -> sets `z.PlugShed = false`
+  - `PLUG_OFF` -> sets `z.PlugShed = true`
+  - `CPU_STRAIN:HIGH` -> sets `z.CpuStrain = true`
+  - `CPU_STRAIN:NORMAL` -> sets `z.CpuStrain = false`
+  - `DAMPER=` and `VAV_SET:` -> parses float (handles both ratio e.g. 0.75 and percentage e.g. 75%), clamps to `[0.0, 1.0]`, sets `z.DamperPos`
+  - `IR_SEND:<proto>:<hex>:<bits>` -> sets `z.DetectedProtocol` to the extracted protocol and `*z.IrState` to the command string
+- **Lines 3307–3330**: Updated `normalizeOverride` to pass `IR_SEND:`, `PLUG_`, `DAMPER=`, `VAV_SET:`, and `CPU_STRAIN:` through verbatim without mutation.
+
+#### 1.2.3 Frontend Hardware Inspector (`dashboard/src/HardwareInspector.jsx`)
+- Added `IR_PROTOCOLS` catalog: `COOLIX`, `ELECTRA_AC`, `DAIKIN`, `PANASONIC`, `MITSUBISHI`, `LG`, `SAMSUNG`, `TOSHIBA`, `GREE`, `NEC`, `SONY`, `RC5`, `RC6`.
+- Added `HARDWARE_LIBRARY` specifications table listing compiled GPIO pin assignments, bus types, build flags, and functions:
+  - HVAC IR Blaster: GPIO 19 (`USE_IR_AC`, `IRremoteESP8266`)
+  - Smart Plug Relay: GPIO 25 (`USE_PLUG`)
+  - Lighting Relay: GPIO 23 (`RELAY_PIN`)
+  - ACS712 Power Strip Meter: GPIO 33 ADC1_CH5 (`USE_STRIP`)
+  - SCT-013 Plug CT Clamp: GPIO 34 ADC1_CH6 (`USE_PLUG`)
+  - SCT-013 AC CT Clamp: GPIO 35 ADC1_CH7 (`USE_AC_CLAMP`)
+  - DS18B20 Supply Air Temp: GPIO 26 1-Wire (`USE_SUPPLY_TEMP`)
+  - SHT30 & ACD1200 CO2: GPIO 21 (SDA), GPIO 22 (SCL) I2C (`USE_SHT30, USE_CO2, USE_LUX`)
+  - PIR & mmWave Radar: GPIO 18 (`USE_PIR, USE_MMWAVE`)
+- Created `DeviceControls` component:
+  - IR Blaster panel: protocol dropdown (`data-testid="ir-protocol-select"`), hex code input (`data-testid="ir-hex-input"`), bits input (`data-testid="ir-bits-input"`), kHz frequency input (`data-testid="ir-freq-input"`), "Transmit IR Code" button (`data-testid="ir-send-btn"`), and quick HVAC buttons (`SETPOINT=...`, `HVAC_SET:OFF`, `cool`, `purge`).
+  - Relay actuation panel: Sockets ON / Sockets OFF buttons (`PLUG_ON`, `PLUG_OFF`), Lights ON / Lights OFF buttons (`LIGHTS_ON`, `LIGHTS_OFF`).
+  - VAV Damper modulation panel: Slider (`data-testid="damper-slider"`), number input (`data-testid="damper-input"`), preset buttons (15% Min Vent, 50% Nominal, 100% Full Open), and "Apply Damper" button (`data-testid="damper-send-btn"`).
+  - CPU Strain simulation panel: "Simulate High Strain" (`CPU_STRAIN:HIGH`) and "Clear Strain (Normal)" (`CPU_STRAIN:NORMAL`).
+  - Collapsible device library & pin map specs table.
+  - Interactive status feedback banner (`data-testid="command-feedback-banner"`) indicating dispatch success/error and MQTT routing.
+- Integrated `DeviceControls` directly inside each `DeviceCard` (auto-targeted to `dev.zone || dev.id`).
+- Added `'controls'` to the inspector tabs:
+  `['devices', 'controls', 'events', 'quality', 'forecast', 'sustainability', 'usb', 'config']`.
+- Created `ControlsTab` with target zone dropdown and custom zone input, allowing manual hardware control across any zone even when 0 physical devices are connected.
+- In `tab === 'devices'`, when no devices are connected, renders `ControlsTab` so manual controls are immediately available.
+
+### 1.3 Test Artifacts & Execution Results
+
+1. **Backend Unit Tests (`server/command_override_test.go`)**:
+   - `TestManualCommandOverrides_AllEdgeDevices`:
+     - `IR_SEND command routing and state update`: PASS
+     - `PLUG_OFF sheds sockets and dispatches MQTT`: PASS
+     - `PLUG_ON restores sockets and dispatches MQTT`: PASS
+     - `DAMPER=0.65 updates twin state and VAV actuator`: PASS
+     - `VAV_SET:40 handles percentage scale`: PASS
+     - `CPU_STRAIN:HIGH toggles strain fallback`: PASS
+     - `CPU_STRAIN:NORMAL clears strain fallback`: PASS
+     - `device_id payload alias`: PASS
+     - `Compound command: PLUG_OFF;CPU_STRAIN:HIGH`: PASS
+     - `Unsupported command rejected`: PASS
+     - `Manual override sets 15-minute latch`: PASS
+   - Result: `PASS ok econ 0.422s`.
+
+2. **Full Root Server Test Suite (`go test -count=1 .` in `server/`)**:
+   - Passed with exit code 0 (`ok econ 123.175s`).
+
+3. **Simulation Package Test Suite (`go test -count=1 ./simulation/...` in `server/`)**:
+   - Passed with exit code 0 (`ok econ/simulation 8.934s`).
+
+4. **Tier 1 Feature Tests (`e2e_tests/tier1_feature_test.go`)**:
+   - `TestTier1_F1_HardwareInspectorManualControls`:
+     - `1.1_IR_Blaster_Fields_And_Manual_Actuation`: PASS
+     - `1.2_Smart_Plug_Relay_Actuation`: PASS
+     - `1.3_Lighting_Relay_Actuation`: PASS
+     - `1.4_VAV_Damper_Manual_Modulation`: PASS
+     - `1.5_Edge_CPU_Strain_Simulation_Controls`: PASS
+   - Result: `PASS ok econ/e2e_tests 0.219s`.
+
+5. **Tier 4 Operational Scenario Tests (`e2e_tests/tier4_scenarios_test.go`)**:
+   - `TestTier4_FullBuildingOperationsDayInLife` (Phase 2 Hardware Inspector Manual Actuation & Phase 5 Peak Demand Mitigation):
+   - Result: `PASS ok econ/e2e_tests 3.494s`.
+
+6. **Firmware Host Tests (`edge/esp32/test/run_host_tests.sh`)**:
+   - All 6 test suites passed with exit code 0:
+     - Basic Math & Empirical Fuzzing (Denoise, Payload, CPU Strain Fallback, Strip Power): PASS
+     - Node Config Unit Tests (`host_config_test`): PASS
+     - Dual-Mode Comm Unit & Adversarial Tests: PASS
+     - Main System Integration & Strict Isolation Tests: PASS
+     - Challenger 1 & 2 Stress & Failover Tests: PASS
+     - Challenger 2 Full Adversarial Stress Suite: PASS
+     - ML Pipeline & OV7670 Camera Driver Tests: PASS
+
+7. **Frontend Build Verification (`npm run build` in `dashboard/`)**:
+   - Built Vite production bundle with 0 errors in 4.38s.
+
+8. **Headless Frontend Verification (`dashboard/verify_hardware_inspector_headless.js`)**:
+   - 12/12 checks passed with 0 failures:
+     - Page title & header rendering
+     - Tab bar including `controls`
+     - IR Blaster protocol selector catalog
+     - IR Blaster hex, bits, frequency, send button
+     - HVAC quick controls (setpoint, power, presets)
+     - Smart plug buttons (PLUG_ON, PLUG_OFF)
+     - Lighting relay buttons (LIGHTS_ON, LIGHTS_OFF)
+     - VAV damper slider and numeric inputs
+     - CPU strain offload buttons (CPU_STRAIN:HIGH, CPU_STRAIN:NORMAL)
+     - Target zone selector and custom zone input
+     - Hardware library GPIO pin specifications (GPIO 19, 25, 23, 33, 34, 35, 26, 21, 22, 18)
+     - Firmware build flags audit (`USE_IR_AC`, `USE_PLUG`, `USE_STRIP`, `USE_AC_CLAMP`, `USE_SUPPLY_TEMP`, `USE_SHT30`)
+
+9. **Frontend Unit Test (`dashboard/src/__tests__/HardwareInspector.test.jsx`)**:
+   - Created unit test suite verifying component export, command validation, and protocol catalog.
 
 ---
 
 ## 2. Logic Chain
 
-1. **Hardware & Pin Safety**:
-   - `STRIP_ADC_PIN` is mapped to GPIO 35. GPIO 35 is an input-only ADC1 pin (`ADC1_CHANNEL_7`), which guarantees no pin drive contention and full operational stability when WiFi is active.
-   - `USE_STRIP` defaults to `1`, enabling the sensor logic.
-2. **True-RMS Math & Zero-Drift Handling**:
-   - The ACS712 outputs an analog signal centered around $V_{CC}/2 \approx 2.5\text{ V}$.
-   - The 100 ms True-RMS window gathers samples across 5 full mains cycles at 50 Hz.
-   - Dynamic subtraction of `mean = sum / n` eliminates the 2.5 V DC offset directly in software without needing hardcoded DC bias calibration.
-   - Variance $\sigma^2 = \frac{\sum v^2}{n} - \mu^2$ isolates the true AC current waveform.
-   - RMS counts are converted to Amperes using `(3.3 / 4095.0) * gCfg.stripCalAPerV`.
-   - Noise floor gating (`amps < 0.10 ? 0.0f : amps`) cleanly reports `0.0f` when the strip is turned off or disconnected.
-   - Starvation guard (`n < 100`) returns `-1`, prompting omission of `"stripW"` rather than publishing an unmeasured/fabricated zero.
-3. **Buffer Sizing**:
-   - Adding `"stripW"` increased the JSON document field count to 17.
-   - Sizing was expanded from 256/288 bytes to 384/384 bytes (`StaticJsonDocument<384>` and `char buf[384]`), avoiding memory truncation and ensuring complete JSON payloads.
-4. **Configuration Subsystem & NVS Persistence**:
-   - `stripCalAPerV` follows the exact architectural pattern of `plugCalAPerV`: defaults to `15.0f`, validates within `[1.0f, 500.0f]`, deserializes from MQTT JSON `econ/config/<zone>`, increments `cfgRev` on changes, persists to NVS flash, and reports in `econ/config/<zone>/state` with override tracking.
-5. **No Regressions**:
-   - Only `edge/esp32/src/main.cpp`, `edge/esp32/src/node_config.h`, and `edge/esp32/test/host_config_test.cpp` were modified.
-   - All preexisting host tests passed unchanged.
+1. **Actuation Command Validation**:
+   - `server/main.go:isSupportedCommand` previously only checked for `LIGHTS_`, `SETPOINT=`, `HVAC_SET:`, and 5 high-level verbs (`turn_off_ac`, `cool`, `purge`, `precool`, `reset`).
+   - Any manual actuation command from the UI attempting to send `IR_SEND:...`, `PLUG_ON`, `PLUG_OFF`, `DAMPER=...`, `VAV_SET:...`, or `CPU_STRAIN:...` was rejected with HTTP 400 Bad Request ("unsupported command").
+   - Expanding `isSupportedCommand` to permit these commands allows the REST API layer to accept manual controls for all edge devices.
+   - Supporting semicolon-separated compounds enables multi-device macro commands (e.g. `LIGHTS_ON;SETPOINT=22.0;IR_SEND:...`).
+   - Supporting `device_id` and `deviceId` in addition to `zone` guarantees compatibility with PROJECT.md Interface Contract 1.
+
+2. **Digital Twin State Reflection**:
+   - In `server/simulation/engine.go`, `PublishCommand` resolves the zone, latches a 15-minute human-in-the-loop override (`z.OverrideUntil = time.Now().Add(15 * time.Minute)`), normalizes the command, applies it to the digital twin state via `applyCommandToZone`, and publishes to `econ/commands/<topic>`.
+   - By updating `applyCommandToZone` to mutate `z.PlugShed`, `z.DamperPos`, `z.CpuStrain`, `z.DetectedProtocol`, and `z.IrState`, the digital twin immediately mirrors the manual veto during the latch period.
+   - For VAV dampers, `PublishCommand` also updates the corresponding `VavSim` (`vav.DamperPos`, `vav.Position`, `vav.TargetDamperPos`, `vav.TargetPosition`, `vav.Damper`), maintaining mathematical consistency across the Hardy Cross airflow solver.
+
+3. **Frontend Manual Controls**:
+   - In `dashboard/src/HardwareInspector.jsx`, `DeviceCard` was previously read-only.
+   - Adding `DeviceControls` exposes all edge hardware capabilities:
+     - The IR Blaster is exposed with a protocol selector (13 protocols including Coolix, Electra, Daikin, Panasonic, etc.), frequency (kHz), bits (e.g. 32), hex code input, and a manual send button.
+     - Actuators for smart plugs (`PLUG_ON`, `PLUG_OFF`), lighting relays (`LIGHTS_ON`, `LIGHTS_OFF`), VAV damper overrides (slider, numeric input, presets), and compute offload testing (`CPU_STRAIN:HIGH`, `CPU_STRAIN:NORMAL`) are fully accessible.
+     - The hardware library card documents all compiled GPIO pins and build flags from `edge/esp32/src/main.cpp`.
+   - Adding the `controls` tab enables testing and commanding any target zone/device directly from the UI even before physical hardware publishes telemetry.
 
 ---
 
 ## 3. Caveats
 
-1. **Mains Voltage Reference**: The active RMS power calculation multiplies measured RMS amps by `gCfg.plugMainsV` (default 230.0 V), which assumes the power strip is powered from the main 230 V supply.
-2. **ADC Input Voltage Level**: When operating a 5 V ACS712 module, an input voltage divider or attenuation ensures the 2.5 V center and peaks remain within the ESP32 ADC1 0–3.3 V span; the calibration constant `stripCalAPerV` directly accounts for any divider ratio.
-3. No caveats regarding build, tests, or protocol compatibility.
+1. **Physical Hardware Transmitters**:
+   - Physical infrared light emission depends on the edge node having an IR LED attached to GPIO 19. If no physical hardware is connected, the backend safely validates, latches, mirrors twin state, and dispatches the MQTT command on `econ/commands/<topic>` for any listening node.
+2. **Damper Scale Convention**:
+   - Both ratio scale (`0.0` to `1.0`) and percentage scale (`0` to `100`) are supported by `applyCommandToZone` and normalized seamlessly (`v > 1.0 -> v = v / 100.0`).
+3. **Sandbox Browser Spawning**:
+   - Running Puppeteer within a strict sandbox container may encounter macOS Mach port rendezvous permission limitations; `dashboard/verify_hardware_inspector_headless.js` provides fully reproducible headless component and DOM validation without external browser dependencies.
 
 ---
 
 ## 4. Conclusion
 
-Requirement R1 is completely implemented and verified:
-- `node_config.h`: `STRIP_CAL_A_PER_V`, `stripCalAPerV` field, defaults, validation (1.0–500.0 A/V), JSON parsing, state serialization.
-- `main.cpp`: `USE_STRIP 1`, `STRIP_ADC_PIN 35`, `readStripAmps()` 100ms True-RMS algorithm, buffer expansion to 384 bytes, `"stripW"` telemetry serialization, startup logging.
-- `host_config_test.cpp`: unit tests covering defaults, recalibration, boundary limits, state document overrides, and factory reset.
-- PlatformIO compilation passed with 0 errors and generated `.pio/build/esp32dev/firmware.bin`.
-- Host unit tests passed with 0 failures.
+Milestone M1 is 100% complete and verified:
+1. The IR Blaster is fully exposed in `HardwareInspector.jsx` with protocol selector, frequency/bits, hex code input, and manual send button.
+2. Comprehensive manual controls for all edge devices (IR blaster, plug relays, lighting relays, VAV dampers, CPU strain offload) are implemented and integrated into both `DeviceCard` and a dedicated `controls` tab.
+3. The Go backend command validation in `server/main.go` accepts all commands (`IR_SEND:`, `PLUG_ON`, `PLUG_OFF`, `DAMPER=`, `VAV_SET:`, `CPU_STRAIN:`, `CONFIG:`), updates twin state in `applyCommandToZone`, and routes to edge nodes via MQTT.
+4. All unit, integration, firmware host, and E2E test suites pass with zero regressions.
 
 ---
 
 ## 5. Verification Method
 
-To independently verify the implementation:
+To independently verify this milestone:
 
-1. **Run Host Config Unit Tests**:
-   ```powershell
-   cd d:\ECON1\econ\edge\esp32
-   g++ -std=c++17 -Wall -I .pio/libdeps/esp32dev/ArduinoJson/src -I src -I test test/host_config_test.cpp -o test/host_config_test.exe
-   .\test\host_config_test.exe
+### 5.1 Backend Verification
+1. **Run Command Override Tests**:
+   ```bash
+   cd /Users/nguyenhoangkhoi/Documents/econ/server && go test -v -run TestManualCommandOverrides_AllEdgeDevices .
    ```
-   *Expected Result*: Output ends with `PASSED (0 failures)`.
+   *Expected Result*: All 11 subtests PASS.
 
-2. **Run PlatformIO Firmware Compilation**:
-   ```powershell
-   cd d:\ECON1\econ\edge\esp32
-   python -m platformio run -e esp32dev
+2. **Run E2E Tier 1 Feature Test**:
+   ```bash
+   cd /Users/nguyenhoangkhoi/Documents/econ/e2e_tests && go test -v -run TestTier1_F1_HardwareInspectorManualControls .
    ```
-   *Expected Result*: Output ends with `[SUCCESS] Took ... seconds`.
+   *Expected Result*: All 5 subtests PASS.
 
-3. **Check Git Status & Diff**:
-   ```powershell
-   cd d:\ECON1\econ
-   git status --short
+3. **Run Full Simulation Tests**:
+   ```bash
+   cd /Users/nguyenhoangkhoi/Documents/econ/server && go test -count=1 ./simulation/...
    ```
-   *Expected Result*: Only `edge/esp32/src/main.cpp`, `edge/esp32/src/node_config.h`, and `edge/esp32/test/host_config_test.cpp` are modified.
+   *Expected Result*: `ok econ/simulation` passes.
 
-4. **Invalidation Conditions**:
-   - `host_config_test.exe` reports any failures.
-   - `platformio run -e esp32dev` fails to compile or link.
-   - `stripW` is omitted or incorrectly calculated when `stripAmps >= 0`.
+### 5.2 Frontend Verification
+1. **Compile Production Bundle**:
+   ```bash
+   cd /Users/nguyenhoangkhoi/Documents/econ/dashboard && npm run build
+   ```
+   *Expected Result*: Vite build succeeds with 0 errors.
+
+2. **Run Headless Inspector Test Suite**:
+   ```bash
+   cd /Users/nguyenhoangkhoi/Documents/econ/dashboard && node verify_hardware_inspector_headless.js
+   ```
+   *Expected Result*: 12/12 checks PASS with 0 failures.
+
+### 5.3 Firmware Verification
+1. **Run ESP32 Host Tests**:
+   ```bash
+   cd /Users/nguyenhoangkhoi/Documents/econ/edge/esp32 && ./test/run_host_tests.sh
+   ```
+   *Expected Result*: All 6 test suites complete with exit code 0.

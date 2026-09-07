@@ -178,6 +178,10 @@ func main() {
 	loadSustainabilityState(carbonTracker, engine.BuildingId())
 	http.HandleFunc("/api/sustainability", sustainabilityHandler(engine, carbonTracker))
 
+	// 13. Operation Mode REST API (modeapi.go): GET/POST /api/mode to query or switch
+	// between Simulation Mode and Real Mode.
+	http.HandleFunc("/api/mode", modeHandler(engine))
+
 	// Connect to the MQTT broker: ingest real occupancy from the CV/edge layer and
 	// publish actuation commands to the ESP32. Non-blocking; the sim runs regardless.
 	startMQTT(engine)
@@ -337,11 +341,43 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request, engine *simulation.
 var validZoneRegex = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
 
 func isSupportedCommand(cmd string) bool {
-	upper := strings.ToUpper(cmd)
-	if strings.HasPrefix(upper, "LIGHTS_") || strings.HasPrefix(upper, "SETPOINT=") || strings.HasPrefix(upper, "HVAC_SET:") {
+	trimmed := strings.TrimSpace(cmd)
+	if trimmed == "" {
+		return false
+	}
+	upper := strings.ToUpper(trimmed)
+	if strings.HasPrefix(upper, "LIGHTS_") ||
+		strings.HasPrefix(upper, "SETPOINT=") ||
+		strings.HasPrefix(upper, "HVAC_SET:") ||
+		strings.HasPrefix(upper, "IR_SEND:") ||
+		upper == "PLUG_ON" || upper == "PLUG_OFF" ||
+		strings.HasPrefix(upper, "DAMPER=") ||
+		strings.HasPrefix(upper, "VAV_SET:") ||
+		strings.HasPrefix(upper, "CPU_STRAIN:") ||
+		strings.HasPrefix(upper, "CONFIG:") {
 		return true
 	}
-	lower := strings.ToLower(cmd)
+	// Check compound ;-separated commands (e.g. "LIGHTS_ON;SETPOINT=20.0" or "PLUG_OFF;CPU_STRAIN:HIGH")
+	if strings.Contains(trimmed, ";") {
+		tokens := strings.Split(trimmed, ";")
+		allValid := true
+		count := 0
+		for _, tok := range tokens {
+			tok = strings.TrimSpace(tok)
+			if tok == "" {
+				continue
+			}
+			count++
+			if !isSupportedCommand(tok) {
+				allValid = false
+				break
+			}
+		}
+		if allValid && count > 0 {
+			return true
+		}
+	}
+	lower := strings.ToLower(trimmed)
 	switch lower {
 	case "turn_off_ac", "cool", "purge", "precool", "reset":
 		return true
@@ -351,7 +387,7 @@ func isSupportedCommand(cmd string) bool {
 }
 
 // commandHandler handles manual command overrides from the UI or external callers.
-// Supports both "command" and "action" fields in the request JSON payload.
+// Supports both "command" and "action" fields, and "zone", "device_id", or "deviceId".
 func commandHandler(engine *simulation.Engine) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if corsPreflight(w, r) {
@@ -367,9 +403,11 @@ func commandHandler(engine *simulation.Engine) http.HandlerFunc {
 		r.Body = http.MaxBytesReader(w, r.Body, 4096)
 
 		var payload struct {
-			Zone    string `json:"zone"`
-			Command string `json:"command"`
-			Action  string `json:"action"`
+			Zone     string `json:"zone"`
+			DeviceId string `json:"device_id"`
+			DeviceID string `json:"deviceId"`
+			Command  string `json:"command"`
+			Action   string `json:"action"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -381,6 +419,13 @@ func commandHandler(engine *simulation.Engine) http.HandlerFunc {
 			payload.Command = strings.TrimSpace(payload.Command)
 		}
 		payload.Zone = strings.TrimSpace(payload.Zone)
+		if payload.Zone == "" {
+			if strings.TrimSpace(payload.DeviceId) != "" {
+				payload.Zone = strings.TrimSpace(payload.DeviceId)
+			} else if strings.TrimSpace(payload.DeviceID) != "" {
+				payload.Zone = strings.TrimSpace(payload.DeviceID)
+			}
+		}
 		if payload.Zone == "" || payload.Command == "" {
 			http.Error(w, "zone and command/action are required", http.StatusBadRequest)
 			return
@@ -399,7 +444,12 @@ func commandHandler(engine *simulation.Engine) http.HandlerFunc {
 		}
 
 		engine.PublishCommand(payload.Command, payload.Zone)
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"status":  "ok",
+			"message": "command dispatched",
+		})
 	}
 }
 

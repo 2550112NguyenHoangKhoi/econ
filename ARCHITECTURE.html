@@ -1,0 +1,2537 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>ECON System Architecture</title>
+<style>
+  @page {
+    size: A3 portrait;
+    margin: 1.5cm 1.5cm 2cm 1.5cm;
+    @bottom-center {
+      content: "Page " counter(page) " of " counter(pages);
+      font-size: 9pt;
+      color: #666;
+    }
+  }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    font-size: 11pt;
+    line-height: 1.55;
+    color: #1a1a1a;
+    max-width: 100%;
+    padding: 0;
+  }
+  h1 {
+    font-size: 22pt;
+    color: #111;
+    border-bottom: 3px solid #333;
+    padding-bottom: 6pt;
+    page-break-after: avoid;
+  }
+  h2 {
+    font-size: 17pt;
+    color: #222;
+    border-bottom: 1.5px solid #999;
+    padding-bottom: 4pt;
+    margin-top: 18pt;
+    page-break-after: avoid;
+  }
+  h3 {
+    font-size: 13pt;
+    color: #333;
+    margin-top: 14pt;
+    page-break-after: avoid;
+  }
+  h4 {
+    font-size: 11.5pt;
+    color: #444;
+    page-break-after: avoid;
+  }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 10pt 0;
+    font-size: 9pt;
+    line-height: 1.4;
+    page-break-inside: auto;
+  }
+  thead {
+    display: table-header-group;
+  }
+  tr {
+    page-break-inside: avoid;
+  }
+  th {
+    background: #2d2d2d;
+    color: white;
+    padding: 6pt 6pt;
+    text-align: left;
+    font-weight: 600;
+    border: 1px solid #444;
+  }
+  td {
+    padding: 5pt 6pt;
+    border: 1px solid #ccc;
+    vertical-align: top;
+  }
+  tr:nth-child(even) td {
+    background: #f7f7f7;
+  }
+  code {
+    font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+    font-size: 9pt;
+    background: #f0f0f0;
+    padding: 1pt 4pt;
+    border-radius: 3pt;
+    color: #c7254e;
+  }
+  pre {
+    background: #1e1e1e;
+    color: #d4d4d4;
+    padding: 10pt 12pt;
+    border-radius: 6pt;
+    font-size: 8.5pt;
+    line-height: 1.45;
+    overflow-x: auto;
+    page-break-inside: avoid;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+  }
+  pre code {
+    background: none;
+    color: inherit;
+    padding: 0;
+    font-size: inherit;
+  }
+  blockquote {
+    border-left: 4px solid #0969da;
+    margin: 10pt 0;
+    padding: 6pt 12pt;
+    background: #f0f7ff;
+    color: #333;
+    font-size: 10pt;
+  }
+  hr {
+    border: none;
+    border-top: 1px solid #ccc;
+    margin: 16pt 0;
+  }
+  strong {
+    color: #111;
+  }
+  /* Mermaid code blocks rendered as text placeholders */
+  pre.highlight {
+    background: #f8f8f8;
+    border: 1px solid #ddd;
+  }
+  /* Math formulas */
+  .arithmatex {
+    font-style: italic;
+  }
+</style>
+</head>
+<body>
+<h1 id="econ-enterprise-digital-twin-system-architecture-onboarding-reference">ECON Enterprise Digital Twin: System Architecture &amp; Onboarding Reference</h1>
+<p><strong>Author:</strong> ECON Core Engineering Team &amp; Technical Documentation Lead<br />
+<strong>Document Version:</strong> 2.4.0<br />
+<strong>Target Release:</strong> Enterprise Production &amp; Research Baseline<br />
+<strong>Project Workspace:</strong> <code>/Users/nguyenhoangkhoi/Documents/econ</code><br />
+<strong>Associated Publications:</strong> ECON Scientific Paper (<code>PAPER.md</code>)  </p>
+<hr />
+<h2 id="1-executive-summary-full-system-architecture-mind-map">1. Executive Summary &amp; Full-System Architecture Mind Map</h2>
+<h3 id="11-executive-summary">1.1 Executive Summary</h3>
+<p>The <strong>ECON Enterprise Digital Twin</strong> is an end-to-end, physics-grounded cyber-physical building energy and indoor environmental management platform. Designed to overcome the operational and architectural limitations of legacy Building Management Systems (BMS), ECON couples real-time physical telemetry with continuous first-principles thermodynamic simulation, online system identification, and generative AI forecasting.</p>
+<p>The platform is architected around the core engineering principle: <strong>"Never fabricate a measurement"</strong>. Physical edge microcontrollers report strictly what has been observed; absent or failing sensors cause telemetry fields to be omitted rather than replaced with synthetic constants. In the absence of physical sensors, the Go backend engine executes an autonomous lumped-capacitance 2R1C thermodynamic model, a closed-form Hardy Cross airflow solver, and diurnal occupancy profiles running at 30 FPS.</p>
+<p>The complete system spans seven ascending architectural layers—from physical edge silicon to browser-rendered WebGL:
+1. <strong>Layer 1: Edge Hardware &amp; Sensors</strong>: ESP32 DevKit and Raspberry Pi Pico microcontrollers hosting 16+ sensor and actuator modalities across I2C, ADC, 1-Wire, UART, and digital interfaces.
+2. <strong>Layer 2: Communication &amp; Message Broker</strong>: Eclipse Mosquitto MQTT broker with role-based ACLs, DualModeComm (UDP/MQTT/Serial), strict topic hierarchies, and an autonomous edge gateway failsafe daemon.
+3. <strong>Layer 3: Backend Engine &amp; Simulation</strong>: High-throughput Go simulation engine integrating 30 FPS 2R1C thermal ODEs, closed-form Hardy Cross fluid networks, Recursive Least Squares (RLS) room identification, Autonomous Plug-Load Control (APLC), dynamic vacancy setback optimization, pre-cooling loops, and sensorless "Shadow Twin" Automated Fault Detection &amp; Diagnostics (AFDD).
+4. <strong>Layer 4: AI/ML &amp; Forecasting</strong>: Supervised PeakLoadLSTM, Google TimesFM zero-shot foundation models (231M/500M parameters), online Welford learned baselines, and cross-process HTTP IPC with plausibility gating.
+5. <strong>Layer 5: Database &amp; Persistence</strong>: PostgreSQL with TimescaleDB hypertables, 5-minute continuous aggregates, an 8192-capacity lockless write buffer, and 60-second durable JSON state checkpointing.
+6. <strong>Layer 6: API Layer</strong>: 32 REST endpoints and high-speed binary Google FlatBuffers WebSocket streaming at 30 Hz with CSWSH protection and constant-time token verification.
+7. <strong>Layer 7: Frontend Dashboard</strong>: React 18, Vite 5, Three.js / React Three Fiber procedural BIM 3D digital twin with CSG window cutouts, custom GLSL thermal heatmap shaders, and honest Recharts forecast deciles.</p>
+<hr />
+<h3 id="12-full-system-architecture-mind-map">1.2 Full-System Architecture Mind Map</h3>
+<div class="highlight"><pre><span></span><code>graph TD
+    ROOT((&quot;ECON Digital Twin&quot;))
+
+    ROOT --&gt; L1[&quot;Layer 1: Edge Hardware &amp; Sensors&quot;]
+    ROOT --&gt; L2[&quot;Layer 2: Communication &amp; Broker&quot;]
+    ROOT --&gt; L3[&quot;Layer 3: Backend Engine &amp; Simulation&quot;]
+    ROOT --&gt; L4[&quot;Layer 4: AI/ML &amp; Forecasting&quot;]
+    ROOT --&gt; L5[&quot;Layer 5: Database &amp; Persistence&quot;]
+    ROOT --&gt; L6[&quot;Layer 6: API Layer&quot;]
+    ROOT --&gt; L7[&quot;Layer 7: Frontend Dashboard&quot;]
+
+    %% Layer 1
+    L1 --&gt; ESP32[&quot;ESP32 Dual-Core MCU&quot;]
+    L1 --&gt; PICO[&quot;RP2040 Raspberry Pi Pico&quot;]
+    L1 --&gt; BOM[&quot;Tiered BOM Builds A-D&quot;]
+
+    ESP32 --&gt; SHT30[&quot;SHT30 Temp &amp; Humidity&quot;]
+    ESP32 --&gt; ACD1200[&quot;ACD1200 NDIR CO2&quot;]
+    ESP32 --&gt; SCT013[&quot;SCT-013 Current Clamps&quot;]
+    ESP32 --&gt; ACS712[&quot;ACS712 Hall Meter&quot;]
+    ESP32 --&gt; DS18B20[&quot;DS18B20 Discharge Probe&quot;]
+    ESP32 --&gt; BH1750[&quot;BH1750 Lux Sensor&quot;]
+    ESP32 --&gt; PRESENCE[&quot;PIR &amp; mmWave Radar&quot;]
+    ESP32 --&gt; OV7670[&quot;OV7670 Edge ML Vision&quot;]
+    ESP32 --&gt; SSR[&quot;Solid State Relays&quot;]
+    ESP32 --&gt; IR[&quot;940nm IR AC Blaster&quot;]
+
+    PICO --&gt; PICO_TEMP[&quot;Internal Die Temp&quot;]
+    PICO --&gt; PICO_BTN[&quot;BOOTSEL &amp; GP16 Presence&quot;]
+    PICO --&gt; PICO_LED[&quot;Onboard Lighting LED&quot;]
+    PICO --&gt; PICO_PIR[&quot;Dual PIR Counter&quot;]
+    PICO --&gt; PICO_WDT[&quot;8s Hardware Watchdog&quot;]
+
+    %% Layer 2
+    L2 --&gt; MOSQ[&quot;Mosquitto MQTT :1883&quot;]
+    L2 --&gt; TOPICS[&quot;Strict Topic Hierarchy&quot;]
+    L2 --&gt; DUAL[&quot;DualModeComm&quot;]
+    L2 --&gt; GW[&quot;Gateway Failsafe Daemon&quot;]
+    L2 --&gt; OFFLOAD[&quot;Compute-Offload Fallback&quot;]
+
+    MOSQ --&gt; ACL[&quot;Role-Based ACL Security&quot;]
+    MOSQ --&gt; USERS[&quot;econ-engine / econ-node / econ-gateway&quot;]
+    TOPICS --&gt; TLIST[&quot;telemetry / commands / status / config&quot;]
+    DUAL --&gt; UDP[&quot;UDP Broadcast :4210&quot;]
+    DUAL --&gt; MQTT_TCP[&quot;MQTT TCP :1883&quot;]
+    DUAL --&gt; SERIAL[&quot;Serial CDC Fallback&quot;]
+    GW --&gt; GW_TIMEOUT[&quot;10s Engine Timeout&quot;]
+    GW --&gt; GW_VACANCY[&quot;30s Vacancy Delay&quot;]
+    GW --&gt; GW_SETBACK[&quot;28C Fallback Setback&quot;]
+
+    %% Layer 3
+    L3 --&gt; FPS[&quot;30 FPS Physics Pipeline&quot;]
+    L3 --&gt; THERMAL[&quot;2R1C Lumped Thermal Circuit&quot;]
+    L3 --&gt; HARDY[&quot;Hardy Cross Airflow Network&quot;]
+    L3 --&gt; RLS[&quot;Online System Identification&quot;]
+    L3 --&gt; BASELINES[&quot;Learned Operating Baselines&quot;]
+    L3 --&gt; APLC[&quot;Autonomous Plug-Load Control&quot;]
+    L3 --&gt; PRECOOL[&quot;Pre-Cool Decision Loop&quot;]
+    L3 --&gt; SETBACK[&quot;Dynamic Vacancy Setback&quot;]
+    L3 --&gt; AFDD[&quot;Shadow Twin AFDD&quot;]
+
+    THERMAL --&gt; EULER[&quot;Forward Euler ODE Integration&quot;]
+    THERMAL --&gt; CAP[&quot;Air &amp; Wall Capacitances&quot;]
+    THERMAL --&gt; VAV[&quot;VAV Cooling Normalization&quot;]
+    HARDY --&gt; STAR[&quot;Closed-Form Star Reduction&quot;]
+    HARDY --&gt; FAN[&quot;Dynamic Fan Curve Sizing&quot;]
+    HARDY --&gt; PA[&quot;Static Pressure Ceiling 650 Pa&quot;]
+    RLS --&gt; RLS_ALG[&quot;Recursive Least Squares&quot;]
+    RLS --&gt; EIV[&quot;Errors-in-Variables Midpoint&quot;]
+    RLS --&gt; BAYES[&quot;Bayesian Ridge Prior&quot;]
+    RLS --&gt; HORIZON[&quot;Closed-Form Horizon Projection&quot;]
+    BASELINES --&gt; WELFORD[&quot;Welford EWMA Mean/Variance&quot;]
+    BASELINES --&gt; BUCKETS[&quot;24 Diurnal Hour Buckets&quot;]
+    BASELINES --&gt; ZSCORE[&quot;Z-Score Anomaly Triggering&quot;]
+    APLC --&gt; SWEEP[&quot;15-min Vacancy Sweep&quot;]
+    APLC --&gt; PHANTOM[&quot;70% Phantom Shedding&quot;]
+    PRECOOL --&gt; LOOKAHEAD[&quot;TimesFM &amp; LSTM Lookahead&quot;]
+    PRECOOL --&gt; PLAUS[&quot;Plausibility Range Gating&quot;]
+    SETBACK --&gt; OVERRIDE[&quot;15-min Human Override Latch&quot;]
+    SETBACK --&gt; CEILING[&quot;SetbackCeiling Thermal Recovery&quot;]
+    AFDD --&gt; SHADOW[&quot;Sensorless 2R1C Parallel Twin&quot;]
+    AFDD --&gt; RESIDUAL[&quot;2.0C Residual EMA Alert&quot;]
+
+    %% Layer 4
+    L4 --&gt; FASTAPI[&quot;FastAPI Service :8000&quot;]
+    L4 --&gt; LSTM[&quot;PeakLoadLSTM Supervised&quot;]
+    L4 --&gt; TIMESFM[&quot;Google TimesFM Foundation&quot;]
+    L4 --&gt; IPC[&quot;Go-Python IPC Orchestrator&quot;]
+    L4 --&gt; CATALOG[&quot;Model Catalog Tiers 1-4&quot;]
+
+    LSTM --&gt; HIDDEN[&quot;64 Hidden Units, 2 Layers&quot;]
+    LSTM --&gt; HIST[&quot;14-Day TimescaleDB History&quot;]
+    LSTM --&gt; SYNTH[&quot;Synthetic Physics Training&quot;]
+    TIMESFM --&gt; TFM_VER[&quot;timesfm-2.5-200m&quot;]
+    TIMESFM --&gt; ZEROSHOT[&quot;Zero-Shot Load Trajectory&quot;]
+    TIMESFM --&gt; QUANTILE[&quot;Decile Quantile Bands q1-q9&quot;]
+    TIMESFM --&gt; DEVICE[&quot;Dynamic MPS/CUDA/CPU&quot;]
+    IPC --&gt; CONCURRENT[&quot;Concurrent Model Querying&quot;]
+    IPC --&gt; AUDIT[&quot;Plausibility Range Auditing&quot;]
+    CATALOG --&gt; EXPORT[&quot;Offline Model Bundle Export&quot;]
+
+    %% Layer 5
+    L5 --&gt; TSDB[&quot;PostgreSQL 16 + TimescaleDB&quot;]
+    L5 --&gt; WRITE[&quot;Lockless Write Pipeline&quot;]
+    L5 --&gt; ROUTING[&quot;Adaptive Query Routing&quot;]
+    L5 --&gt; CHECKPOINT[&quot;Durable JSON Checkpoints&quot;]
+
+    TSDB --&gt; HYPER[&quot;sensor-readings Hypertable 7-Day&quot;]
+    TSDB --&gt; ROLLUP[&quot;sensor-readings-5m Rollup 90-Day&quot;]
+    TSDB --&gt; EVENTS[&quot;device-events Lifecycle Audit&quot;]
+    WRITE --&gt; BUFFER[&quot;8192-Capacity writeCh Buffer&quot;]
+    WRITE --&gt; BATCH[&quot;Batched 512-Row Worker&quot;]
+
+    %% Layer 6
+    L6 --&gt; REST[&quot;32 REST Endpoints&quot;]
+    L6 --&gt; WS[&quot;Binary WebSocket Streaming&quot;]
+    L6 --&gt; SEC[&quot;Security &amp; Governance&quot;]
+
+    REST --&gt; REST_TOPO[&quot;Topology, Models &amp; History&quot;]
+    REST --&gt; REST_FORE[&quot;Forecasts, Carbon &amp; Devices&quot;]
+    REST --&gt; REST_PLUG[&quot;APLC, Plugs &amp; Overrides&quot;]
+    WS --&gt; FLATBUF[&quot;FlatBuffers SimState Schema&quot;]
+    WS --&gt; HZ30[&quot;30 Hz Non-Blocking Broadcast&quot;]
+    SEC --&gt; CSWSH[&quot;CSWSH Origin Verification&quot;]
+    SEC --&gt; TOKEN[&quot;Constant-Time Admin Auth&quot;]
+
+    %% Layer 7
+    L7 --&gt; REACT[&quot;React 18 + Vite 5 SPA&quot;]
+    L7 --&gt; STORE[&quot;Dynamic State Store&quot;]
+    L7 --&gt; BIM[&quot;Procedural BIM 3D Twin&quot;]
+    L7 --&gt; FORECAST_VIZ[&quot;Honest Forecast Visualizer&quot;]
+    L7 --&gt; AI_OPS[&quot;AI Operations &amp; Evidence&quot;]
+
+    STORE --&gt; BOOT[&quot;Two-Stage Bootloader&quot;]
+    STORE --&gt; SWITCHER[&quot;Multi-Level vs Home Switcher&quot;]
+    BIM --&gt; THREE[&quot;Three.js + React Three Fiber&quot;]
+    BIM --&gt; CSG[&quot;CSG Window Wall Subtraction&quot;]
+    BIM --&gt; GLSL[&quot;Custom GLSL Heatmap Shader&quot;]
+    BIM --&gt; LERP[&quot;Frame Optimization Lerping&quot;]
+    FORECAST_VIZ --&gt; ZEROCURVE[&quot;Zero-Curve Data Fallback&quot;]
+    FORECAST_VIZ --&gt; DECILES[&quot;Recharts Decile Risk Bands&quot;]
+    AI_OPS --&gt; SIGMA[&quot;Visual Sigma-Strip Anomaly&quot;]
+    AI_OPS --&gt; STEP[&quot;RLS Step-Response Curves&quot;]
+    AI_OPS --&gt; AUTOPILOT[&quot;Autonomous Auto-Pilot Toggle&quot;]
+</code></pre></div>
+
+<hr />
+<h2 id="2-zero-hardware-simulation-path-developer-quick-start-guide">2. Zero-Hardware Simulation Path &amp; Developer Quick-Start Guide</h2>
+<p>The ECON platform provides a fully autonomous, zero-hardware simulation path. Collaborators and new team members can build, execute, debug, and test the entire system without connecting a single microcontroller, wire, or sensor.</p>
+<h3 id="21-simulation-architecture-principles">2.1 Simulation Architecture &amp; Principles</h3>
+<p>When physical edge hardware is absent:
+1. <strong>Autonomous 2R1C Thermal Integration</strong>: The Go engine evaluates <code>z.hwFresh()</code> (<code>server/simulation/engine.go:999–1002</code>). When no MQTT packet has arrived for $&gt;20$ seconds (<code>hwStaleAfter</code>), physical sensor pinning disengages. The zone’s air ($T_{\text{air}}$) and wall ($T_{\text{wall}}$) temperatures are governed strictly by the Forward Euler integration of the 2R1C thermodynamic ODEs.
+2. <strong>Climatological Diurnal Weather Model</strong>: If external weather APIs are unreachable, outdoor temperature follows a deterministic Ho Chi Minh City diurnal sinusoid (<code>engine.go:1007–1021</code>):
+   $$T_{\text{out}}(t) = 29.5 + 4.5 \cos\left(\frac{2\pi (t_{\text{hour}} - 15)}{24}\right) \quad [25.0^\circ\text{C}\text{ at dawn to }34.0^\circ\text{C}\text{ at 15:00}]$$
+3. <strong>Diurnal Building Occupancy Schedule</strong>: Occupancy schedules modulate human density and internal thermal gains based on standard commercial building operating hours (<code>engine.go:2022</code>).
+4. <strong>Closed-Form Hardy Cross Airflow</strong>: Duct static pressures and VAV branch airflows are computed from damper positions and fan curves without requiring physical flow sensors.</p>
+<div class="highlight"><pre><span></span><code>sequenceDiagram
+    autonumber
+    participant Dev as Collaborator Workstation
+    participant Mosq as Mosquitto MQTT (:1883)
+    participant DB as TimescaleDB (:5432)
+    participant ML as FastAPI Service (:8000)
+    participant Engine as Go Simulation Engine (:8080)
+    participant UI as Vite React Dashboard (:5173)
+
+    Note over Dev,UI: Step 1: Infrastructure Initialization
+    Dev-&gt;&gt;Mosq: docker run -p 1883:1883 eclipse-mosquitto
+    Dev-&gt;&gt;DB: docker run -p 5432:5432 timescale/timescaledb
+    Dev-&gt;&gt;ML: uvicorn main:app --port 8000
+    Dev-&gt;&gt;Engine: go run . (Starts 30 FPS Physics Loop)
+    Dev-&gt;&gt;UI: npm run dev (Starts Vite Local Server)
+
+    Note over Engine,UI: Step 2: Autonomous In-Silico Physics &amp; Streaming
+    Engine-&gt;&gt;Engine: 2R1C Coupled ODE Integration (30 FPS)
+    Engine-&gt;&gt;Engine: Hardy Cross Airflow Solver (P_ahu, Q_v)
+    Engine-&gt;&gt;Engine: Diurnal Weather &amp; Occupancy Schedule Evaluation
+    Engine-&gt;&gt;ML: HTTP POST /forecast/load (Recent Load History)
+    ML--&gt;&gt;Engine: TimesFM Point Forecast + Decile Bands (q1..q9)
+    Engine-&gt;&gt;DB: Asynchronous Batched Multi-Row Write (writeCh -&gt; sensor_readings)
+    Engine-&gt;&gt;UI: Binary FlatBuffers SimState over WebSocket (:8080/ws)
+    UI-&gt;&gt;UI: GLSL Heatmap Shader Update + Recharts Trajectory Render
+</code></pre></div>
+
+<hr />
+<h3 id="22-step-by-step-local-quick-start-guide">2.2 Step-by-Step Local Quick-Start Guide</h3>
+<p>Follow these commands to launch the complete ECON stack locally on macOS or Linux:</p>
+<h4 id="terminal-1-infrastructure-services-mqtt-broker-timescaledb">Terminal 1: Infrastructure Services (MQTT Broker &amp; TimescaleDB)</h4>
+<div class="highlight"><pre><span></span><code><span class="nb">cd</span><span class="w"> </span>/Users/nguyenhoangkhoi/Documents/econ/server
+
+<span class="c1"># Launch Mosquitto broker and TimescaleDB via Docker Compose</span>
+docker<span class="w"> </span>compose<span class="w"> </span>up<span class="w"> </span>-d<span class="w"> </span>mqtt<span class="w"> </span>db
+
+<span class="c1"># Verify services are healthy</span>
+docker<span class="w"> </span>compose<span class="w"> </span>ps
+<span class="c1"># Mosquitto listening on localhost:1883</span>
+<span class="c1"># TimescaleDB listening on localhost:5432 (user: postgres, pass: postgres, db: econ)</span>
+</code></pre></div>
+
+<p><em>(Note: If Docker is unavailable, Mosquitto and PostgreSQL/TimescaleDB can be installed and executed natively via Homebrew or apt).</em></p>
+<h4 id="terminal-2-ai-forecasting-microservice-python-fastapi">Terminal 2: AI Forecasting Microservice (Python FastAPI)</h4>
+<div class="highlight"><pre><span></span><code><span class="nb">cd</span><span class="w"> </span>/Users/nguyenhoangkhoi/Documents/econ/backend/forecasting
+
+<span class="c1"># Create and activate virtual environment</span>
+python3<span class="w"> </span>-m<span class="w"> </span>venv<span class="w"> </span>venv
+<span class="nb">source</span><span class="w"> </span>venv/bin/activate
+
+<span class="c1"># Install dependencies (PyTorch, Transformers, FastAPI, Uvicorn)</span>
+pip<span class="w"> </span>install<span class="w"> </span>-r<span class="w"> </span>requirements.txt
+
+<span class="c1"># Execute supervised trainer to generate local model weights and scaler</span>
+python<span class="w"> </span>train.py
+
+<span class="c1"># Launch FastAPI forecasting server</span>
+uvicorn<span class="w"> </span>main:app<span class="w"> </span>--host<span class="w"> </span><span class="m">0</span>.0.0.0<span class="w"> </span>--port<span class="w"> </span><span class="m">8000</span><span class="w"> </span>--reload
+<span class="c1"># Service ready at http://localhost:8000</span>
+<span class="c1"># OpenAPI documentation available at http://localhost:8000/docs</span>
+</code></pre></div>
+
+<h4 id="terminal-3-go-backend-simulation-engine">Terminal 3: Go Backend Simulation Engine</h4>
+<div class="highlight"><pre><span></span><code><span class="nb">cd</span><span class="w"> </span>/Users/nguyenhoangkhoi/Documents/econ/server
+
+<span class="c1"># Run the Go engine (auto-connects to MQTT :1883, DB :5432, ML :8000)</span>
+go<span class="w"> </span>run<span class="w"> </span>.
+
+<span class="c1"># Backend initializes:</span>
+<span class="c1"># - Loads programme-library.json and building topology</span>
+<span class="c1"># - Seeds 2R1C thermal states and sizes Hardy Cross fan</span>
+<span class="c1"># - Starts 30 FPS physics ticker (dt = 33.3ms)</span>
+<span class="c1"># - Starts FlatBuffers WebSocket server on :8080/ws</span>
+<span class="c1"># - Starts REST API server on http://localhost:8080</span>
+</code></pre></div>
+
+<h4 id="terminal-4-frontend-operations-dashboard-react-vite">Terminal 4: Frontend Operations Dashboard (React / Vite)</h4>
+<div class="highlight"><pre><span></span><code><span class="nb">cd</span><span class="w"> </span>/Users/nguyenhoangkhoi/Documents/econ/dashboard
+
+<span class="c1"># Install npm dependencies</span>
+npm<span class="w"> </span>install<span class="w"> </span>--legacy-peer-deps
+
+<span class="c1"># Launch Vite development server</span>
+npm<span class="w"> </span>run<span class="w"> </span>dev
+<span class="c1"># Dashboard opens at http://localhost:5173</span>
+</code></pre></div>
+
+<hr />
+<h3 id="23-synthetic-telemetry-generators-emulators">2.3 Synthetic Telemetry Generators &amp; Emulators</h3>
+<p>To simulate active hardware nodes, test edge binding, inject physical faults, or evaluate computer vision occupancy:</p>
+<ol>
+<li>
+<p><strong>Software ESP32 Emulator (<code>edge/esp32/esp32_emulator.py</code>)</strong>:
+   Simulates a live ESP32 edge node over MQTT. Connects to <code>localhost:1883</code>, publishes realistic telemetry to <code>econ/telemetry/zone_1</code>, and responds to actuation commands (<code>LIGHTS_ON</code>, <code>LIGHTS_OFF</code>, <code>SETPOINT=22.0</code>):
+   <code>bash
+   python3 edge/esp32/esp32_emulator.py</code></p>
+</li>
+<li>
+<p><strong>Computer Vision Headcount Tracker (<code>ai_modules/branch_a_occupancy/yolo_bytetrack/yolo_tracker.py</code>)</strong>:
+   Executes YOLOv8 and ByteTrack on bundled camera footage (<code>people-detection.mp4</code>), streaming detected person counts and bounding box confidence to <code>econ/telemetry/&lt;zone&gt;</code>:
+   <code>bash
+   cd ai_modules/branch_a_occupancy/yolo_bytetrack
+   pip install ultralytics opencv-python paho-mqtt
+   python3 yolo_tracker.py</code></p>
+</li>
+<li>
+<p><strong>Wokwi Web Microcontroller Simulation (<code>edge/esp32/wokwi.toml</code>, <code>edge/esp32/diagram.json</code>)</strong>:
+   Runs the compiled ESP32 firmware binary (<code>firmware.bin</code>) inside a virtual browser-based ESP32 with simulated DHT22, DS18B20, and relay hardware. Open <code>diagram.json</code> in VS Code with the Wokwi extension or on <code>wokwi.com</code>.</p>
+</li>
+<li>
+<p><strong>CLI Telemetry Injection (Testing AFDD Shadow Twin Faults)</strong>:
+   Inject an anomalous sensor reading via <code>mosquitto_pub</code> to observe real-time AFDD shadow twin residual divergence and alarm triggering:
+   <code>bash
+   mosquitto_pub -h localhost -p 1883 -t econ/telemetry/zone_1 \
+     -m '{"zone":"Level 4","occupancy":2,"temperature":33.4,"source":"esp32","tempReal":true}'</code></p>
+</li>
+</ol>
+<hr />
+<h2 id="3-layer-1-edge-hardware-sensors">3. Layer 1: Edge Hardware &amp; Sensors</h2>
+<h3 id="31-edge-hardware-architecture-overview">3.1 Edge Hardware Architecture Overview</h3>
+<p>Layer 1 encompasses the physical sensing and actuation hardware deployed within building thermal zones. The architecture uses a dual-microcontroller topology:
+- <strong>Primary Zone Node (ESP32)</strong>: A dual-core Xtensa LX6 running at 240 MHz. Handles high-speed ADC sampling (True-RMS computation), I2C sensor communications, Wi-Fi DualModeComm networking, and local actuation.
+- <strong>Auxiliary Coprocessor / Lab Desk Node (Raspberry Pi Pico)</strong>: Powered by the RP2040 dual ARM Cortex-M0+ running at 133 MHz. Acts as a desktop environmental sensor, USB CDC serial bridge, directional PIR headcount monitor, and hardware watchdog supervisor.</p>
+<div class="highlight"><pre><span></span><code>graph TD
+    subgraph &quot;ESP32 DevKit Node (240MHz Dual Core)&quot;
+        ESP[ESP32 Microcontroller]
+        I2C_BUS[I2C Hardware Bus&lt;br/&gt;SDA: GPIO 21 / SCL: GPIO 22]
+        ADC1_BUS[ADC1 12-Bit Analog Bus&lt;br/&gt;Input-Only Low Noise]
+        ONEWIRE_BUS[1-Wire Bus&lt;br/&gt;GPIO 26]
+        ACT_BUS[Digital Actuation Bus&lt;br/&gt;GPIO 19, 23, 25]
+        DVP_BUS[8-Bit Parallel DVP Bus&lt;br/&gt;Camera Interface]
+        TOUCH_PAD[Capacitive Touch Pad&lt;br/&gt;GPIO 32 / T9]
+    end
+
+    subgraph &quot;I2C Environmental Sensors&quot;
+        SHT30[&quot;Sensirion SHT30&lt;br/&gt;Address: 0x44&lt;br/&gt;Ambient Temp &amp; RH (±0.2°C)&quot;]
+        ACD1200[&quot;ASAIR ACD1200 NDIR&lt;br/&gt;Address: 0x2A (5V VCC)&lt;br/&gt;Indoor CO2 (400-5000 ppm)&quot;]
+        BH1750[&quot;ROHM BH1750&lt;br/&gt;Address: 0x23&lt;br/&gt;Ambient Illuminance (Lux)&quot;]
+        SHIFTER[&quot;BSS138 Bidirectional&lt;br/&gt;4-Channel Level Shifter&lt;br/&gt;5V High to 3.3V Low&quot;]
+    end
+
+    subgraph &quot;Analog Electrical Metering (ADC1)&quot;
+        SCT_PLUG[&quot;SCT-013-000 CT (100A:50mA)&lt;br/&gt;GPIO 34 (ADC1_CH6)&lt;br/&gt;33Ω Burden + 1.65V Bias&lt;br/&gt;APLC Socket Bank Metering&quot;]
+        ACS712[&quot;ACS712-30A Hall Meter&lt;br/&gt;GPIO 33 (ADC1_CH5)&lt;br/&gt;10kΩ/10kΩ Voltage Divider&lt;br/&gt;Power Strip Appliance Metering&quot;]
+        SCT_AC[&quot;2nd SCT-013-000 CT&lt;br/&gt;GPIO 35 (ADC1_CH7)&lt;br/&gt;33Ω Burden + 1.65V Bias&lt;br/&gt;AC Compressor Metering&quot;]
+    end
+
+    subgraph &quot;1-Wire, Presence &amp; Vision&quot;
+        DS18B20[&quot;DS18B20 Probe&lt;br/&gt;GPIO 26 (4.7kΩ Pull-up)&lt;br/&gt;HVAC Supply Air Discharge Temp&quot;]
+        PIR_RADAR[&quot;Dual PIR / mmWave Radar&lt;br/&gt;GPIO 18&lt;br/&gt;HC-SR501 / Ai-Thinker Rd-03&quot;]
+        OV7670[&quot;OV7670 Camera Module&lt;br/&gt;DVP Bus + SCCB&lt;br/&gt;TFLite Micro Person Detection&quot;]
+    end
+
+    subgraph &quot;Actuation Hardware&quot;
+        RELAY_LIGHT[&quot;G3MB-202P Solid State Relay&lt;br/&gt;GPIO 23&lt;br/&gt;220V AC Lighting Circuit&quot;]
+        RELAY_PLUG[&quot;G3MB-202P Solid State Relay&lt;br/&gt;GPIO 25 (Fail-Energized HIGH)&lt;br/&gt;220V AC Socket Circuit (APLC)&quot;]
+        IR_BLASTER[&quot;940nm IR Emitter + 2N2222&lt;br/&gt;GPIO 19&lt;br/&gt;38 kHz Split-AC Command Blaster&quot;]
+    end
+
+    subgraph &quot;RP2040 Raspberry Pi Pico&quot;
+        PICO[RP2040 Microcontroller]
+        PICO_TEMP[&quot;Internal Die Sensor&lt;br/&gt;ADC Channel 4&quot;]
+        PICO_BTN[&quot;BOOTSEL / GP16 Presence&lt;br/&gt;Hardware Pull-up&quot;]
+        PICO_LED[&quot;Onboard LED (Pin 25)&lt;br/&gt;Lighting Indicator&quot;]
+        PICO_PIR[&quot;Dual PIR Directional&lt;br/&gt;GP14 (PIR1) &amp; GP15 (PIR2)&quot;]
+        PICO_WDT[&quot;Hardware Watchdog&lt;br/&gt;8-Second Hard Reboot&quot;]
+    end
+
+    I2C_BUS --&gt; SHT30
+    I2C_BUS --&gt; BH1750
+    I2C_BUS --&gt; SHIFTER
+    SHIFTER --&gt; ACD1200
+
+    ADC1_BUS --&gt; SCT_PLUG
+    ADC1_BUS --&gt; ACS712
+    ADC1_BUS --&gt; SCT_AC
+
+    ONEWIRE_BUS --&gt; DS18B20
+    ESP --&gt; PIR_RADAR
+    DVP_BUS --&gt; OV7670
+    ESP --&gt; TOUCH_PAD
+
+    ACT_BUS --&gt; RELAY_LIGHT
+    ACT_BUS --&gt; RELAY_PLUG
+    ACT_BUS --&gt; IR_BLASTER
+
+    PICO --&gt; PICO_TEMP
+    PICO --&gt; PICO_BTN
+    PICO --&gt; PICO_LED
+    PICO --&gt; PICO_PIR
+    PICO --&gt; PICO_WDT
+</code></pre></div>
+
+<hr />
+<h3 id="32-master-pin-level-hardware-interface-pinout-table">3.2 Master Pin-Level Hardware Interface &amp; Pinout Table</h3>
+<p>The table below catalogs every sensor, actuator, and peripheral implemented in <code>edge/esp32/src/main.cpp</code>, <code>edge/esp32/src/node_config.h</code>, <code>edge/esp32/src/current_denoiser.h</code>, <code>edge/pico/main.py</code>, <code>edge/pico/src/main.cpp</code>, <code>edge/WIRING.md</code>, and <code>edge/SHOPPING_LIST.md</code>.</p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Sensor / Actuator Name &amp; Model</th>
+<th>Microcontroller</th>
+<th>Exact Physical Pin (Code &amp; Wiring)</th>
+<th>Protocol / Interface</th>
+<th>Firmware Build Flag</th>
+<th>Electrical Passives &amp; Power Rails</th>
+<th>Backend Go Engine Consumption &amp; Model Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>1</strong></td>
+<td><strong>Sensirion SHT30</strong></td>
+<td>ESP32</td>
+<td><code>I2C_SDA</code> = <strong>GPIO 21</strong><br/><code>I2C_SCL</code> = <strong>GPIO 22</strong></td>
+<td>I2C (<code>0x44</code>, alt <code>0x45</code>). Single-shot high-repeatability <code>0x2400</code>, dual CRC-8.</td>
+<td><code>-DUSE_SHT30=1</code></td>
+<td>3.3V VCC, GND. On-board 4.7kΩ pull-ups. Direct 3.3V logic.</td>
+<td>Ingests <code>temperature</code> and <code>humidity</code>. Pins zone physics (<code>z.HwTemp</code>, <code>z.HwHum</code>) when <code>tempReal: true</code>. Seeds <code>z.ShadowTemp</code>. Identifies thermal time constant $1/\theta_0$ in <code>simulation/dynamics.go</code>. Evaluates AFDD fault residual.</td>
+</tr>
+<tr>
+<td><strong>2</strong></td>
+<td><strong>ASAIR ACD1200 NDIR CO₂</strong></td>
+<td>ESP32</td>
+<td><code>I2C_SDA</code> = <strong>GPIO 21</strong><br/><code>I2C_SCL</code> = <strong>GPIO 22</strong></td>
+<td>I2C (<code>0x2A</code>, datasheet 7-bit, <code>0x54</code> write / <code>0x55</code> read). 9-byte payload with CRC-8 per word. Command <code>0x0300</code>.</td>
+<td><code>-DUSE_CO2=1</code><br/><code>-DCO2_ABC_OFF=1</code> (manual cal)</td>
+<td><strong>5V VCC</strong> (VIN). ⚠️ <strong>Mandatory bidirectional level shifter</strong> (BSS138 with 10kΩ pull-ups). Internal I2C lines pull to 5V! Pin 5 (SET) floating.</td>
+<td>Ingests <code>co2</code> (ppm) into <code>z.HwCo2</code>. Used by CO₂ mass balance model in <code>simulation/dynamics.go</code> ($dC/dt = \varphi_0 \cdot \text{occ} + \varphi_1(C_{out}-C) + \varphi_2$) to calculate true air-change rate $\varphi_1$ and ventilate.</td>
+</tr>
+<tr>
+<td><strong>3</strong></td>
+<td><strong>DHT11 / DHT22 Sensor</strong></td>
+<td>ESP32</td>
+<td><code>DHT_PIN</code> = <strong>GPIO 4</strong></td>
+<td>Single-wire digital bitstream (Adafruit DHT).</td>
+<td><code>-DUSE_DHT=1</code><br/><code>-DDHT_TYPE=DHT22</code></td>
+<td>3.3V VCC, GND. 10kΩ pull-up resistor between Data pin and 3.3V.</td>
+<td>Fallback ambient temperature and humidity when SHT30 is absent. If valid, pins <code>z.HwTemp</code> with <code>tempReal: true</code>.</td>
+</tr>
+<tr>
+<td><strong>4</strong></td>
+<td><strong>PIR Motion Sensor (HC-SR501)</strong></td>
+<td>ESP32</td>
+<td><code>PIR1_PIN</code> = <strong>GPIO 18</strong><br/><code>PIR2_PIN</code> = <strong>GPIO 18</strong> (<code>main.cpp:313-332</code>)</td>
+<td>Digital active-HIGH TTL logic (3.3V). Polled every 50ms with instant edge dispatch.</td>
+<td><code>-DUSE_PIR=1</code><br/><code>-DPIR1_PIN=18</code><br/><code>-DPIR2_PIN=18</code></td>
+<td>5V VCC (VIN), GND. Output line provides 3.3V logic directly from onboard regulator. No level shifter needed.</td>
+<td>Sets <code>occupancy</code> (1 if motion detected, 0 if idle). Immediate MQTT telemetry burst on occupancy flip (&lt;200ms latency). Resets vacancy timeout in pre-cool/setback loops.</td>
+</tr>
+<tr>
+<td><strong>5</strong></td>
+<td><strong>Ai-Thinker Rd-03 / HLK-LD2410C 24GHz mmWave Radar</strong></td>
+<td>ESP32</td>
+<td><code>MMWAVE_PIN</code> = <strong>GPIO 18</strong></td>
+<td>Digital active-HIGH logic output. Holds HIGH for stationary occupants (breathing micro-motion).</td>
+<td><code>-DUSE_MMWAVE=1</code></td>
+<td>Rd-03: 3.3V supply (3.0–3.6V), pin 5 (<code>OT2</code>) to GPIO 18.<br/>LD2410C: 5V supply, <code>OUT</code> pin (3.3V logic) to GPIO 18. No shifter.</td>
+<td>Continuous stationary presence. Prevents false vacancy setbacks when occupants type or read quietly without gross motion.</td>
+</tr>
+<tr>
+<td><strong>6</strong></td>
+<td><strong>Capacitive Touch Presence</strong></td>
+<td>ESP32</td>
+<td><code>TOUCH_PIN</code> = <strong>T9 (GPIO 32)</strong></td>
+<td>Capacitive charge-time delta via ESP32 hardware touch controller (<code>touchRead</code>).</td>
+<td><code>-DUSE_TOUCH_PRESENCE=1</code> (active if no PIR/radar/camera)</td>
+<td>Bare wire or copper tape pad connected directly to GPIO 32. No external passives.</td>
+<td>Zero-wiring interactive demonstration. Reports <code>gCfg.touchOccupants</code> (default 3) when touched. Uses dual-threshold hysteresis (<code>touchEnterPct=62%</code>, <code>touchExitPct=82%</code>).</td>
+</tr>
+<tr>
+<td><strong>7</strong></td>
+<td><strong>SCT-013-000 Current Clamp (Plug Circuit Metering)</strong></td>
+<td>ESP32</td>
+<td><code>PLUG_ADC_PIN</code> = <strong>GPIO 34</strong> (ADC1_CH6, input-only)</td>
+<td>Analog AC millivolt output (100A:50mA CT). 12-bit ADC True-RMS sampled over 100ms window.</td>
+<td><code>-DUSE_PLUG=1</code><br/><code>-DPLUG_CAL_A_PER_V=60.6</code><br/><code>-DPLUG_MAINS_V=230.0</code></td>
+<td>33Ω burden resistor (1% ¼W) across CT tip/sleeve. DC bias divider: two 10kΩ resistors from 3.3V to GND, midpoint decoupled to GND by 0.1µF (or 10µF) capacitor. Tip to GPIO 34.</td>
+<td>Publishes <code>plugW</code>. Replaces simulated plug loads. Governed by APLC (After-Hours Plug-Load Control) sweep in <code>server/simulation/plugs.go</code>, calculating energy savings and Scope 2 operational carbon.</td>
+</tr>
+<tr>
+<td><strong>8</strong></td>
+<td><strong>ACS712-30A Hall Meter (Power Strip Metering)</strong></td>
+<td>ESP32</td>
+<td><code>STRIP_ADC_PIN</code> = <strong>GPIO 33</strong> (ADC1_CH5)</td>
+<td>Analog DC-biased voltage output ($V_{CC}/2 \pm 66\text{ mV/A}$). 12-bit ADC processed by <code>CurrentDenoiser</code>.</td>
+<td><code>-DUSE_STRIP=1</code><br/><code>-DSTRIP_ADC_PIN=33</code><br/><code>-DSTRIP_CAL_A_PER_V=15.0</code></td>
+<td><strong>5V VCC</strong>, GND. Output is 0–5V (2.5V quiescent). ⚠️ <strong>10kΩ / 10kΩ voltage divider</strong> halves output to 0–2.5V (<code>dividerRatio=0.5f</code>) to protect ESP32 3.3V ADC.</td>
+<td>Publishes <code>stripW</code>. Ingested into <code>z.HwStripW</code>. Used in <code>server/carbon.go</code> for equipment health monitoring, predictive maintenance threshold alerts, and real-time Scope 2 carbon emission tracking.</td>
+</tr>
+<tr>
+<td><strong>9</strong></td>
+<td><strong>2nd SCT-013-000 CT (AC Supply Metering)</strong></td>
+<td>ESP32</td>
+<td><code>AC_CLAMP_PIN</code> = <strong>GPIO 35</strong> (ADC1_CH7, input-only)</td>
+<td>Analog AC millivolt output (100A:50mA). 12-bit ADC True-RMS sampled over 100ms window via <code>CurrentDenoiser</code>.</td>
+<td><code>-DUSE_AC_CLAMP=1</code><br/><code>-DAC_CAL_A_PER_V=60.6</code><br/><code>-DAC_MAINS_V=220.0</code></td>
+<td>33Ω burden resistor across CT, 10kΩ/10kΩ bias divider to 1.65V mid-rail, 0.1µF capacitor, tip to GPIO 35.</td>
+<td>Publishes <code>acW</code>. Represents measured compressor power draw, intended to replace simulated VAV airflow in cooling regressor $\theta_1 \cdot \text{flow} \cdot (T_{in} - T_{supply})$. Stored in <code>z.HwAcW</code>.</td>
+</tr>
+<tr>
+<td><strong>10</strong></td>
+<td><strong>DS18B20 Waterproof Probe (AC Supply Discharge)</strong></td>
+<td>ESP32</td>
+<td><code>SUPPLY_TEMP_PIN</code> = <strong>GPIO 26</strong></td>
+<td>Maxim/Dallas 1-Wire protocol. 12-bit resolution. Rejects -127°C and +85°C power-on defaults.</td>
+<td><code>-DUSE_SUPPLY_TEMP=1</code> (Fails build if <code>IR_RECV_PIN == 26</code>)</td>
+<td>3.3V VCC (or 5V), GND. 4.7kΩ pull-up resistor from Data line to 3.3V. Cable-tied into AC indoor discharge louvre.</td>
+<td>Publishes <code>supplyC</code>. In <code>server/simulation/dynamics.go</code>, replaces constant <code>supplyAirDesignC</code> (12.0°C) with real measured discharge temperature in cooling identification.</td>
+</tr>
+<tr>
+<td><strong>11</strong></td>
+<td><strong>BH1750 Illuminance Sensor</strong></td>
+<td>ESP32</td>
+<td><code>I2C_SDA</code> = <strong>GPIO 21</strong><br/><code>I2C_SCL</code> = <strong>GPIO 22</strong></td>
+<td>I2C (<code>0x23</code>, default). One-time high-resolution mode (<code>0x20</code>), 180ms conversion.</td>
+<td><code>-DUSE_LUX=1</code></td>
+<td>3.3V VCC, GND. Shares main I2C bus directly with SHT30. No level shifter needed.</td>
+<td>Publishes <code>lux</code>. Real irradiance proxy for facade daylight, replacing static per-zone solar multiplier. Precursor for daylight-linked dimming. Stored in <code>z.HwLux</code>.</td>
+</tr>
+<tr>
+<td><strong>12</strong></td>
+<td><strong>OV7670 Camera Module (Edge ML Vision)</strong></td>
+<td>ESP32</td>
+<td><code>PIN_CAM_XCLK</code> = <strong>27</strong><br/><code>PIN_CAM_PCLK</code> = <strong>14</strong><br/><code>PIN_CAM_VSYNC</code> = <strong>36</strong><br/><code>PIN_CAM_HREF</code> = <strong>39</strong><br/><code>PIN_CAM_D0..D7</code> = <strong>33, 32, 17, 16, 15, 13, 12, 5</strong><br/><code>PIN_CAM_SIOD/C</code> = <strong>21, 22</strong></td>
+<td>8-bit parallel DVP (Digital Video Port) + SCCB (I2C 0x21). QQVGA (160x120) cropped to 96x96x1 int8 tensor.</td>
+<td><code>-DUSE_CAMERA=1</code></td>
+<td>Direct jumper connection to ESP32 parallel bus. Internal 80KB static tensor arena for TensorFlow Lite Micro person detector.</td>
+<td>Generates local ML headcount and bounding box confidence (<code>person_count</code>, <code>confidence</code>). Dispatches telemetry via DualModeComm (UDP :4210 + MQTT).</td>
+</tr>
+<tr>
+<td><strong>13</strong></td>
+<td><strong>Lighting SSR Actuator (G3MB-202P)</strong></td>
+<td>ESP32</td>
+<td><code>RELAY_PIN</code> = <strong>GPIO 23</strong></td>
+<td>Digital active-HIGH (or active-LOW via <code>gCfg.relayActiveLow</code>). Drives SSR trigger.</td>
+<td>Always compiled in (Default)</td>
+<td>5V VCC (VIN), GND. CH1 IN to GPIO 23. G3MB-202P SSR switches 220V AC lighting circuit hot wire (0.1–2A AC load).</td>
+<td>Actuates lights on commands <code>"LIGHTS_ON"</code> / <code>"LIGHTS_OFF"</code>. Responds to occupancy transitions and vacancy timeout setbacks.</td>
+</tr>
+<tr>
+<td><strong>14</strong></td>
+<td><strong>Plug-Load SSR Actuator (G3MB-202P)</strong></td>
+<td>ESP32</td>
+<td><code>PLUG_RELAY_PIN</code> = <strong>GPIO 25</strong></td>
+<td>Digital active-HIGH. <strong>Boots HIGH (fail-energized)</strong> to keep sockets powered on boot/reboot.</td>
+<td><code>-DUSE_PLUG=1</code></td>
+<td>5V VCC (VIN), GND. CH2 IN of SSR to GPIO 25. Switches non-critical socket bank.</td>
+<td>Switches non-critical sockets on commands <code>"PLUG_ON"</code> / <code>"PLUG_OFF"</code>. Actuated by APLC sweep on confirmed vacancy.</td>
+</tr>
+<tr>
+<td><strong>15</strong></td>
+<td><strong>HVAC 940nm IR Emitter (Split AC Blaster)</strong></td>
+<td>ESP32</td>
+<td><code>IR_PIN</code> = <strong>GPIO 19</strong></td>
+<td>38 kHz modulated infrared carrier pulses via <code>IRremoteESP8266</code> (<code>IRac</code>). Multi-vendor frame encoding.</td>
+<td><code>-DUSE_IR_AC=1</code><br/><code>-DIR_AC_PROTOCOL=COOLIX</code> (or <code>DAIKIN</code>, <code>GREE</code>, etc.)</td>
+<td>940 nm IR LED driven by NPN transistor (2N2222): GPIO 19 -&gt; 1kΩ base resistor -&gt; NPN Base; 5V VIN -&gt; 10Ω ¼W resistor -&gt; LED Anode -&gt; LED Cathode -&gt; NPN Collector; Emitter to GND.</td>
+<td>Translates setpoint commands (<code>"SETPOINT=22.0"</code>) into stateless vendor IR frames. Telemetry reports <code>acReal: true/false</code>, enabling the twin to book real HVAC energy savings.</td>
+</tr>
+<tr>
+<td><strong>16</strong></td>
+<td><strong>Onboard Status LED</strong></td>
+<td>ESP32</td>
+<td><code>STATUS_LED</code> = <strong>GPIO 2</strong></td>
+<td>Digital output. Onboard blue LED.</td>
+<td>Always compiled in</td>
+<td>Connected internally on ESP32 DevKit to GPIO 2.</td>
+<td>Solid HIGH = MQTT connected; LOW = disconnected / attempting reconnect every 5s.</td>
+</tr>
+<tr>
+<td><strong>17</strong></td>
+<td><strong>RP2040 Die Temperature Sensor</strong></td>
+<td>Pico</td>
+<td><code>ADC(4)</code> (Internal ADC Channel 4)</td>
+<td>12-bit SAR ADC, 8-sample moving average: $T = 27 - \frac{V - 0.706}{0.001721} - 4.0^\circ\text{C}$.</td>
+<td>Built-in (<code>main.py:45, 142</code>)</td>
+<td>Internal to RP2040 die. Reports <code>tempReal: false</code> by default so engine models physics rather than pinning to die heat.</td>
+<td>Provides zero-wiring fingertip demonstration of temperature trends. Flags <code>tempReal: false</code> to avoid corrupting room AFDD residual.</td>
+</tr>
+<tr>
+<td><strong>18</strong></td>
+<td><strong>BOOTSEL Pushbutton Presence</strong></td>
+<td>Pico</td>
+<td><code>rp2.bootsel_button()</code> (Virtual)</td>
+<td>Flash SPI CS line sampling at 4 Hz. Press-edge toggle.</td>
+<td>Built-in (<code>main.py:152-178</code>)</td>
+<td>Internal to Pico. 250ms polling throttle prevents USB CDC hang.</td>
+<td>Toggles simulated room occupancy (<code>OCCUPIED_COUNT = 2</code>) for interactive lab testing without external switches.</td>
+</tr>
+<tr>
+<td><strong>19</strong></td>
+<td><strong>Hardwired Presence Jumper</strong></td>
+<td>Pico</td>
+<td><strong>GP16</strong> (<code>presence_wire</code>)</td>
+<td>Digital active-LOW with internal pull-up.</td>
+<td>Built-in (<code>main.py:131</code>)</td>
+<td>Connect GP16 to any GND pin via jumper wire.</td>
+<td>Rock-solid stationary occupancy override: bridged = occupied; floating = vacant.</td>
+</tr>
+<tr>
+<td><strong>20</strong></td>
+<td><strong>Onboard Lighting Actuator LED</strong></td>
+<td>Pico</td>
+<td><strong>Pin("LED")</strong> (Pico W) / <strong>GP25</strong> (Pico)</td>
+<td>Digital active-HIGH output.</td>
+<td>Built-in (<code>main.py:124-128</code>)</td>
+<td>Internal LED on RP2040 board.</td>
+<td>Actuates on <code>"LIGHTS_ON"</code> / <code>"LIGHTS_OFF"</code> commands. Flashes 3 times on presence transition.</td>
+</tr>
+<tr>
+<td><strong>21</strong></td>
+<td><strong>SHT30 Temperature &amp; RH (Pico)</strong></td>
+<td>Pico</td>
+<td><code>SDA</code> = <strong>GP4</strong><br/><code>SCL</code> = <strong>GP5</strong></td>
+<td>MicroPython hardware I2C0 at 100 kHz. Address <code>0x44</code>. Dual CRC-8 check.</td>
+<td>Optional (<code>main.py:36-38, 100</code>)</td>
+<td>3.3V VCC, GND. On-board pull-up resistors.</td>
+<td>Provides real ambient temperature and RH (<code>tempReal: true</code>) for lab bench deployments.</td>
+</tr>
+<tr>
+<td><strong>22</strong></td>
+<td><strong>DHT22 Sensor (Pico Fallback)</strong></td>
+<td>Pico</td>
+<td><code>DHT_PIN</code> = <strong>GP15</strong></td>
+<td>MicroPython <code>dht.DHT22</code> single-wire digital bitstream.</td>
+<td>Optional (<code>main.py:35, 62</code>)</td>
+<td>3.3V VCC, GND. 10kΩ pull-up to 3.3V rail.</td>
+<td>Fallback ambient temperature when SHT30 is absent. Overrides internal die sensor.</td>
+</tr>
+<tr>
+<td><strong>23</strong></td>
+<td><strong>Dual Directional PIR Headcount (Pico)</strong></td>
+<td>Pico</td>
+<td><code>PIR1_PIN</code> = <strong>GP14</strong><br/><code>PIR2_PIN</code> = <strong>GP15</strong></td>
+<td>Digital inputs with <code>INPUT_PULLDOWN</code>. Dual-sensor state machine (<code>edge/pico/src/main.cpp</code>).</td>
+<td>Arduino C++ Pico build</td>
+<td>5V VCC, GND, 3.3V logic outputs to GP14 &amp; GP15.</td>
+<td>Detects occupant transit direction (ingress vs egress), publishing updated <code>occupancy</code> and <code>occupancy_2</code> over USB serial.</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h3 id="33-microcontroller-pin-allocation-conflict-safeguards">3.3 Microcontroller Pin Allocation &amp; Conflict Safeguards</h3>
+<p>In <code>edge/esp32/src/main.cpp</code>, strict compile-time preprocessor assertions prevent pin collisions that would otherwise cause silent runtime bus failure or silicon damage:</p>
+<ol>
+<li>
+<p><strong>I2C Bus vs IR Blaster Guard (<code>main.cpp:251–253</code>):</strong>
+   <code>cpp
+   #if I2C_SDA == 19 || I2C_SCL == 19
+     #error "I2C pin collides with IR_PIN (GPIO19) - pick another pin via -DI2C_SDA/-DI2C_SCL"
+   #endif</code>
+   <em>Rationale:</em> Earlier board layouts assigned the IR emitter to GPIO 22, which is <code>I2C_SCL</code>. Every 38 kHz HVAC burst clamped the SCL clock line to ground, permanently locking the SHT30 and ACD1200 I2C bus until power-cycle. Moving the IR emitter to GPIO 19 resolved the conflict.</p>
+</li>
+<li>
+<p><strong>I2C Bus vs Actuator Relay Guards (<code>main.cpp:248–256</code>):</strong>
+   <code>cpp
+   #if I2C_SDA == 23 || I2C_SCL == 23
+     #error "I2C pin collides with RELAY_PIN (GPIO23) - pick another pin via -DI2C_SDA/-DI2C_SCL"
+   #endif
+   #if USE_PLUG &amp;&amp; (I2C_SDA == 25 || I2C_SCL == 25)
+     #error "I2C pin collides with PLUG_RELAY_PIN (GPIO25) - pick another pin via -DI2C_SDA/-DI2C_SCL"
+   #endif</code></p>
+</li>
+<li>
+<p><strong>1-Wire Temperature vs IR Receiver Guard (<code>main.cpp:190–192</code>):</strong>
+   <code>cpp
+   #if USE_IR_AC &amp;&amp; defined(IR_RECV_PIN) &amp;&amp; IR_RECV_PIN == 26
+     #error "SUPPLY_TEMP_PIN collides with IR_RECV_PIN (GPIO26) - cannot use both simultaneously"
+   #endif</code></p>
+</li>
+<li>
+<p><strong>ADC Pin Assignment &amp; Wi-Fi SAR ADC2 Isolation:</strong></p>
+</li>
+<li><code>PLUG_ADC_PIN</code> is on <strong>GPIO 34</strong> (ADC1 Channel 6).</li>
+<li><code>STRIP_ADC_PIN</code> is on <strong>GPIO 33</strong> (ADC1 Channel 5).</li>
+<li>
+<p><code>AC_CLAMP_PIN</code> is on <strong>GPIO 35</strong> (ADC1 Channel 7).
+   <em>Design Rule:</em> All analog current sensors are assigned strictly to <strong>ADC1</strong>. On the ESP32, <strong>ADC2 is permanently disabled while the Wi-Fi subsystem is active</strong> (the SAR ADC2 hardware is shared with the Wi-Fi baseband). Assigning current clamps to ADC2 pins (e.g. GPIO 0, 2, 4, 12–15, 25–27) causes <code>analogRead()</code> to return spurious zeros or crash whenever a packet transmits. Furthermore, GPIO 34 and 35 are physical input-only pins with no internal pull-ups or output drivers, protecting the microcontroller from inadvertent software back-powering.</p>
+</li>
+<li>
+<p><strong>PIR vs Camera D7 Pin Guard:</strong>
+   When the OV7670 camera module is compiled in (<code>-DUSE_CAMERA=1</code>), parallel data line <code>D7</code> claims GPIO 5. The legacy single-PIR pin assignment (GPIO 5 in older documentation) was migrated to <strong>GPIO 18</strong> to allow concurrent camera and motion detection.</p>
+</li>
+<li>
+<p><strong>Mandatory 5V-to-3.3V Bidirectional Level Shifter for ACD1200 NDIR CO₂:</strong>
+   The ASAIR ACD1200 requires a 5V supply to operate its optical incandescent IR lamp. Its internal I2C pull-up resistors tie directly to the 5V rail. Connecting the ACD1200 directly to the ESP32’s 3.3V I2C pins (GPIO 21/22) will over-voltage the SoC’s ESD clamping diodes and permanently degrade the silicon. A bidirectional MOSFET level shifter (BSS138 with 10kΩ pull-ups) is <strong>strictly mandatory</strong>.</p>
+</li>
+</ol>
+<hr />
+<h3 id="34-hardware-bill-of-materials-bom-buying-guide">3.4 Hardware Bill of Materials (BOM) &amp; Buying Guide</h3>
+<p>All components are selected based on availability in Vietnam (primarily sourced from <code>hshop.vn</code>, <code>caka.vn</code>, and the Nhật Tảo electronics market), fully cross-referenced against <code>edge/SHOPPING_LIST.md</code> and <code>edge/WIRING.md</code>.</p>
+<h4 id="master-component-sourcing-table">Master Component Sourcing Table</h4>
+<table>
+<thead>
+<tr>
+<th style="text-align: center;">Item #</th>
+<th>Category</th>
+<th>Component &amp; Specification</th>
+<th>Vendor / SKU</th>
+<th style="text-align: center;">Unit Price (VND)</th>
+<th>Purpose in System</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: center;"><strong>1</strong></td>
+<td>Core</td>
+<td>ESP32 NodeMCU-32S (WROOM-32, CH340)</td>
+<td>hshop.vn <code>HS1524</code></td>
+<td style="text-align: center;">190.000₫</td>
+<td>Primary zone edge microcontroller (Wi-Fi, dual-core).</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>1b</strong></td>
+<td>Core (Alt)</td>
+<td>Mtiny ESP32 WROOM-32E Dev Board</td>
+<td>hshop.vn <code>HS1760</code></td>
+<td style="text-align: center;">125.000₫</td>
+<td>Value alternative microcontroller.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>2</strong></td>
+<td>Core</td>
+<td>Micro-USB Cable (1 m, Ugreen Data/Power)</td>
+<td>hshop.vn <code>HS2196V</code></td>
+<td style="text-align: center;">54.000₫</td>
+<td>Firmware flashing and DC power input.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>3</strong></td>
+<td>Power</td>
+<td>5 V / 2 A AC-DC USB Power Supply Adapter</td>
+<td>hshop.vn</td>
+<td style="text-align: center;">45.000₫</td>
+<td>Powers ESP32, radar, and relay coils.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>4</strong></td>
+<td>Prototyping</td>
+<td>MB-102 Solderless Breadboard (830 points)</td>
+<td>hshop.vn <code>HS1113C</code></td>
+<td style="text-align: center;">35.000₫</td>
+<td>Breadboard with dual 3.3V and 5V power rails.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>5</strong></td>
+<td>Wiring</td>
+<td>Jumper Wire Ribbon (40-pin M-M, 20 cm)</td>
+<td>hshop.vn <code>HS0381C</code></td>
+<td style="text-align: center;">30.000₫</td>
+<td>Color-coded interconnect jumpers.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>6</strong></td>
+<td>Sensing</td>
+<td>Sensirion SHT30-IIC Temp/Humidity Sensor</td>
+<td>hshop.vn <code>HS2214V</code></td>
+<td style="text-align: center;">135.000₫</td>
+<td>High-precision (±0.2°C) ambient temperature and RH.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>7</strong></td>
+<td>Sensing</td>
+<td>Ai-Thinker Rd-03 24 GHz mmWave Radar</td>
+<td>hshop.vn <code>HS1779</code></td>
+<td style="text-align: center;">70.000₫</td>
+<td>Stationary human presence detection (3.3V logic).</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>8</strong></td>
+<td>Sensing</td>
+<td>ASAIR ACD1200 NDIR CO₂ Sensor (I2C)</td>
+<td>hshop.vn <code>HS2167V</code></td>
+<td style="text-align: center;">243.000₫</td>
+<td>True NDIR CO₂ measurement (400–5000 ppm).</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>9</strong></td>
+<td>Interface</td>
+<td>Bidirectional 4-Ch I2C Level Shifter (BSS138)</td>
+<td>hshop.vn <code>HS0667</code></td>
+<td style="text-align: center;">10.000₫</td>
+<td>Mandatory 5V ↔ 3.3V protection for ACD1200 I2C bus.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>10</strong></td>
+<td>Sensing</td>
+<td>PIR Motion Sensor HC-SR501</td>
+<td>hshop.vn <code>HS0158C</code></td>
+<td style="text-align: center;">27.000₫</td>
+<td>Gross motion detection (dual PIR / backup presence).</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>11</strong></td>
+<td>Actuation</td>
+<td>2-Channel 5V Solid State Relay (G3MB-202P)</td>
+<td>hshop.vn <code>HS0996</code></td>
+<td style="text-align: center;">59.000₫</td>
+<td>Silent switching of AC lights (CH1) and sockets (CH2).</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>12</strong></td>
+<td>Actuation</td>
+<td>940 nm Infrared Emitting LED (5 mm)</td>
+<td>Nhật Tảo / Online</td>
+<td style="text-align: center;">~8.000₫</td>
+<td>Transmits 38 kHz split AC commands.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>13</strong></td>
+<td>Actuation</td>
+<td>NPN Transistor (2N2222 / S8050 / PN2222)</td>
+<td>Nhật Tảo / caka</td>
+<td style="text-align: center;">~3.000₫</td>
+<td>Amplifies GPIO19 output to drive ~100mA IR LED pulses.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>14</strong></td>
+<td>Passives</td>
+<td>Resistor Assortment: 1kΩ (base), 10Ω ¼W (LED)</td>
+<td>caka.vn</td>
+<td style="text-align: center;">~2.000₫</td>
+<td>IR LED current-limiting and base drive resistors.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>15</strong></td>
+<td>Metering</td>
+<td>SCT-013-000 Split-Core CT (100A:50mA)</td>
+<td>hshop.vn <code>HS0186</code></td>
+<td style="text-align: center;">102.000₫</td>
+<td>Non-invasive CT clamp for plug circuit (APLC).</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>15c</strong></td>
+<td>Wiring</td>
+<td>CH-2 Spring Wire Clamps (2-pin domino)</td>
+<td>caka.vn</td>
+<td style="text-align: center;">4.000₫ (pair)</td>
+<td>Connects stranded CT wire to solid jumper off-board.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>15d</strong></td>
+<td>Prototyping</td>
+<td>SYB-170 Mini Breadboard (170 points)</td>
+<td>caka.vn</td>
+<td style="text-align: center;">6.000₫</td>
+<td>Houses CT burden/bias circuit off main breadboard.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>16</strong></td>
+<td>Passives</td>
+<td>Ceramic Capacitor Assortment (0.1 µF kit)</td>
+<td>hshop.vn <code>HS0093</code></td>
+<td style="text-align: center;">40.000₫</td>
+<td>Decouples CT 1.65V DC mid-rail to ground.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>17</strong></td>
+<td>Passives</td>
+<td>Burden Resistor (33Ω 1%) + Bias Resistors (2× 10kΩ)</td>
+<td>caka.vn</td>
+<td style="text-align: center;">~5.000₫</td>
+<td>Converts CT current to voltage and biases to 1.65V.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>18</strong></td>
+<td>Metering</td>
+<td>ACS712-30A Hall-Effect Current Sensor</td>
+<td>hshop.vn <code>HS0187C</code></td>
+<td style="text-align: center;">27.000₫</td>
+<td>Power strip metering (bench appliance load).</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>19</strong></td>
+<td>Sensing</td>
+<td>DS18B20 Waterproof 1-Wire Temp Probe</td>
+<td>hshop.vn <code>HS2243V</code></td>
+<td style="text-align: center;">75.000₫</td>
+<td>Measures AC discharge louvre supply air (<code>supplyC</code>).</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>20</strong></td>
+<td>Sensing</td>
+<td>BH1750 Ambient Light Sensor (I2C)</td>
+<td>hshop.vn <code>HS0159V</code></td>
+<td style="text-align: center;">35.000₫</td>
+<td>Ambient illuminance / daylight proxy (<code>lux</code>).</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>21</strong></td>
+<td>Gateway</td>
+<td>Raspberry Pi 5 (2 GB RAM)</td>
+<td>hshop.vn <code>HS2256V</code></td>
+<td style="text-align: center;">2.430.000₫</td>
+<td>Dedicated site gateway, Mosquitto broker, failsafe engine.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>21b</strong></td>
+<td>Gateway</td>
+<td>Raspberry Pi Zero 2 W (Budget Alternative)</td>
+<td>hshop.vn</td>
+<td style="text-align: center;">729.000₫</td>
+<td>Budget gateway option for small installations.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>22</strong></td>
+<td>Gateway</td>
+<td>SanDisk 64 GB microSD Card (Class 10, A1)</td>
+<td>hshop.vn <code>HS1122V</code></td>
+<td style="text-align: center;">351.000₫</td>
+<td>Gateway OS storage and Mosquitto persistent DB.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>23</strong></td>
+<td>Gateway</td>
+<td>Official Raspberry Pi 27 W USB-C Power Supply</td>
+<td>hshop.vn <code>HS2377V</code></td>
+<td style="text-align: center;">243.000₫</td>
+<td>Clean power supply avoiding brownout throttles.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>24</strong></td>
+<td>Edge Alt</td>
+<td>Raspberry Pi Pico W (RP2040 + Wi-Fi)</td>
+<td>hshop.vn</td>
+<td style="text-align: center;">195.000₫</td>
+<td>Secondary edge node for lab desk/sensors.</td>
+</tr>
+</tbody>
+</table>
+<h4 id="tiered-build-packages">Tiered Build Packages</h4>
+<ol>
+<li><strong>Build A: Bare Demo Board (~220.000₫ / ~$9 USD)</strong></li>
+<li><em>Components</em>: ESP32 NodeMCU-32S + Micro-USB Cable.</li>
+<li><em>Capability</em>: Zero external wiring. Uses capacitive touch on GPIO 32 for presence, simulated temperature with <code>tempReal: false</code>, full MQTT communication loop.</li>
+<li><strong>Build B: Standard Office Node (~615.000₫ / ~$25 USD)</strong></li>
+<li><em>Components</em>: Build A + SHT30 (I2C) + Ai-Thinker Rd-03 (mmWave) + 940nm IR Emitter driver + 2-channel G3MB-202P SSR + Breadboard &amp; Jumpers.</li>
+<li><em>Capability</em>: Real measured temperature/humidity (<code>tempReal: true</code>), stationary presence detection, true AC temperature setpoint actuation, lighting control.</li>
+<li><strong>Build C: Fully Instrumented Environmental Node (~870.000₫ / ~$35 USD)</strong></li>
+<li><em>Components</em>: Build B + ASAIR ACD1200 NDIR CO₂ sensor + BSS138 Level Shifter.</li>
+<li><em>Capability</em>: Everything in Build B plus measured indoor CO₂ ppm for ventilation identification.</li>
+<li><strong>Build D: Complete Plug-Load Metering &amp; Diagnostics Node (~1.010.000₫ / ~$41 USD)</strong></li>
+<li><em>Components</em>: Build C + SCT-013-000 CT clamp + 33Ω burden + 10kΩ bias divider + 0.1µF cap + CH-2 clamps + ACS712 power strip sensor.</li>
+<li><em>Capability</em>: Full environmental sensing, APLC plug-load metering (<code>plugW</code>), power strip monitoring (<code>stripW</code>), dual relay control (lights and sockets).</li>
+<li><strong>4-Zone Floor Bundle (~5.800.000₫ / ~$235 USD)</strong></li>
+<li><em>Components</em>: 1× Dedicated Site Gateway (Raspberry Pi 5 + 27W PSU + 64GB MicroSD) + 4× Build D Zone Nodes.</li>
+<li><em>Capability</em>: Complete autonomous smart building deployment for an entire commercial office floor.</li>
+</ol>
+<hr />
+<h2 id="4-layer-2-communication-message-broker">4. Layer 2: Communication &amp; Message Broker</h2>
+<h3 id="41-broker-architecture-role-based-access-control-acl">4.1 Broker Architecture &amp; Role-Based Access Control (ACL)</h3>
+<p>The communication backbone is built on <strong>Eclipse Mosquitto v2.0</strong> listening on standard port <code>1883</code> (<code>server/mosquitto/mosquitto.conf</code>). Anonymous connections are strictly forbidden (<code>allow_anonymous false</code>). Client authentication is enforced using salted SHA-512 hashes generated via <code>server/setup-mqtt-auth.sh</code>.</p>
+<div class="highlight"><pre><span></span><code>graph LR
+    subgraph &quot;Edge Tier&quot;
+        NODE[&quot;ESP32 / Pico Nodes&lt;br/&gt;user: econ-node&quot;]
+        GW_CLI[&quot;RPi Gateway Daemon&lt;br/&gt;user: econ-gateway&quot;]
+    end
+
+    subgraph &quot;Broker Infrastructure&quot;
+        MOSQ[&quot;Mosquitto Broker (:1883)&lt;br/&gt;ACL Enactment Engine&quot;]
+    end
+
+    subgraph &quot;Backend Tier&quot;
+        ENGINE[&quot;Go Engine Subscriber&lt;br/&gt;user: econ-engine&quot;]
+    end
+
+    NODE --&gt;|&quot;PUB: econ/telemetry/&lt;zone&gt;&lt;br/&gt;PUB: econ/status/&lt;zone&gt;&quot;| MOSQ
+    MOSQ --&gt;|&quot;SUB: econ/commands/&lt;zone&gt;&quot;| NODE
+
+    GW_CLI --&gt;|&quot;SUB: econ/telemetry/+&lt;br/&gt;SUB: econ/commands/+&quot; | MOSQ
+    GW_CLI --&gt;|&quot;PUB: econ/commands/&lt;zone&gt;&lt;br/&gt;(Failsafe Commands)&quot;| MOSQ
+
+    MOSQ --&gt;|&quot;SUB: econ/telemetry/#&lt;br/&gt;SUB: econ/status/#&quot;| ENGINE
+    ENGINE --&gt;|&quot;PUB: econ/commands/#&quot;| MOSQ
+</code></pre></div>
+
+<h4 id="access-control-list-acl-specification-servermosquittoacl">Access Control List (ACL) Specification (<code>server/mosquitto/acl</code>)</h4>
+<div class="highlight"><pre><span></span><code>user econ-engine
+topic read econ/telemetry/#
+topic read econ/status/#
+topic write econ/commands/#
+
+user econ-node
+topic write econ/telemetry/#
+topic write econ/status/#
+topic read econ/commands/#
+
+user econ-gateway
+topic read econ/telemetry/#
+topic read econ/status/#
+topic readwrite econ/commands/#
+</code></pre></div>
+
+<p><em>Security Impact:</em> An edge node compromised on the local network is mathematically restricted by the broker to publishing only its own telemetry/status and reading commands. It cannot inject commands to other relays, read adjacent zone sensors, or alter building setpoints.</p>
+<hr />
+<h3 id="42-mqtt-topic-hierarchy">4.2 MQTT Topic Hierarchy</h3>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Topic Pattern</th>
+<th style="text-align: center;">Direction</th>
+<th style="text-align: left;">Publisher</th>
+<th style="text-align: left;">Subscriber(s)</th>
+<th style="text-align: center;">QoS</th>
+<th style="text-align: center;">Retained</th>
+<th style="text-align: left;">Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><code>econ/telemetry/&lt;ZONE_TOPIC&gt;</code></td>
+<td style="text-align: center;">Pub</td>
+<td style="text-align: left;">ESP32 / Pico / CV Node</td>
+<td style="text-align: left;">Go Engine, RPi Gateway</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">False</td>
+<td style="text-align: left;">Periodic and event-driven zone sensor telemetry.</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>econ/commands/&lt;ZONE_TOPIC&gt;</code></td>
+<td style="text-align: center;">Pub</td>
+<td style="text-align: left;">Go Engine / RPi Gateway</td>
+<td style="text-align: left;">ESP32 / Pico Node</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">False</td>
+<td style="text-align: left;">Actuation setpoints, lighting commands, plug commands.</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>econ/status/&lt;ZONE_TOPIC&gt;</code></td>
+<td style="text-align: center;">Pub</td>
+<td style="text-align: left;">ESP32 / Pico (LWT)</td>
+<td style="text-align: left;">Go Engine, RPi Gateway</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">True</td>
+<td style="text-align: left;">Node liveness status (<code>"online"</code> or <code>"offline"</code>).</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>econ/status/gateway</code></td>
+<td style="text-align: center;">Pub</td>
+<td style="text-align: left;">RPi Gateway (LWT)</td>
+<td style="text-align: left;">Go Engine</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">True</td>
+<td style="text-align: left;">Gateway liveness status (<code>"online"</code> or <code>"offline"</code>).</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>econ/config/&lt;ZONE_TOPIC&gt;</code></td>
+<td style="text-align: center;">Pub</td>
+<td style="text-align: left;">Go Engine / Operator</td>
+<td style="text-align: left;">ESP32 Edge Node</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">True</td>
+<td style="text-align: left;">Runtime configuration changes (calibration, voltages, intervals).</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>econ/config/&lt;ZONE_TOPIC&gt;/state</code></td>
+<td style="text-align: center;">Pub</td>
+<td style="text-align: left;">ESP32 Edge Node</td>
+<td style="text-align: left;">Go Engine / Dashboard</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">True</td>
+<td style="text-align: left;">Confirmed effective node configuration and active overrides.</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h3 id="43-dual-mode-communications-dualmodecomm">4.3 Dual-Mode Communications (<code>DualModeComm</code>)</h3>
+<p>Implemented in <code>edge/esp32/src/camera/dual_mode_comm.cpp</code>:
+- <strong>Primary Mode (Wi-Fi UDP Broadcast)</strong>: Transmits lightweight datagrams on UDP port <code>4210</code> (<code>:4210</code>) with concurrent MQTT publishing. Provides low-overhead datagram streaming for edge person tracking (&lt;0.2 ms non-blocking slice).
+- <strong>Secondary / Fallback Mode (USB CDC Serial)</strong>: Zero-delay USB Serial JSON streaming (<code>115200</code> baud) when Wi-Fi is unassociated or broker connection fails.</p>
+<hr />
+<h3 id="44-json-payload-schemas-concrete-examples">4.4 JSON Payload Schemas &amp; Concrete Examples</h3>
+<h4 id="1-zone-telemetry-payload-econtelemetryzone_topic">1. Zone Telemetry Payload (<code>econ/telemetry/&lt;ZONE_TOPIC&gt;</code>)</h4>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;zone&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Level 4&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;source&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;esp32&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;cfgRev&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;temperature&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">24.2</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;tempReal&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;humidity&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">55.4</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;occupancy&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;confidence&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">1.0</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;person_count&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;co2&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">620</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;plugW&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">145.2</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;plug&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;ON&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;stripW&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">85.0</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;supplyC&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">14.8</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;acW&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">650.0</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;lux&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">420.0</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;lights&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;ON&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;setpoint&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">23.0</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;acReal&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h4 id="2-raw-fallback-telemetry-payload-under-microcontroller-cpu-strain">2. Raw Fallback Telemetry Payload (Under Microcontroller CPU Strain)</h4>
+<p>When local DSP execution exceeds <code>DSP_TIME_BUDGET_US</code> (15 ms), the node bypasses local RMS calculations, decimates the 1200-sample ADC buffer down to 30 raw sample counts (<code>gRawStripSamples</code>), and offloads processing to the Go backend (<code>server/mqtt.go:164–176</code>):</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;zone&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Level 4&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;source&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;esp32&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;cfgRev&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;temperature&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">24.2</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;tempReal&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;occupancy&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;rawFallback&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;rawStripSamples&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="mi">1845</span><span class="p">,</span><span class="w"> </span><span class="mi">1850</span><span class="p">,</span><span class="w"> </span><span class="mi">1920</span><span class="p">,</span><span class="w"> </span><span class="mi">2040</span><span class="p">,</span><span class="w"> </span><span class="mi">2150</span><span class="p">,</span><span class="w"> </span><span class="mi">2240</span><span class="p">,</span><span class="w"> </span><span class="mi">2290</span><span class="p">,</span><span class="w"> </span><span class="mi">2260</span><span class="p">,</span><span class="w"> </span><span class="mi">2180</span><span class="p">,</span><span class="w"> </span><span class="mi">2050</span><span class="p">,</span>
+<span class="w">    </span><span class="mi">1910</span><span class="p">,</span><span class="w"> </span><span class="mi">1820</span><span class="p">,</span><span class="w"> </span><span class="mi">1780</span><span class="p">,</span><span class="w"> </span><span class="mi">1790</span><span class="p">,</span><span class="w"> </span><span class="mi">1840</span><span class="p">,</span><span class="w"> </span><span class="mi">1930</span><span class="p">,</span><span class="w"> </span><span class="mi">2060</span><span class="p">,</span><span class="w"> </span><span class="mi">2170</span><span class="p">,</span><span class="w"> </span><span class="mi">2250</span><span class="p">,</span><span class="w"> </span><span class="mi">2280</span><span class="p">,</span>
+<span class="w">    </span><span class="mi">2240</span><span class="p">,</span><span class="w"> </span><span class="mi">2150</span><span class="p">,</span><span class="w"> </span><span class="mi">2020</span><span class="p">,</span><span class="w"> </span><span class="mi">1890</span><span class="p">,</span><span class="w"> </span><span class="mi">1810</span><span class="p">,</span><span class="w"> </span><span class="mi">1780</span><span class="p">,</span><span class="w"> </span><span class="mi">1800</span><span class="p">,</span><span class="w"> </span><span class="mi">1860</span><span class="p">,</span><span class="w"> </span><span class="mi">1960</span><span class="p">,</span><span class="w"> </span><span class="mi">2080</span>
+<span class="w">  </span><span class="p">],</span>
+<span class="w">  </span><span class="nt">&quot;lights&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;ON&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;setpoint&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">24.0</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;acReal&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h4 id="3-actuation-command-tokens-econcommandszone_topic">3. Actuation Command Tokens (<code>econ/commands/&lt;ZONE_TOPIC&gt;</code>)</h4>
+<p>Commands use tokenized semicolon-separated ASCII strings for minimal RAM overhead:
+- Standard Optimizer Command: <code>"LIGHTS_ON;SETPOINT=22.5"</code>
+- Vacancy Setback Command: <code>"LIGHTS_OFF;SETPOINT=26.0"</code>
+- Plug-Load Shed Command (APLC): <code>"PLUG_OFF"</code>
+- Autonomous Gateway Failsafe Command: <code>"LIGHTS_OFF;SETPOINT=28.0;SRC=FAILSAFE"</code>
+- Custom Hex IR Blaster Code: <code>"IR_SEND:COOLIX:0xB27BE0:24"</code>
+- CPU Strain Simulation Override: <code>"CPU_STRAIN:HIGH"</code> or <code>"CPU_STRAIN:NORMAL"</code></p>
+<hr />
+<h3 id="45-gateway-failsafe-resiliency-mechanisms">4.5 Gateway Failsafe &amp; Resiliency Mechanisms</h3>
+<div class="highlight"><pre><span></span><code>sequenceDiagram
+    participant ESP as ESP32 Edge Node
+    participant Broker as Mosquitto MQTT Broker
+    participant GW as Raspberry Pi Gateway (gateway.py)
+    participant Engine as Go Engine (Brain)
+
+    Note over ESP,Engine: Normal Operation (Engine Online)
+    ESP-&gt;&gt;Broker: econ/telemetry/zone_1 {&quot;occupancy&quot;: 0, &quot;temp&quot;: 24.5}
+    Broker-&gt;&gt;Engine: Deliver Telemetry
+    Broker-&gt;&gt;GW: Deliver Telemetry (Tracks vacant_since = now)
+    Engine-&gt;&gt;Broker: econ/commands/zone_1 &quot;LIGHTS_OFF;SETPOINT=26.0&quot;
+    Broker-&gt;&gt;ESP: Deliver Command
+    Broker-&gt;&gt;GW: Deliver Command (GW updates last_engine_cmd = now)
+
+    Note over Engine: Central Brain Dies / Network Partition
+    ESP-&gt;&gt;Broker: econ/telemetry/zone_1 {&quot;occupancy&quot;: 0}
+    Broker-&gt;&gt;GW: Deliver Telemetry (Zone remains vacant)
+    Note over GW: Tick evaluates:&lt;br/&gt;1. (now - last_engine_cmd) &gt; 10s (ENGINE OFFLINE)&lt;br/&gt;2. vacant_for &gt; 30s (VACANCY PERSISTS)&lt;br/&gt;3. failsafe_active == false
+    GW-&gt;&gt;Broker: econ/commands/zone_1 &quot;LIGHTS_OFF;SETPOINT=28.0;SRC=FAILSAFE&quot;
+    Broker-&gt;&gt;ESP: Deliver Failsafe Command
+    ESP-&gt;&gt;ESP: Sets Lights OFF, Sets AC to 28.0°C Setback
+
+    Note over ESP,GW: Recovery (Occupant Returns)
+    ESP-&gt;&gt;Broker: econ/telemetry/zone_1 {&quot;occupancy&quot;: 1}
+    Broker-&gt;&gt;GW: Deliver Telemetry (occupancy &gt; 0)
+    Note over GW: GW clears failsafe_active = false,&lt;br/&gt;vacant_since = null
+</code></pre></div>
+
+<h4 id="1-autonomous-gateway-failsafe-daemon-edgeraspberry_pigatewaypy1155">1. Autonomous Gateway Failsafe Daemon (<code>edge/raspberry_pi/gateway.py:1–155</code>)</h4>
+<ul>
+<li><strong>Architectural Role</strong>: Hosted locally on the site Raspberry Pi alongside the Mosquitto broker. Acts as a local rules engine that DEFERS to the central Go engine as long as the engine is alive, but intervenes autonomously if the engine drops offline.</li>
+<li><strong>Engine Liveness Tracking</strong>: Subscribes to <code>econ/commands/+</code>. Tracks <code>last_engine_cmd</code>. If <code>(now - last_engine_cmd) &gt; ENGINE_TIMEOUT_S</code> (10.0 seconds), the engine is declared unreachable.</li>
+<li><strong>Vacancy Setback Delay</strong>: Subscribes to <code>econ/telemetry/+</code>. When occupancy drops to $\le 0$, sets <code>vacant_since</code>. If vacancy persists for <code>FAILSAFE_DELAY_S</code> (30.0 seconds) while the engine is offline, the gateway publishes:
+  <code>"LIGHTS_OFF;SETPOINT=28.0;SRC=FAILSAFE"</code></li>
+<li><strong>Anti-Self-Trigger Tag (<code>FAILSAFE_TAG = ";SRC=FAILSAFE"</code>)</strong>: The gateway checks <code>if FAILSAFE_TAG in payload: return</code> (line 91), ensuring it never mistakes its own failsafe command for an engine heartbeat.</li>
+<li><strong>Edge Command Parser Compatibility</strong>: The ESP32 <code>handleCommand()</code> splits commands by <code>;</code>. Unknown tokens like <code>;SRC=FAILSAFE</code> are gracefully ignored while <code>LIGHTS_OFF</code> and <code>SETPOINT=28.0</code> are executed.</li>
+<li><strong>State Recovery</strong>: As soon as telemetry with <code>occupancy &gt; 0</code> arrives, <code>failsafe_active</code> resets to <code>false</code>, allowing seamless handback to the engine upon reconnection.</li>
+</ul>
+<h4 id="2-microcontroller-hardware-watchdogs">2. Microcontroller Hardware Watchdogs</h4>
+<ul>
+<li><strong>Raspberry Pi Pico (<code>edge/pico/main.py:251, 315, 338</code>)</strong>: Initializes the RP2040 hardware watchdog timer with an 8-second timeout (<code>machine.WDT(timeout=8000)</code>). If USB CDC serial streaming or network socket reads freeze for $&gt;8$ seconds, the chip executes a hard reboot.</li>
+<li><strong>ESP32 FreeRTOS Task Watchdog</strong>: Monitored via the ESP-IDF Task Watchdog Timer (TWDT), triggering an automatic reboot if loop execution wedges.</li>
+</ul>
+<hr />
+<h2 id="5-layer-3-backend-engine-simulation">5. Layer 3: Backend Engine &amp; Simulation</h2>
+<h3 id="51-30-fps-physics-pipeline-control-loops">5.1 30 FPS Physics Pipeline &amp; Control Loops</h3>
+<p>The Go backend engine (<code>server/simulation/engine.go</code>) runs a continuous 30 Hz simulation loop ($\Delta t \approx 33.3\,\text{ms}$). It bridges first-principles physics with online machine learning, maintaining energy conservation across every zone.</p>
+<div class="highlight"><pre><span></span><code>graph TD
+    subgraph &quot;30 FPS Simulation Pipeline (server/simulation/engine.go)&quot;
+        TICK[&quot;Tick Clock (dt = 0.033s / 30 FPS)&quot;]
+        HARDY[&quot;Hardy Cross Fluid Airflow Solver&lt;br/&gt;doHardyCross() lines 586-599&lt;br/&gt;R_system, P_ahu, Q_v Branch Flow&quot;]
+        THERMO[&quot;2R1C Thermal ODE Integration&lt;br/&gt;tick(dt) lines 2050-2200&lt;br/&gt;T_air, T_wall, q_cool, q_interzone&quot;]
+        SHADOW[&quot;Parallel Sensorless Shadow Twin&lt;br/&gt;tick() lines 2186-2198&lt;br/&gt;T_shadow 2R1C Integration&quot;]
+        HW_APPLY[&quot;Hardware Sensor Blending&lt;br/&gt;applyHardware() lines 1297-1316&lt;br/&gt;Smooth Nudging &amp; AFDD Residual EMA&quot;]
+    end
+
+    subgraph &quot;Online Adaptation &amp; Learning&quot;
+        BASELINES[&quot;Learned Baselines (every 20s)&lt;br/&gt;baselines.go lines 131-157&lt;br/&gt;Welford-Finch EWMA Mean &amp; Variance&quot;]
+        RLS[&quot;RLS Room Identification (every 300s)&lt;br/&gt;dynamics.go lines 226-376&lt;br/&gt;theta_0..3, phi_0..2, Bayesian Ridge&quot;]
+        APLC[&quot;Autonomous Plug Sweep (every 30s)&lt;br/&gt;plugs.go lines 135-181&lt;br/&gt;Phantom Load Shedding &amp; Avoided kWh&quot;]
+        PRECOOL[&quot;Pre-Cool Loop (every 300s)&lt;br/&gt;precool.go lines 52-192&lt;br/&gt;TimesFM / LSTM Forecast Poller&quot;]
+        SETBACK[&quot;Vacancy Optimizer (every tick)&lt;br/&gt;actuate() lines 862-974&lt;br/&gt;Dynamic SetbackCeiling Depth&quot;]
+    end
+
+    subgraph &quot;Broadcast &amp; Persistence&quot;
+        DB_QUEUE[&quot;Database Write Queue&lt;br/&gt;db.go writeCh (8192 capacity)&quot;]
+        WS_STREAM[&quot;FlatBuffers Binary Serializer&lt;br/&gt;telemetry.fbs -&gt; WebSocket /ws&quot;]
+    end
+
+    TICK --&gt; HARDY
+    HARDY --&gt; THERMO
+    THERMO --&gt; SHADOW
+    SHADOW --&gt; HW_APPLY
+
+    HW_APPLY --&gt; BASELINES
+    HW_APPLY --&gt; RLS
+    HW_APPLY --&gt; APLC
+    HW_APPLY --&gt; PRECOOL
+    HW_APPLY --&gt; SETBACK
+
+    HW_APPLY --&gt; DB_QUEUE
+    HW_APPLY --&gt; WS_STREAM
+</code></pre></div>
+
+<hr />
+<h3 id="52-the-2r1c-lumped-capacitance-thermodynamic-model">5.2 The 2R1C Lumped-Capacitance Thermodynamic Model</h3>
+<h4 id="521-physical-formulation-coupled-differential-equations">5.2.1 Physical Formulation &amp; Coupled Differential Equations</h4>
+<p>Each thermal zone is modeled as a 2-Resistor / 1-Capacitor equivalent circuit:
+- Fast indoor air node ($T_{\text{air}}$) with thermal capacitance $C_{\text{air}}$ ($\text{J/K}$).
+- Slow structural wall thermal mass ($T_{\text{wall}}$) with capacitance $C_{\text{wall}}$ ($\text{J/K}$).
+- Inner boundary resistance $R_{\text{in}}$ ($\text{K/W}$) between air and interior wall surface.
+- Outer envelope resistance $R_{\text{out}}$ ($\text{K/W}$) between wall mass and outdoor ambient air ($T_{\text{out}}$).</p>
+<p>The coupled continuous-time differential equations governing the thermal state are:</p>
+<p>$$\frac{dT_{\text{air}}}{dt} = \frac{1}{C_{\text{air}}} \left[ \frac{T_{\text{wall}} - T_{\text{air}}}{R_{\text{in}}} + \dot{q}<em>{\text{int}} + \dot{q}</em>{\text{interzone}} - \dot{q}_{\text{cool}} \right]$$</p>
+<p>$$\frac{dT_{\text{wall}}}{dt} = \frac{1}{C_{\text{wall}}} \left[ \frac{T_{\text{out}} - T_{\text{wall}}}{R_{\text{out}}} - \frac{T_{\text{wall}} - T_{\text{air}}}{R_{\text{in}}} \right]$$</p>
+<p>In state-space matrix notation $\dot{\mathbf{T}} = \mathbf{A}\mathbf{T} + \mathbf{b}$, where $\mathbf{T} = [\,T_{\text{air}},\, T_{\text{wall}}\,]^{\top}$:</p>
+<p>$$\mathbf{A} = \begin{bmatrix} -\dfrac{1}{R_{\text{in}}C_{\text{air}}} &amp; \dfrac{1}{R_{\text{in}}C_{\text{air}}} \ \dfrac{1}{R_{\text{in}}C_{\text{wall}}} &amp; -\dfrac{1}{C_{\text{wall}}}\left(\dfrac{1}{R_{\text{in}}}+\dfrac{1}{R_{\text{out}}}\right) \end{bmatrix}, \qquad \mathbf{b} = \begin{bmatrix} \dfrac{\dot{q}<em>{\text{int}} + \dot{q}</em>{\text{interzone}} - \dot{q}<em>{\text{cool}}}{C</em>{\text{air}}} \ \dfrac{T_{\text{out}}}{R_{\text{out}}\,C_{\text{wall}}} \end{bmatrix}$$</p>
+<h4 id="522-parameter-derivation">5.2.2 Parameter Derivation</h4>
+<ol>
+<li><strong>Air Thermal Capacitance ($C_{\text{air}}$)</strong>:
+   $$C_{\text{air}} = \kappa \cdot \rho_{\text{air}} c_{p,\text{air}} \cdot A_{\text{zone}} \cdot h_{\text{ceiling}}$$
+   where $\rho_{\text{air}} c_{p,\text{air}} = 1206\,\text{J}\cdot\text{m}^{-3}\text{K}^{-1}$, and $\kappa = 5$ is a lump factor accounting for furniture, partitions, and shallow slab thermal mass.</li>
+<li><strong>Wall Thermal Capacitance ($C_{\text{wall}}$)</strong>:
+   $$C_{\text{wall}} = \rho_{\text{concrete}} c_{p,\text{concrete}} \cdot V_{\text{envelope}} \approx 4 \times 10^6\,\text{J/K (default baseline)}$$</li>
+<li><strong>Envelope Thermal Resistance ($R_{\text{in}}, R_{\text{out}}$)</strong>:
+   $$(UA)<em>{\text{zone}} = U</em>{\text{wall}} A_{\text{wall}} + U_{\text{roof}} A_{\text{roof}} + U_{\text{part}} A_{\text{part}}, \qquad R_{\text{total}} = \frac{1}{(UA)<em>{\text{zone}}}$$
+   $$R</em>{\text{in}} = 0.40 \cdot R_{\text{total}}, \qquad R_{\text{out}} = 0.60 \cdot R_{\text{total}}$$</li>
+<li><strong>Inter-Zone Partition Coupling ($\dot{q}_{\text{interzone}}$)</strong>:
+   $$\dot{q}<em>{\text{interzone}} = \sum</em>{j \in \text{Adjacent}} \frac{T_j - T_{\text{air}}}{R_{\text{part}, j}}, \qquad R_{\text{part}, j} = \max\Big(0.001,\; 2.0 \cdot (R_{\text{in}} + R_{\text{in}, j})\Big)$$</li>
+</ol>
+<h4 id="523-vav-sensible-cooling-capacity-normalization">5.2.3 VAV Sensible Cooling Capacity Normalization</h4>
+<p>Sensible cooling extraction $\dot{q}_{\text{cool}}$ is normalized by terminal VAV nominal design airflow:</p>
+<p>$$\dot{q}<em>{\text{total,nom}} = \dot{q}</em>{\text{int,nom}} + \frac{T_{\text{out}} - T_{\text{sp}}}{R_{\text{in}} + R_{\text{out}}}$$</p>
+<p>$$\dot{q}<em>{\text{cool}} = \max\left(0,\; \left(\frac{\dot{m}</em>{\text{vav}}}{\dot{m}<em>{\text{nom}}}\right) \cdot \dot{q}</em>{\text{total,nom}} \cdot \left(\frac{T_{\text{air}} - T_{\text{supply}}}{T_{\text{sp}} - T_{\text{supply}}}\right)\right)$$</p>
+<p>where $\dot{m}<em>{\text{vav}} / \dot{m}</em>{\text{nom}}$ is the airflow ratio from the Hardy Cross solver, and $T_{\text{supply}}$ is either measured via DS18B20 or taken from design ($12.0^\circ\text{C}$). The non-negative clamp prevents cooling air from heating zones.</p>
+<h4 id="524-numerical-integration-stability-criterion">5.2.4 Numerical Integration &amp; Stability Criterion</h4>
+<p>Integration uses an explicit Forward Euler discretization:</p>
+<p>$$T_{\text{air}}^{(k+1)} = T_{\text{air}}^{(k)} + \left[ \frac{T_{\text{wall}}^{(k)} - T_{\text{air}}^{(k)}}{R_{\text{in}} C_{\text{air}}} + \frac{\dot{q}<em>{\text{int}} + \dot{q}</em>{\text{interzone}} - \dot{q}<em>{\text{cool}}}{C</em>{\text{air}}} \right] \Delta t$$</p>
+<p>$$T_{\text{wall}}^{(k+1)} = T_{\text{wall}}^{(k)} + \left[ \frac{T_{\text{out}} - T_{\text{wall}}^{(k)}}{R_{\text{out}} C_{\text{wall}}} - \frac{T_{\text{wall}}^{(k)} - T_{\text{air}}^{(k)}}{R_{\text{in}} C_{\text{wall}}} \right] \Delta t$$</p>
+<p><strong>Stability Bound</strong>: The spectral radius requires $\Delta t &lt; 2 R_{\text{in}} C_{\text{air}} = 2 \tau_{\text{air}}$. At $\Delta t \approx 0.033\,\text{s}$, the solver operates orders of magnitude inside the stability threshold ($\tau_{\text{air}} \sim 600 - 3600\,\text{s}$). State values are clamped to $[5.0^\circ\text{C}, 50.0^\circ\text{C}]$.</p>
+<ul>
+<li><strong>Source Reference</strong>: <code>server/simulation/engine.go:2050–2200</code> (<code>tick()</code>).</li>
+<li><strong>Mathematical Specification</strong>: <code>PAPER.md:400–493</code> (§7.1, §7.2).</li>
+</ul>
+<hr />
+<h3 id="53-hardy-cross-fluid-airflow-simulation">5.3 Hardy Cross Fluid Airflow Simulation</h3>
+<h4 id="531-looped-formulation-closed-form-star-reduction">5.3.1 Looped Formulation &amp; Closed-Form Star Reduction</h4>
+<p>Turbulent head loss $h$ across duct segments obeys the Atkinson equation $h = K \cdot Q^2$. In ECON's parallel VAV star network, $V$ parallel branches share a common supply plenum pressure drop $\Delta P = P_{\text{ahu}}$. The looped Newton-Raphson formulation reduces to an exact closed-form algebraic solution:</p>
+<p>Each branch carries airflow:
+$$Q_v = \sqrt{\frac{\Delta P}{K_v}} \implies K_v^{-1/2} = \frac{Q_v}{\sqrt{\Delta P}}$$</p>
+<p>Summing across all $V$ branches yields total airflow $Q_{\text{tot}} = \sqrt{\Delta P} \sum K_v^{-1/2}$. Inverting yields equivalent system resistance $R_{\text{system}}$:</p>
+<p>$$R_{\text{system}} = \left( \sum_{v=1}^V K_v^{-1/2} \right)^{-2} = \left( \sum_{v=1}^V \frac{1}{\sqrt{K_v}} \right)^{-2}$$</p>
+<p>Coupling with the supply fan curve ($P_{\max}$ split between fan resistance $K_{\text{fan}}$ and $R_{\text{system}}$):</p>
+<p>$$Q_{\text{tot}}^2 = \frac{P_{\max}}{K_{\text{fan}} + R_{\text{system}}}$$</p>
+<p>Static operating pressure at the AHU plenum is:</p>
+<p>$$\Delta P = P_{\text{ahu}} = R_{\text{system}} \cdot Q_{\text{tot}}^2 = R_{\text{system}} \cdot \left(\frac{P_{\max}}{K_{\text{fan}} + R_{\text{system}}}\right)$$</p>
+<p>Individual branch flows are directly extracted:</p>
+<p>$$Q_v = \sqrt{\frac{\max(0, P_{\text{ahu}})}{K_v}}$$</p>
+<h4 id="532-fan-sizing-static-pressure-ceiling">5.3.2 Fan Sizing &amp; Static Pressure Ceiling</h4>
+<p>The fan sizing function <code>sizeFanToBuilding()</code> sets:
+$$P_{\max} = P_{\text{design}} \cdot \left( \frac{K_{\text{fan}}}{R_{\text{system, design}}} + 1.0 \right)$$
+Static pressure is clamped to a physical safety ceiling: $P_{\text{ahu}} \le 650.0\,\text{Pa}$. When a VAV damper closes, $R_{\text{system}}$ rises, increasing plenum pressure and redistributing airflow into adjacent open zones.</p>
+<ul>
+<li><strong>Source Reference</strong>: <code>server/simulation/engine.go:570–599</code> (<code>sizeFanToBuilding()</code>, <code>doHardyCross()</code>).</li>
+<li><strong>Mathematical Specification</strong>: <code>PAPER.md:494–524</code> (§7.3).</li>
+</ul>
+<hr />
+<h3 id="54-recursive-least-squares-rls-online-room-dynamics">5.4 Recursive Least Squares (RLS) Online Room Dynamics</h3>
+<h4 id="541-system-identification-formulation">5.4.1 System Identification Formulation</h4>
+<p>Implemented in <code>server/simulation/dynamics.go:1–989</code>. Identifies physical room parameters online by regressing two continuous differential equations:</p>
+<ol>
+<li><strong>Thermal Response ODE</strong>:
+   $$\frac{dT}{dt} = \theta_0 (T_{\text{out}} - T_{\text{in}}) + \theta_1 \cdot \text{FlowRatio} \cdot (T_{\text{in}} - T_{\text{supply}}) + \theta_2 \cdot N_{\text{occ}} + \theta_3$$</li>
+<li>$\theta_0$: Envelope thermal conductance ($h^{-1}$); thermal time constant $\tau = 1/\theta_0$ (hours).</li>
+<li>$\theta_1$: VAV cooling authority ($h^{-1}$ per unit flow $\cdot \Delta T$); physically $&lt; 0$.</li>
+<li>$\theta_2$: Heat gain per occupant ($^\circ\text{C}/h$ per person); physically $\ge 0$.</li>
+<li>
+<p>$\theta_3$: Unmetered base electrical and solar load ($^\circ\text{C}/h$).</p>
+</li>
+<li>
+<p><strong>Ventilation &amp; CO₂ Mass Balance ODE</strong>:
+   $$\frac{dC}{dt} = \phi_0 \cdot N_{\text{occ}} + \phi_1 (C_{\text{out}} - C) + \phi_2$$</p>
+</li>
+<li>$\phi_0$: CO₂ generation rate per person ($\text{ppm}/h$ per person).</li>
+<li>$\phi_1$: Air-change rate ACH ($h^{-1}$); physically $&gt; 0$.</li>
+<li>$\phi_2$: Ambient baseline drift ($\text{ppm}/h$).</li>
+</ol>
+<h4 id="542-midpoint-bias-cancellation-errors-in-variables">5.4.2 Midpoint Bias Cancellation &amp; Errors-in-Variables</h4>
+<p>Sampling occurs at $\Delta t_{\text{sample}} = 300\,\text{s}$ (5 minutes). Evaluating target derivative $y = (T_t - T_{t-1})/\Delta t$ against endpoint $T_t$ introduces measurement error $-\varepsilon_t$, creating spurious negative terms in covariance. ECON evaluates regressors at the <strong>interval midpoint</strong>:</p>
+<p>$$T_{\text{mid}} = \frac{T_t + T_{t-1}}{2}, \qquad C_{\text{mid}} = \frac{C_t + C_{t-1}}{2}$$</p>
+<p>This cancels correlated noise expectation $\mathbb{E}[\varepsilon_t^2 - \varepsilon_{t-1}^2]/(2\Delta t) = 0$, eliminating asymptotic bias.</p>
+<h4 id="543-rls-update-equations-anti-windup">5.4.3 RLS Update Equations &amp; Anti-Windup</h4>
+<ol>
+<li>Information Metric: $\text{info} = \mathbf{x}^\top P \mathbf{x}$.</li>
+<li>Information-Gated Forgetting: $\lambda = 0.999$ if $\text{info} \ge 10^{-3}$; else $\lambda = 1.000$ (prevents covariance windup during steady state).</li>
+<li>Gain Vector: $\mathbf{k} = \frac{P \mathbf{x}}{\lambda + \mathbf{x}^\top P \mathbf{x}}$.</li>
+<li>Parameter &amp; Covariance Update:
+   $$\theta \leftarrow \theta + \mathbf{k}(y - \mathbf{x}^\top \theta), \qquad P \leftarrow \frac{1}{\lambda}\left(P - \mathbf{k}\mathbf{x}^\top P\right)$$</li>
+<li>Trace Bounding: If $\text{trace}(P) &gt; 10^4$, rescales $P \leftarrow P \cdot \frac{10^4}{\text{trace}(P)}$.</li>
+<li>Bayesian Ridge Prior (Leaky RLS): Relaxes unconstrained parameters toward physical prior $\theta_{\text{prior}} = [0.5, -1.0, 0.05, 0.2]^\top$:
+   $$w_i = \text{clamp}\left(\frac{P_{ii}}{50.0},\, 0,\, 1\right), \qquad \theta_i \leftarrow \theta_i + 0.002 \cdot w_i \cdot (\theta_{\text{prior}, i} - \theta_i)$$</li>
+</ol>
+<h4 id="544-closed-form-forward-trajectory-projection">5.4.4 Closed-Form Forward Trajectory Projection</h4>
+<p>With drivers held constant, the ODE integrates analytically:</p>
+<p>$$k = \theta_0 - \theta_1 \cdot \text{FlowRatio}, \qquad T_{\text{eq}} = \frac{\theta_0 T_{\text{out}} - \theta_1 \cdot \text{FlowRatio} \cdot T_{\text{supply}} + \theta_2 N_{\text{occ}} + \theta_3}{k}$$</p>
+<p>$$T(t) = T_{\text{eq}} + \big(T(0) - T_{\text{eq}}\big) e^{-k t}$$</p>
+<p>Time required to cross comfort limit $T_{\text{limit}}$:</p>
+<p>$$t_{\text{limit}} = -\frac{1}{k} \ln\left(\frac{T_{\text{limit}} - T_{\text{eq}}}{T(0) - T_{\text{eq}}}\right) \times 3600\,\text{seconds}$$</p>
+<ul>
+<li><strong>Source Reference</strong>: <code>server/simulation/dynamics.go:1–989</code>, <code>recommend.go:299–409</code>.</li>
+</ul>
+<hr />
+<h3 id="55-learned-operating-baselines-anomaly-scoring">5.5 Learned Operating Baselines &amp; Anomaly Scoring</h3>
+<h4 id="551-online-welfordfinch-mean-and-variance-estimator">5.5.1 Online Welford/Finch Mean and Variance Estimator</h4>
+<p>Implemented in <code>server/simulation/baselines.go:1–413</code>. Maintains online statistics per <code>(zone, metric, hour)</code>:
+- Sample count $n$
+- Running mean $\mu_n$
+- Running variance $\sigma_n^2$</p>
+<p>On arrival of reading $x$ (sampled every 20 seconds):</p>
+<p>$$\alpha = \max\left(\frac{1}{n},\; 0.04\right), \qquad d = x - \mu_{n-1}$$</p>
+<p>$$\mu_n = \mu_{n-1} + \alpha \cdot d, \qquad \sigma_n^2 = (1 - \alpha) \big( \sigma_{n-1}^2 + \alpha \cdot d^2 \big)$$</p>
+<h4 id="552-diurnal-partitioning-maturity-hierarchy">5.5.2 Diurnal Partitioning &amp; Maturity Hierarchy</h4>
+<ul>
+<li><strong>Buckets</strong>: 24 clock-hour buckets ($0..23$) plus an all-hours pooled bucket ($24$).</li>
+<li><strong>Maturity</strong>: Mature when $n \ge 20$ samples.</li>
+<li><strong>Hierarchy</strong>: Clock-hour bucket $\to$ Pooled bucket $\to$ Recognized standard (ASHRAE 62.1).</li>
+</ul>
+<h4 id="553-anomaly-scoring-threshold-table">5.5.3 Anomaly Scoring &amp; Threshold Table</h4>
+<p>Anomaly score: $z = \frac{x - \mu}{\max(\sigma, \sigma_{\min})}$.</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Metric</th>
+<th style="text-align: left;">$\sigma_{\min}$</th>
+<th style="text-align: left;">$z_{\text{alert}}$</th>
+<th style="text-align: left;">High Bad</th>
+<th style="text-align: left;">Standard Fallback Floor</th>
+<th style="text-align: left;">Action Trigger</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><code>temp</code></td>
+<td style="text-align: left;">$0.4^\circ\text{C}$</td>
+<td style="text-align: left;">$+3.5\sigma$</td>
+<td style="text-align: left;">Yes</td>
+<td style="text-align: left;">None (purely learned)</td>
+<td style="text-align: left;"><code>cool</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>co2</code></td>
+<td style="text-align: left;">$40\,\text{ppm}$</td>
+<td style="text-align: left;">$+3.0\sigma$</td>
+<td style="text-align: left;">Yes</td>
+<td style="text-align: left;">$1000\,\text{ppm}$ (ASHRAE)</td>
+<td style="text-align: left;"><code>purge</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>occupancy</code></td>
+<td style="text-align: left;">$0.5\,\text{pax}$</td>
+<td style="text-align: left;">$-1.5\sigma$</td>
+<td style="text-align: left;">No</td>
+<td style="text-align: left;">$0\,\text{pax}$ (zero-check)</td>
+<td style="text-align: left;"><code>turn_off_ac</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>buildingLoadMw</code></td>
+<td style="text-align: left;">$0.05\,\text{MW}$</td>
+<td style="text-align: left;">$+1.5\sigma$</td>
+<td style="text-align: left;">Yes</td>
+<td style="text-align: left;">None</td>
+<td style="text-align: left;"><code>precool</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>plugKw</code></td>
+<td style="text-align: left;">$0.3\,\text{kW}$</td>
+<td style="text-align: left;">$+3.0\sigma$</td>
+<td style="text-align: left;">Yes</td>
+<td style="text-align: left;">None</td>
+<td style="text-align: left;">Advisory</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>Source Reference</strong>: <code>server/simulation/baselines.go:1–413</code>, <code>recommend.go:128–269</code>.</li>
+</ul>
+<hr />
+<h3 id="56-autonomous-plug-load-controller-aplc">5.6 Autonomous Plug-Load Controller (APLC)</h3>
+<h4 id="561-physical-modeling-sweep-loop">5.6.1 Physical Modeling &amp; Sweep Loop</h4>
+<p>Implemented in <code>server/simulation/plugs.go:1–306</code> and <code>server/plugapi.go:1–178</code>. Plug demand is modeled as:</p>
+<p>$$P_{\text{plug}} = P_{\text{standby}} + N_{\text{occ}} \cdot P_{\text{active,occ}}$$</p>
+<p>where $P_{\text{active,occ}} = 65.0\,\text{W}$ and $P_{\text{standby}} = 1.2\,\text{W/m}^2 \cdot A_{\text{zone}}$. Switchable fraction $f_{\text{switch}} = 0.70$ (70% non-critical sockets; 30% critical appliances).</p>
+<h4 id="562-actuation-avoided-carbon-integration">5.6.2 Actuation &amp; Avoided Carbon Integration</h4>
+<ul>
+<li><strong>Window</strong>: Armed outside operating hours (default 19:00 to 07:00).</li>
+<li><strong>Safety Dwell</strong>: Zone must be vacant for <code>GraceMinutes = 15</code>. Server rooms and comms closets are excluded (<code>isZoneCritical</code>).</li>
+<li><strong>Actuation</strong>: Dispatches <code>PLUG_OFF</code> over MQTT. Standby power drops by 70%.</li>
+<li><strong>Energy Avoided</strong>: Integrated continuously:
+  $$\Delta E_{\text{saved}} = \frac{P_{\text{standby}} \cdot f_{\text{switch}} \cdot \Delta t}{3.6 \times 10^6}\,\text{kWh}$$</li>
+</ul>
+<hr />
+<h3 id="57-forecast-driven-pre-cool-decision-loop">5.7 Forecast-Driven Pre-Cool Decision Loop</h3>
+<p>Implemented in <code>server/precool.go:1–226</code> and <code>server/simulation/engine.go:892, 938–942</code>.
+1. Runs every 5 minutes (<code>precoolLoop</code>).
+2. Queries the <strong>Google TimesFM</strong> zero-shot model (12-step / 60-min lookahead) via <code>queryTimesFM()</code>; falls back to <strong>PeakLoadLSTM</strong> via <code>queryLSTM()</code>.
+3. <strong>Plausibility Gate</strong>: Clamps against observed load range $[L_{\min}, L_{\max}]$. Rejects foreign building weights.
+4. <strong>Trigger Threshold</strong>: Evaluates baseline with 30-minute lead:
+   $$L_{\text{thresh}} = \mu_{\text{load}}(t + 30\,\text{min}) + 1.5 \cdot \sigma_{\text{load}}(t + 30\,\text{min})$$
+5. <strong>Actuation</strong>: If $\hat{P}<em>{\text{peak}} \ge L</em>{\text{thresh}}$, opens a 20-minute pre-cooling window, depressing active setpoints by $-1.5^\circ\text{C}$ to charge concrete thermal mass ($C_{\text{wall}}$) before peak electrical tariffs hit.</p>
+<hr />
+<h3 id="58-vacancy-setback-optimizer">5.8 Vacancy Setback Optimizer</h3>
+<p>Implemented in <code>server/simulation/engine.go:862–974</code> and <code>server/simulation/dynamics.go:879–950</code>.
+1. <strong>Manual Override Latch</strong>: Respects manual human changes (<code>z.OverrideUntil</code>) for 15 minutes.
+2. <strong>Vacancy Dwell</strong>: Requires 90 consecutive vacant ticks ($\approx 3.0\,\text{s}$ at 30 FPS).
+3. <strong>Dynamic Setback Depth via <code>SetbackCeiling()</code></strong>: Rather than a flat setback, calculates the maximum setback $\Delta T_{\text{sb}}$ such that full cooling can recover to setpoint within 30 minutes ($t_{\text{recover}} = 1800\,\text{s}$):
+   $$k_{\text{rec}} = \theta_0 - \theta_1, \qquad T_{\text{eq,full}} = \frac{\theta_0 T_{\text{out}} - \theta_1 T_{\text{supply}} + \theta_3}{k_{\text{rec}}}$$
+   $$T_{\text{sb,max}} = T_{\text{eq,full}} + \big(T_{\text{sp,base}} - T_{\text{eq,full}}\big) e^{k_{\text{rec}} \cdot t_{\text{recover}}}$$
+   $$\Delta T_{\text{sb}} = \text{clamp}\big(T_{\text{sb,max}} - T_{\text{sp,base}} - 0.5^\circ\text{C},\; 1.5^\circ\text{C},\; 6.0^\circ\text{C}\big)$$</p>
+<hr />
+<h3 id="59-automated-fault-detection-and-diagnostics-afdd">5.9 Automated Fault Detection and Diagnostics (AFDD)</h3>
+<p>Implemented in <code>server/simulation/engine.go:125–135, 1308–1316, 2186–2198</code>, <code>recommend.go:320–408</code>, and <code>carbon.go:420–530</code>.
+1. <strong>Sensorless Shadow Twin</strong>: Every zone bound to hardware runs a parallel, sensor-free 2R1C simulation. It is never pulled toward physical measurements.
+2. <strong>Residual Tracking</strong>: Raw residual $r = |T_{\text{hw}} - T_{\text{shadow}}|$ is filtered via an Exponential Moving Average ($\alpha = 0.02$):
+   $$\text{ResidualEma} \leftarrow \text{ResidualEma} + 0.02 \cdot \big(r - \text{ResidualEma}\big)$$
+3. <strong>Alert Triggering</strong>: When $\text{ResidualEma} &gt; 2.0^\circ\text{C}$, asserts <code>AfddAlert = true</code> (flags stuck dampers, fouled coils, or sensor drift).
+4. <strong>Capability Shortfall</strong>: Flags when full cooling equilibrium $T_{\text{eq,full}} &gt; T_{\text{sp}} + 0.8^\circ\text{C}$ (<em>"Undersized VAV / delivery fault"</em>).</p>
+<hr />
+<h2 id="6-layer-4-aiml-forecasting">6. Layer 4: AI/ML &amp; Forecasting</h2>
+<h3 id="61-machine-learning-architecture-ipc-topology">6.1 Machine Learning Architecture &amp; IPC Topology</h3>
+<p>Layer 4 integrates deep learning models running in a dedicated Python FastAPI microservice (<code>backend/forecasting/</code>) with the Go backend engine (<code>server/forecast.go</code>).</p>
+<div class="highlight"><pre><span></span><code>graph TD
+    subgraph &quot;Go Backend Server (Port 8080)&quot;
+        ENG_HIST[Load History Buffer 12 x 5min] --&gt; BF[forecast.go BuildForecastGraph]
+        BF --&gt;|Concurrent HTTP GET/POST| TFM_REQ[queryTimesFM]
+        BF --&gt;|Concurrent HTTP GET/POST| LSTM_REQ[queryLSTM]
+        PL_GATE[Plausibility Gate checkPlausible] --&gt; BF
+        BF --&gt; CASCADE[&quot;Priority Cascade: TimesFM to LSTM to Baseline&quot;]
+    end
+
+    subgraph &quot;Python ML Service (Port 8000)&quot;
+        ROUTER[FastAPI Router main.py]
+        TFM_REQ --&gt;|POST /forecast/load| ROUTER
+        LSTM_REQ --&gt;|POST /predict| ROUTER
+        ROUTER --&gt; TFM_MOD[TimesFmForecaster timesfm_forecaster.py]
+        ROUTER --&gt; LSTM_MOD[PeakLoadLSTM model.py]
+        TFM_MOD --&gt;|231M Transformer Weights| TFM_OUT[Point Forecast + Deciles q1..q9]
+        LSTM_MOD --&gt;|model_weights.pth + scaler.pkl| LSTM_OUT[Predicted Peak Load MW]
+    end
+
+    subgraph &quot;Offline Model Catalog (server/modelcatalog.go)&quot;
+        CATALOG[Model Catalog Engine] --&gt; T1[Tier 1 Recommender Lite 0.5GB]
+        CATALOG --&gt; T2[Tier 2 Room Analyst 2GB]
+        CATALOG --&gt; T3[Tier 3 Forecast CPU 8GB]
+        CATALOG --&gt; T4[Tier 4 Accelerated MPS/CUDA 16GB]
+        EXPORT[modelexport.go ZIP Bundle Exporter]
+    end
+</code></pre></div>
+
+<hr />
+<h3 id="62-supervised-peakloadlstm-architecture">6.2 Supervised PeakLoadLSTM Architecture</h3>
+<ul>
+<li><strong>Implementation</strong>: <code>backend/forecasting/model.py:5–22</code>, <code>config.py:8–23</code>, <code>train.py:75–134</code>.</li>
+<li>
+<p><strong>Model Architecture</strong>:
+  ```python
+  class PeakLoadLSTM(nn.Module):
+      def <strong>init</strong>(self, input_size=4, hidden_size=64, num_layers=2, output_size=1):
+          super().<strong>init</strong>()
+          self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True)
+          self.fc = nn.Linear(hidden_size, output_size)</p>
+<p>def forward(self, x):
+      out, _ = self.lstm(x)
+      return self.fc(out[:, -1, :])
+  <code>``
+- **Input Features**:</code>["room_temp", "airflow", "outdoor_temp", "outdoor_humidity"]<code>(sequence length: 12 steps = 1 hour rolling window).
+- **Training Source**: 14-day history from TimescaleDB continuous aggregate</code>sensor_readings_5m<code>. If $&lt;200$ windows exist, generates 6,000 synthetic physics trajectories using the plant COP equation (</code>train.py:54–73<code>).
+- **Honest Serving**: If</code>model_weights.pth<code>or</code>scaler.pkl<code>is absent,</code>POST /predict` returns HTTP 503 rather than fabricating estimates.</p>
+</li>
+</ul>
+<hr />
+<h3 id="63-google-timesfm-zero-shot-foundation-model">6.3 Google TimesFM Zero-Shot Foundation Model</h3>
+<ul>
+<li><strong>Implementation</strong>: <code>backend/forecasting/timesfm_forecaster.py:1–270</code>, <code>main.py:97–145</code>.</li>
+<li><strong>Model Candidates</strong>: Probes Hugging Face for <code>google/timesfm-2.5-200m-transformers</code> (231M parameters, primary) and <code>google/timesfm-2.0-500m-pytorch</code> (500M parameters, fallback).</li>
+<li><strong>Hardware Acceleration</strong>: Dynamically binds to <code>cuda</code> (NVIDIA), <code>mps</code> (Apple Silicon Metal Performance Shaders), or falls back to <code>cpu</code> (<code>pick_device()</code>).</li>
+<li><strong>Zero-Shot Inference</strong>: Requires $\ge 8$ historical 5-minute load observations. Forecasts 12 steps (1 hour) into the future without building-specific retraining.</li>
+<li><strong>Quantile Risk Bands</strong>: Outputs mean point trajectory plus 9 decile quantiles (<code>q1</code> through <code>q9</code>). Enables risk-averse pre-cooling based on the 90th percentile peak risk ($q9$).</li>
+</ul>
+<hr />
+<h3 id="64-go-to-python-ipc-concurrency-plausibility-auditing">6.4 Go-to-Python IPC, Concurrency &amp; Plausibility Auditing</h3>
+<p>Implemented in <code>server/forecast.go:44–126, 182–226, 594–681</code>:
+- <strong>Concurrent Dispatch</strong>: <code>BuildForecastGraph()</code> queries <code>queryTimesFM</code> (180s cold-start timeout) and <code>queryLSTM</code> (2–8s timeout) concurrently across Go channels.
+- <strong>Plausibility Auditing (<code>checkPlausible()</code>)</strong>: Compares predicted peak against the building's historical load range $[L_{\min}, L_{\max}]$. If $\hat{P} &gt; 4.0 \cdot L_{\max}$, rejects the forecast as out-of-distribution.
+- <strong>Priority Cascade</strong>:
+  1. <em>Primary</em>: Google TimesFM zero-shot trajectory with decile quantile bands ($q9$).
+  2. <em>Secondary</em>: Supervised LSTM peak with honest persistence trajectory.
+  3. <em>Fallback</em>: Physical persistence baseline with honest statistical uncertainty bounds.</p>
+<hr />
+<h3 id="65-local-model-catalog-offline-export-tiers">6.5 Local Model Catalog &amp; Offline Export Tiers</h3>
+<p>Implemented in <code>server/modelcatalog.go:1–353</code> and <code>server/modelexport.go:1–305</code>. Profiles client hardware via browser capabilities (<code>POST /api/model/recommend</code>) to match user devices to downloadable local AI runtimes:
+- <strong>Tier 1 — Recommender (Lite)</strong>: Standard Python library only (0.5 GB RAM, 1 core). $\sigma$-scores readings against learned baselines.
+- <strong>Tier 2 — Room Analyst</strong>: Standard Python library (2 GB RAM, 2 cores). Solves closed-form room dynamics and time-to-breach.
+- <strong>Tier 3 — Forecast (CPU)</strong>: Python + PyTorch + Transformers (8 GB RAM, 4 cores). Runs TimesFM (231M) and LSTM on CPU.
+- <strong>Tier 4 — Forecast (Accelerated)</strong>: PyTorch with Apple Silicon MPS or NVIDIA CUDA (16 GB RAM, 8 cores). Runs GPU-accelerated TimesFM and Monte Carlo scenario sweeps.</p>
+<p>Bundled as a standalone downloadable ZIP archive via <code>GET /api/model/export</code>.</p>
+<hr />
+<h2 id="7-layer-5-database-persistence">7. Layer 5: Database &amp; Persistence</h2>
+<h3 id="71-database-engine-timescaledb-hypertable-schema">7.1 Database Engine &amp; TimescaleDB Hypertable Schema</h3>
+<p>ECON uses PostgreSQL 16 with the TimescaleDB extension for time-series persistence (<code>server/db/init.sql</code>, <code>server/db.go:migrateSchema()</code>).</p>
+<div class="highlight"><pre><span></span><code>graph TD
+    subgraph &quot;Go Backend Engine&quot;
+        READING[&quot;Telemetry Readings&lt;br/&gt;Persist() &amp; persistReading()&quot;]
+        BUFFER[&quot;In-Memory Write Buffer&lt;br/&gt;writeCh (Capacity: 8192)&quot;]
+        BATCHER[&quot;Batched Writer Worker&lt;br/&gt;writeLoop() (Max 512 rows / 500ms)&quot;]
+    end
+
+    subgraph &quot;PostgreSQL + TimescaleDB&quot;
+        HYPER[&quot;sensor_readings Hypertable&lt;br/&gt;Chunk Size: 1 Day&lt;br/&gt;Retention Policy: 7 Days&quot;]
+        CAGGS[&quot;sensor_readings_5m Materialized View&lt;br/&gt;Continuous Aggregate (time_bucket &#39;5m&#39;)&lt;br/&gt;Retention Policy: 90 Days&quot;]
+        EVENTS[&quot;device_events Table&lt;br/&gt;Hardware Connect / Disconnect Lifecycle&quot;]
+    end
+
+    subgraph &quot;Query Routing Layer&quot;
+        ROUTER[&quot;Adaptive Query Router&lt;br/&gt;historyHandler() &amp; seriesHandler()&quot;]
+        RAW_QUERY[&quot;Direct Hypertable Scan&lt;br/&gt;(Time Window &lt;= 7 Days)&quot;]
+        CAGGS_QUERY[&quot;Continuous Aggregate Scan&lt;br/&gt;(Time Window &gt; 7 Days)&quot;]
+    end
+
+    READING --&gt; BUFFER
+    BUFFER --&gt; BATCHER
+    BATCHER --&gt;|Multi-Row Parameterized INSERT| HYPER
+    BATCHER --&gt;|Hardware Online/Offline| EVENTS
+    HYPER --&gt;|Continuous Aggregate Policy| CAGGS
+
+    ROUTER --&gt;|&quot;Window &lt;= 7 Days&quot;| RAW_QUERY
+    RAW_QUERY --&gt; HYPER
+    ROUTER --&gt;|&quot;Window &gt; 7 Days&quot;| CAGGS_QUERY
+    CAGGS_QUERY --&gt; CAGGS
+</code></pre></div>
+
+<h4 id="sql-schema-definition">SQL Schema Definition</h4>
+<div class="highlight"><pre><span></span><code><span class="c1">-- 1. Main Time-Series Hypertable</span>
+<span class="k">CREATE</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">sensor_readings</span><span class="w"> </span><span class="p">(</span>
+<span class="w">  </span><span class="k">time</span><span class="w">        </span><span class="n">TIMESTAMPTZ</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span>
+<span class="w">  </span><span class="n">zone_id</span><span class="w">     </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span>
+<span class="w">  </span><span class="n">sensor_type</span><span class="w"> </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span>
+<span class="w">  </span><span class="n">value</span><span class="w">       </span><span class="n">DOUBLE</span><span class="w"> </span><span class="k">PRECISION</span><span class="p">,</span>
+<span class="w">  </span><span class="n">device_id</span><span class="w">   </span><span class="nb">TEXT</span><span class="p">,</span>
+<span class="w">  </span><span class="n">quality</span><span class="w">     </span><span class="nb">TEXT</span><span class="p">,</span><span class="w">              </span><span class="c1">-- &#39;measured&#39; | &#39;modelled&#39; | &#39;derived&#39;</span>
+<span class="w">  </span><span class="n">strip_w</span><span class="w">     </span><span class="n">DOUBLE</span><span class="w"> </span><span class="k">PRECISION</span>
+<span class="p">);</span>
+<span class="k">SELECT</span><span class="w"> </span><span class="n">create_hypertable</span><span class="p">(</span><span class="s1">&#39;sensor_readings&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;time&#39;</span><span class="p">);</span>
+<span class="k">CREATE</span><span class="w"> </span><span class="k">INDEX</span><span class="w"> </span><span class="k">ON</span><span class="w"> </span><span class="n">sensor_readings</span><span class="w"> </span><span class="p">(</span><span class="n">zone_id</span><span class="p">,</span><span class="w"> </span><span class="k">time</span><span class="w"> </span><span class="k">DESC</span><span class="p">);</span>
+<span class="k">CREATE</span><span class="w"> </span><span class="k">INDEX</span><span class="w"> </span><span class="k">ON</span><span class="w"> </span><span class="n">sensor_readings</span><span class="w"> </span><span class="p">(</span><span class="n">device_id</span><span class="p">,</span><span class="w"> </span><span class="k">time</span><span class="w"> </span><span class="k">DESC</span><span class="p">);</span>
+
+<span class="c1">-- 2. Hardware Lifecycle Events Table</span>
+<span class="k">CREATE</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">device_events</span><span class="w"> </span><span class="p">(</span>
+<span class="w">  </span><span class="k">time</span><span class="w">      </span><span class="n">TIMESTAMPTZ</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span>
+<span class="w">  </span><span class="n">device_id</span><span class="w"> </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span>
+<span class="w">  </span><span class="n">event</span><span class="w">     </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span><span class="w">       </span><span class="c1">-- &#39;online&#39; | &#39;offline&#39; | &#39;malformed&#39;</span>
+<span class="w">  </span><span class="n">detail</span><span class="w">    </span><span class="nb">TEXT</span>
+<span class="p">);</span>
+
+<span class="c1">-- 3. 5-Minute Continuous Aggregate Materialized View</span>
+<span class="k">CREATE</span><span class="w"> </span><span class="n">MATERIALIZED</span><span class="w"> </span><span class="k">VIEW</span><span class="w"> </span><span class="n">sensor_readings_5m</span>
+<span class="k">WITH</span><span class="w"> </span><span class="p">(</span><span class="n">timescaledb</span><span class="p">.</span><span class="n">continuous</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span>
+<span class="k">SELECT</span><span class="w"> </span><span class="n">time_bucket</span><span class="p">(</span><span class="s1">&#39;5 minutes&#39;</span><span class="p">,</span><span class="w"> </span><span class="k">time</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">bucket</span><span class="p">,</span>
+<span class="w">       </span><span class="n">zone_id</span><span class="p">,</span>
+<span class="w">       </span><span class="n">sensor_type</span><span class="p">,</span>
+<span class="w">       </span><span class="k">AVG</span><span class="p">(</span><span class="n">value</span><span class="p">)</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="n">avg_value</span>
+<span class="k">FROM</span><span class="w"> </span><span class="n">sensor_readings</span>
+<span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">bucket</span><span class="p">,</span><span class="w"> </span><span class="n">zone_id</span><span class="p">,</span><span class="w"> </span><span class="n">sensor_type</span><span class="p">;</span>
+
+<span class="c1">-- 4. Automated Retention Policies</span>
+<span class="k">SELECT</span><span class="w"> </span><span class="n">add_continuous_aggregate_policy</span><span class="p">(</span><span class="s1">&#39;sensor_readings_5m&#39;</span><span class="p">,</span>
+<span class="w">    </span><span class="n">start_offset</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="nb">INTERVAL</span><span class="w"> </span><span class="s1">&#39;1 month&#39;</span><span class="p">,</span>
+<span class="w">    </span><span class="n">end_offset</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="nb">INTERVAL</span><span class="w"> </span><span class="s1">&#39;5 minutes&#39;</span><span class="p">,</span>
+<span class="w">    </span><span class="n">schedule_interval</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="nb">INTERVAL</span><span class="w"> </span><span class="s1">&#39;5 minutes&#39;</span><span class="p">);</span>
+
+<span class="k">SELECT</span><span class="w"> </span><span class="n">add_retention_policy</span><span class="p">(</span><span class="s1">&#39;sensor_readings&#39;</span><span class="p">,</span><span class="w"> </span><span class="nb">INTERVAL</span><span class="w"> </span><span class="s1">&#39;7 days&#39;</span><span class="p">);</span>
+<span class="k">SELECT</span><span class="w"> </span><span class="n">add_retention_policy</span><span class="p">(</span><span class="s1">&#39;sensor_readings_5m&#39;</span><span class="p">,</span><span class="w"> </span><span class="nb">INTERVAL</span><span class="w"> </span><span class="s1">&#39;90 days&#39;</span><span class="p">);</span>
+</code></pre></div>
+
+<hr />
+<h3 id="72-high-throughput-asynchronous-ingestion-pipeline">7.2 High-Throughput Asynchronous Ingestion Pipeline</h3>
+<p>To prevent database disk latency from blocking the 30 FPS physics ticker:
+1. <code>engine.Persist(zoneId, sensorType, value)</code> enqueues records into Go channel <code>writeCh</code> (capacity 8192). If the channel saturates, records are dropped gracefully.
+2. Background goroutine <code>writeLoop()</code> (<code>server/db.go:164–216</code>) drains <code>writeCh</code>. It flushes batched multi-row inserts when <code>maxBatch = 512</code> is reached or every 500 ms on a ticker.
+3. Multi-row parameterized SQL is executed in single transactions:
+   <code>INSERT INTO sensor_readings (time, zone_id, sensor_type, value, device_id, quality, strip_w) VALUES ($1,$2,...), ($8,$9,...)</code></p>
+<hr />
+<h3 id="73-dynamic-historical-query-routing">7.3 Dynamic Historical Query Routing</h3>
+<p>Implemented in <code>server/db.go:218–399</code> (<code>historyHandler()</code>, <code>seriesHandler()</code>):
+- <strong>Window $\le 7$ days</strong>: Queries raw hypertable <code>sensor_readings</code> using <code>time_bucket('1 second', time)</code> or calculated intervals.
+- <strong>Window $&gt; 7$ days</strong>: Dynamically routes to continuous aggregate view <code>sensor_readings_5m</code> using <code>time_bucket(interval, bucket)</code>, avoiding table scans across millions of rows.</p>
+<hr />
+<h3 id="74-durable-json-state-checkpointing">7.4 Durable JSON State Checkpointing</h3>
+<p>In addition to TimescaleDB, the engine maintains durable JSON snapshots in <code>server/data/</code> for models requiring persistence across restarts:
+- <code>data/baseline-model.json</code>: Hourly mean/variance stats (<code>baselines.go</code>).
+- <code>data/room-dynamics.json</code>: Identified RLS parameters ($\theta, \phi, P$) (<code>dynamics.go</code>).
+- <code>data/load-history.json</code>: 5-minute rolling building load context for TimesFM (<code>forecast.go</code>).
+- <code>data/plug-state.json</code>: APLC cumulative saved kWh and configuration (<code>plugapi.go</code>).
+- <code>data/sustainability-state.json</code>: Scope 2 emissions and equipment runtimes (<code>carbon.go</code>).
+- <strong>Checkpoint Loops</strong>: Goroutines flush changes to disk once every 60 seconds.</p>
+<hr />
+<h2 id="8-layer-6-api-layer-real-time-communication">8. Layer 6: API Layer &amp; Real-Time Communication</h2>
+<h3 id="81-api-architecture-security-model">8.1 API Architecture &amp; Security Model</h3>
+<div class="highlight"><pre><span></span><code>graph LR
+    subgraph &quot;Clients&quot;
+        DASH[&quot;React Operations Dashboard&quot;]
+        CURL[&quot;CLI / Operator Tools&quot;]
+    end
+
+    subgraph &quot;API &amp; Security Layer (server/main.go &amp; auth.go)&quot;
+        CSWSH[&quot;checkOrigin() Origin Validation&quot;]
+        AUTH_GATE[&quot;tokenMatches() Constant-Time Auth&quot;]
+        REST_MUX[&quot;REST API Router (32 Endpoints)&quot;]
+        WS_HANDLER[&quot;WebSocket Server (/ws)&quot;]
+    end
+
+    subgraph &quot;Simulation &amp; State&quot;
+        SIM[&quot;Engine State &amp; Physics&quot;]
+        FLATBUFF[&quot;FlatBuffers Serializer&quot;]
+    end
+
+    DASH --&gt;|HTTP REST| CSWSH --&gt; REST_MUX --&gt; SIM
+    DASH --&gt;|WS Upgrade :8080/ws| CSWSH --&gt; WS_HANDLER
+    CURL --&gt;|X-Admin-Token| AUTH_GATE --&gt; REST_MUX
+
+    SIM --&gt; FLATBUFF --&gt;|Binary SimState @ 30 FPS| WS_HANDLER --&gt; DASH
+</code></pre></div>
+
+<ul>
+<li><strong>Cross-Site WebSocket Hijacking (CSWSH) Protection (<code>server/auth.go:checkOrigin</code>)</strong>: Validates the <code>Origin</code> header against <code>Host</code>, loopback addresses, or <code>ECON_ALLOWED_ORIGINS</code>.</li>
+<li><strong>Constant-Time Token Authentication (<code>server/auth.go:tokenMatches</code>)</strong>: Compares incoming admin tokens via <code>subtle.ConstantTimeCompare</code> against <code>ECON_ADMIN_TOKEN</code> to prevent timing attacks.</li>
+<li><strong>Role-Based WebSocket Execution</strong>: Unauthenticated WebSocket connections stream telemetry read-only; administrative control actions (<code>"action": "auth"</code>) require passing a valid token.</li>
+</ul>
+<hr />
+<h3 id="82-master-catalog-of-32-rest-api-endpoints">8.2 Master Catalog of 32 REST API Endpoints</h3>
+<p>The Go backend exposes 32 REST endpoints across simulation, hardware inspection, recommendations, and carbon metrics.</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: center;">#</th>
+<th style="text-align: left;">Endpoint</th>
+<th style="text-align: center;">Method</th>
+<th style="text-align: left;">Source File &amp; Line</th>
+<th style="text-align: center;">Auth Required</th>
+<th style="text-align: left;">Functional Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: center;"><strong>1</strong></td>
+<td style="text-align: left;"><code>/api/building-data</code></td>
+<td style="text-align: center;">GET</td>
+<td style="text-align: left;"><code>server/main.go:26</code></td>
+<td style="text-align: center;">No</td>
+<td style="text-align: left;">Building geometry, zones, coordinates, and VAV mappings.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>2</strong></td>
+<td style="text-align: left;"><code>/api/building/switch</code></td>
+<td style="text-align: center;">POST</td>
+<td style="text-align: left;"><code>server/main.go:29</code>, <code>modelswitch.go:13</code></td>
+<td style="text-align: center;">Yes</td>
+<td style="text-align: left;">Hot-reloads building context (e.g. <code>home</code>, <code>office</code>).</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>3</strong></td>
+<td style="text-align: left;"><code>/api/model/switch</code></td>
+<td style="text-align: center;">POST</td>
+<td style="text-align: left;"><code>server/main.go:30</code>, <code>modelswitch.go:13</code></td>
+<td style="text-align: center;">Yes</td>
+<td style="text-align: left;">Alias for building context switch.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>4</strong></td>
+<td style="text-align: left;"><code>/api/ontology</code></td>
+<td style="text-align: center;">GET</td>
+<td style="text-align: left;"><code>server/main.go:33</code></td>
+<td style="text-align: center;">No</td>
+<td style="text-align: left;">Brick Schema ontology semantic graph (TTL / JSON).</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>5</strong></td>
+<td style="text-align: left;"><code>/api/library</code></td>
+<td style="text-align: center;">GET</td>
+<td style="text-align: left;"><code>server/main.go:47</code></td>
+<td style="text-align: center;">No</td>
+<td style="text-align: left;">Programme library thermal and design coefficients.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>6</strong></td>
+<td style="text-align: left;"><code>/api/history</code></td>
+<td style="text-align: center;">GET</td>
+<td style="text-align: left;"><code>server/main.go:58</code>, <code>db.go:218</code></td>
+<td style="text-align: center;">No</td>
+<td style="text-align: left;">TimescaleDB power, CO₂, and occupancy historical series.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>7</strong></td>
+<td style="text-align: left;"><code>/api/series</code></td>
+<td style="text-align: center;">GET</td>
+<td style="text-align: left;"><code>server/main.go:66</code>, <code>db.go:329</code></td>
+<td style="text-align: center;">No</td>
+<td style="text-align: left;">Parameterized time series for any metric (e.g. <code>afddResidual</code>).</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>8</strong></td>
+<td style="text-align: left;"><code>/api/forecast</code></td>
+<td style="text-align: center;">GET/POST</td>
+<td style="text-align: left;"><code>server/main.go:69</code>, <code>forecast.go:43</code></td>
+<td style="text-align: center;">No</td>
+<td style="text-align: left;">Supervised LSTM 24-step peak electrical load forecast.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>9</strong></td>
+<td style="text-align: left;"><code>/api/forecast/load</code></td>
+<td style="text-align: center;">GET</td>
+<td style="text-align: left;"><code>server/main.go:166</code>, <code>forecast.go:193</code></td>
+<td style="text-align: center;">No</td>
+<td style="text-align: left;">Google TimesFM zero-shot foundation model load forecast.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>10</strong></td>
+<td style="text-align: left;"><code>/api/forecast/engines</code></td>
+<td style="text-align: center;">GET</td>
+<td style="text-align: left;"><code>server/main.go:167</code>, <code>forecast.go:269</code></td>
+<td style="text-align: center;">No</td>
+<td style="text-align: left;">Health and readiness status of forecast engines.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>11</strong></td>
+<td style="text-align: left;"><code>/api/forecast/compare</code></td>
+<td style="text-align: center;">GET</td>
+<td style="text-align: left;"><code>server/main.go:173</code>, <code>forecast.go:318</code></td>
+<td style="text-align: center;">No</td>
+<td style="text-align: left;">Side-by-side comparison of LSTM vs TimesFM forecasts.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>12</strong></td>
+<td style="text-align: left;"><code>/api/hardware</code></td>
+<td style="text-align: center;">GET</td>
+<td style="text-align: left;"><code>server/main.go:73</code></td>
+<td style="text-align: center;">No</td>
+<td style="text-align: left;">Live status and telemetry of edge IoT nodes (ESP32/Pico).</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>13</strong></td>
+<td style="text-align: left;"><code>/api/vision/detection</code></td>
+<td style="text-align: center;">POST</td>
+<td style="text-align: left;"><code>server/main.go:80</code></td>
+<td style="text-align: center;">No</td>
+<td style="text-align: left;">Injects camera-detected AC brand/protocol frame.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>14</strong></td>
+<td style="text-align: left;"><code>/api/command</code></td>
+<td style="text-align: center;">POST</td>
+<td style="text-align: left;"><code>server/main.go:102</code>, <code>main.go:355</code></td>
+<td style="text-align: center;">No</td>
+<td style="text-align: left;">Manual HVAC/lights override (<code>HVAC_SET</code>, <code>SETPOINT</code>).</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>15</strong></td>
+<td style="text-align: left;"><code>/api/devices</code></td>
+<td style="text-align: center;">GET</td>
+<td style="text-align: left;"><code>server/devices.go:412</code></td>
+<td style="text-align: center;">No</td>
+<td style="text-align: left;">Hardware diagnostic inspector table and device statuses.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>16</strong></td>
+<td style="text-align: left;"><code>/api/devices/series</code></td>
+<td style="text-align: center;">GET</td>
+<td style="text-align: left;"><code>server/devices.go:413</code></td>
+<td style="text-align: center;">No</td>
+<td style="text-align: left;">Device-attributed telemetry series.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>17</strong></td>
+<td style="text-align: left;"><code>/api/devices/events</code></td>
+<td style="text-align: center;">GET</td>
+<td style="text-align: left;"><code>server/devices.go:414</code></td>
+<td style="text-align: center;">No</td>
+<td style="text-align: left;">Edge node connect, disconnect, and error event audit log.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>18</strong></td>
+<td style="text-align: left;"><code>/api/devices/quality</code></td>
+<td style="text-align: center;">GET</td>
+<td style="text-align: left;"><code>server/devices.go:415</code></td>
+<td style="text-align: center;">No</td>
+<td style="text-align: left;">Sensor data quality breakdown (measured vs modeled).</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>19</strong></td>
+<td style="text-align: left;"><code>/api/precool</code></td>
+<td style="text-align: center;">GET/POST</td>
+<td style="text-align: left;"><code>server/main.go:116</code>, <code>precool.go:197</code></td>
+<td style="text-align: center;">No</td>
+<td style="text-align: left;">Pre-cool window status / manual window trigger.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>20</strong></td>
+<td style="text-align: left;"><code>/api/weather</code></td>
+<td style="text-align: center;">GET</td>
+<td style="text-align: left;"><code>server/main.go:120</code>, <code>weather.go:72</code></td>
+<td style="text-align: center;">No</td>
+<td style="text-align: left;">Open-Meteo live outdoor temp and fallback status.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>21</strong></td>
+<td style="text-align: left;"><code>/api/digitize</code></td>
+<td style="text-align: center;">POST</td>
+<td style="text-align: left;"><code>server/main.go:126</code>, <code>blueprint.go:67</code></td>
+<td style="text-align: center;">No</td>
+<td style="text-align: left;">Uploads architectural plan for ML digitizer parsing.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>22</strong></td>
+<td style="text-align: left;"><code>/api/building</code></td>
+<td style="text-align: center;">POST</td>
+<td style="text-align: left;"><code>server/main.go:127</code>, <code>blueprint.go:94</code></td>
+<td style="text-align: center;">Yes</td>
+<td style="text-align: left;">Deploys digitized blueprint to active digital twin.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>23</strong></td>
+<td style="text-align: left;"><code>/api/building/backups</code></td>
+<td style="text-align: center;">GET</td>
+<td style="text-align: left;"><code>server/main.go:128</code>, <code>blueprint.go:142</code></td>
+<td style="text-align: center;">No</td>
+<td style="text-align: left;">Lists historical building model backups.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>24</strong></td>
+<td style="text-align: left;"><code>/api/building/rollback</code></td>
+<td style="text-align: center;">POST</td>
+<td style="text-align: left;"><code>server/main.go:129</code>, <code>blueprint.go:159</code></td>
+<td style="text-align: center;">Yes</td>
+<td style="text-align: left;">Reverts active model to a historical backup.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>25</strong></td>
+<td style="text-align: left;"><code>/api/plugs</code></td>
+<td style="text-align: center;">GET/POST</td>
+<td style="text-align: left;"><code>server/main.go:135</code>, <code>plugapi.go:18</code></td>
+<td style="text-align: center;">Guarded POST</td>
+<td style="text-align: left;">APLC status, phantom leaderboard, and policy update.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>26</strong></td>
+<td style="text-align: left;"><code>/api/recommendations</code></td>
+<td style="text-align: center;">GET</td>
+<td style="text-align: left;"><code>server/main.go:142</code>, <code>recommendapi.go:120</code></td>
+<td style="text-align: center;">No</td>
+<td style="text-align: left;">Ranked AI operational recommendations and baselines.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>27</strong></td>
+<td style="text-align: left;"><code>/api/rooms/models</code></td>
+<td style="text-align: center;">GET</td>
+<td style="text-align: left;"><code>server/main.go:151</code>, <code>simulation/dynamics.go</code></td>
+<td style="text-align: center;">No</td>
+<td style="text-align: left;">Identified RLS physical room parameters per zone.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>28</strong></td>
+<td style="text-align: left;"><code>/api/model</code></td>
+<td style="text-align: center;">GET</td>
+<td style="text-align: left;"><code>server/main.go:158</code>, <code>modelexport.go:16</code></td>
+<td style="text-align: center;">No</td>
+<td style="text-align: left;">Metadata on exportable offline model bundle.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>29</strong></td>
+<td style="text-align: left;"><code>/api/model/export</code></td>
+<td style="text-align: center;">GET</td>
+<td style="text-align: left;"><code>server/main.go:159</code>, <code>modelexport.go:35</code></td>
+<td style="text-align: center;">No</td>
+<td style="text-align: left;">Downloads offline model bundle ZIP package.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>30</strong></td>
+<td style="text-align: left;"><code>/api/model/recommend</code></td>
+<td style="text-align: center;">GET</td>
+<td style="text-align: left;"><code>server/main.go:160</code>, <code>modelcatalog.go:122</code></td>
+<td style="text-align: center;">No</td>
+<td style="text-align: left;">Machine sizing recommendation for local models.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>31</strong></td>
+<td style="text-align: left;"><code>/api/sustainability</code></td>
+<td style="text-align: center;">GET</td>
+<td style="text-align: left;"><code>server/main.go:179</code>, <code>carbon.go:463</code></td>
+<td style="text-align: center;">No</td>
+<td style="text-align: left;">Scope 2 carbon, space utilization, and carbon offsets.</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>32</strong></td>
+<td style="text-align: left;"><code>/ws</code></td>
+<td style="text-align: center;">GET (Upgrade)</td>
+<td style="text-align: left;"><code>server/main.go:193</code>, <code>main.go:211</code></td>
+<td style="text-align: center;">Yes (for control)</td>
+<td style="text-align: left;">High-speed binary FlatBuffers telemetry stream at 30 Hz.</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h3 id="83-websocket-streaming-protocol-binary-frames">8.3 WebSocket Streaming Protocol &amp; Binary Frames</h3>
+<ul>
+<li><strong>Endpoint</strong>: <code>/ws</code></li>
+<li><strong>Protocol</strong>: Binary WebSocket frame carrying Google FlatBuffers bytes (<code>Telemetry.SimState</code>).</li>
+<li><strong>Cadence</strong>: Broadcast at ~30 Hz driven by the engine ticker (<code>server/simulation/engine.go:2713–2856</code>).</li>
+<li><strong>Frame Schema (<code>server/schema/telemetry.fbs</code>)</strong>:</li>
+<li><code>ZoneData</code>: Zone ID, temperature, setpoint, deadband, occupants, electrical load, lighting state, humidity, CO₂, plug watts, plug shed flag, supply temperature, power strip watts, AFDD residual.</li>
+<li><code>VavData</code>: Damper position, airflow rate.</li>
+<li><code>GlobalData</code>: Total building load ($MW$), cooling output ($MW$), plant COP, energy saved ($MW$), BESS state of charge ($SOC\%$), average CO₂, total plug load ($kW$), auto-pilot status, AHU static pressure ($Pa$).</li>
+<li>Root <code>SimState</code>: Vectors of <code>ZoneData</code>, <code>VavData</code>, and <code>GlobalData</code> with epoch millisecond timestamp.</li>
+<li><strong>Non-Blocking Dispatch</strong>: Finished byte buffers are broadcast asynchronously outside the engine lock to prevent network lag from stalling simulation physics.</li>
+</ul>
+<hr />
+<h2 id="9-layer-7-frontend-dashboard">9. Layer 7: Frontend Dashboard</h2>
+<h3 id="91-component-hierarchy-state-flow">9.1 Component Hierarchy &amp; State Flow</h3>
+<p>The dashboard (<code>dashboard/</code>) is a high-performance single-page web application built with <strong>React 18</strong>, <strong>Vite 5</strong>, <strong>Three.js / React Three Fiber</strong>, and <strong>Recharts</strong>.</p>
+<div class="highlight"><pre><span></span><code>graph TD
+    subgraph &quot;Data Ingestion (dashboard/src/useDigitalTwin.js)&quot;
+        WS_CLI[&quot;WebSocket ws://localhost:8080/ws&quot;] --&gt;|Binary FlatBuffers @ 30 FPS| FB_PARSE[&quot;SimState Deserializer&quot;]
+        FB_PARSE --&gt; ZONES_STATE[&quot;Zone State Map&quot;]
+        FB_PARSE --&gt; GLOBALS_STATE[&quot;Global Metrics State&quot;]
+        POLL_REC[&quot;Polling /api/recommendations&quot;] --&gt; REC_STATE[&quot;Recommendations Store&quot;]
+        POLL_COMP[&quot;Polling /api/forecast/compare&quot;] --&gt; FORECAST_STATE[&quot;Forecast Store&quot;]
+    end
+
+    subgraph &quot;State Store (dashboard/src/buildingStore.js)&quot;
+        BOOT[&quot;Two-Stage Bootloader&quot;] --&gt; STORE[&quot;Active Building State&quot;]
+        SWITCH[&quot;Model Switcher: Multi-Level vs Domestic Home&quot;] --&gt; STORE
+    end
+
+    subgraph &quot;Core Dashboard Components&quot;
+        ZONES_STATE --&gt; MODEL_3D[&quot;BuildingModel.jsx (3D Digital Twin Canvas)&quot;]
+        GLOBALS_STATE --&gt; METRICS_PANEL[&quot;GlobalMetricsPanel.jsx (Power &amp; Carbon)&quot;]
+        GLOBALS_STATE --&gt; PLUG_PANEL[&quot;PlugLoadPanel.jsx (APLC Standby Shedding)&quot;]
+        REC_STATE --&gt; AI_PANEL[&quot;AiInsightsPanel.jsx (Recommendations)&quot;]
+        REC_STATE --&gt; EVIDENCE[&quot;RecommendationEvidence.jsx (Sigma-Strip)&quot;]
+        FORECAST_STATE --&gt; CHART[&quot;ForecastChart.jsx (Honest Trajectory)&quot;]
+    end
+
+    subgraph &quot;WebGL / Three.js 3D Canvas&quot;
+        MODEL_3D --&gt; CSG_WALLS[&quot;CSG Exterior Walls with Carved Windows&quot;]
+        MODEL_3D --&gt; SHADER_ZONES[&quot;Zone Meshes with Custom GLSL Heatmap Shader&quot;]
+    end
+</code></pre></div>
+
+<hr />
+<h3 id="92-procedural-bim-3d-digital-twin-custom-glsl-heatmap-shader">9.2 Procedural BIM 3D Digital Twin &amp; Custom GLSL Heatmap Shader</h3>
+<p>Implemented in <code>dashboard/src/BuildingModel.jsx:1–799</code>:
+1. <strong>Constructive Solid Geometry (CSG) Window Cutouts</strong>:
+   Uses <code>three-bvh-csg</code> (<code>Evaluator</code>, <code>Brush</code>, <code>SUBTRACTION</code>, lines 12–43) to carve window openings directly out of exterior walls. An in-memory geometry cache (<code>_geometryCache</code>) keys on wall dimensions to reduce CSG tessellation overhead across identical floor plates by $3\times$.
+2. <strong>Custom GLSL Thermal Heatmap Shader Material (<code>ZoneRenderer</code>, lines 319–407)</strong>:
+   Each zone polygon is extruded via <code>THREE.ExtrudeGeometry</code> (depth: 3.8 m) and rendered using a custom GLSL fragment shader:
+   ```glsl
+   vec3 heatmap(float deviation) {
+     float amount = clamp(deviation, -1.0, 3.0);
+     vec3 cool = vec3(0.0, 0.5, 1.0);  // Blue: Overcooled
+     vec3 good = vec3(0.0, 1.0, 0.0);  // Green: Optimal
+     vec3 warn = vec3(1.0, 1.0, 0.0);  // Yellow: Warning
+     vec3 hot  = vec3(1.0, 0.0, 0.0);  // Red: Critical Overheat</p>
+<div class="highlight"><pre><span></span><code> if (amount &lt; 0.0) return mix(good, cool, -amount);
+ if (amount &lt; 1.0) return mix(good, warn, amount);
+ return mix(warn, hot, min(1.0, amount - 1.0));
+</code></pre></div>
+
+<p>}</p>
+<p>void main() {
+     float deviation = (temperature - setpoint) / deadband;
+     vec3 heatColor = heatmap(deviation);
+     vec3 physColor = vec3(0.2, 0.2, 0.2);
+     vec3 finalColor = mix(heatColor, physColor, isPhysical);
+     finalColor *= mix(0.3, 1.0, lightsOn); // Vacancy setback dims zone
+     float finalOpacity = mix(opacity, opacity * 0.1, isPhysical);
+     gl_FragColor = vec4(finalColor, finalOpacity);
+   }
+   <code>``
+3. **Frame Optimization (</code>useFrame<code>, lines 415–433)**: Only active and alarmed zones execute</code>THREE.MathUtils.lerp` every frame (60 FPS). Inactive background zones snap only when telemetry changes by $&gt;0.05^\circ\text{C}$, preventing frame drops across 1,350 zones.</p>
+<hr />
+<h3 id="93-predictive-forecast-visualization">9.3 Predictive Forecast Visualization</h3>
+<p>Implemented in <code>dashboard/src/ForecastChart.jsx:1–398</code>:
+- <strong>Honest Data Discipline</strong>: Eliminates synthetic cubic curves. If <code>series</code> is empty or null, renders an explicit fallback:
+  <code>&lt;div data-testid="forecast-insufficient-data"&gt;Insufficient data — awaiting model telemetry&lt;/div&gt;</code> (lines 110–145).
+- <strong>Trajectory &amp; Uncertainty Bands (lines 150–260)</strong>:
+  - <code>&lt;Line dataKey="mw" stroke="var(--accent-blue)" ...&gt;</code>: TimesFM zero-shot point trajectory.
+  - <code>&lt;Line dataKey="hi" stroke="var(--accent-yellow)" strokeDasharray="3 3" ...&gt;</code>: Upper decile ($q9$) uncertainty head.
+  - <code>&lt;ReferenceLine y={lstmPeak} stroke="var(--accent-purple)" strokeDasharray="4 4" ...&gt;</code>: Supervised LSTM peak load reference benchmark.</p>
+<hr />
+<h3 id="94-operational-telemetry-panels-ai-insights">9.4 Operational Telemetry Panels &amp; AI Insights</h3>
+<ul>
+<li><strong>Power &amp; Carbon Metrics (<code>GlobalMetricsPanel.jsx:1–624</code>)</strong>: Displays whole-building electrical load ($MW$), thermal cooling output ($MW$), chiller COP, energy saved ($MW$), BESS battery status, and Scope 2 operational emissions ($kg\,\text{CO}_2\text{e}$).</li>
+<li><strong>APLC Plug-Load Panel (<code>PlugLoadPanel.jsx:1–320</code>)</strong>: Quantifies non-HVAC socket power ($kW$), active occupant draw, phantom standby loads, and automated overnight socket shedding.</li>
+<li><strong>AI Recommendations &amp; Evidence (<code>AiInsightsPanel.jsx:1–1127</code>, <code>RecommendationEvidence.jsx:1–232</code>)</strong>:</li>
+<li>Renders a visual $\sigma$-strip displaying where zone telemetry sits relative to its learned $\pm 2\sigma$ diurnal band, citing baseline mean, standard deviation, sample count, and hour bucket.</li>
+<li>Plots the first-order step response curve computed by the RLS filter.</li>
+<li>Exposes manual human override buttons alongside an autonomous Auto-Pilot toggle.</li>
+</ul>
+<hr />
+<h2 id="10-end-to-end-data-flow-traces">10. End-to-End Data Flow Traces</h2>
+<h3 id="101-trace-1-physical-sensor-to-engine-ingestion-carbon-accounting">10.1 Trace #1: Physical Sensor to Engine Ingestion &amp; Carbon Accounting</h3>
+<p>This trace follows an AC electrical load (e.g. 185.4 W office appliance bank) from physical electron flow through to backend carbon accounting and frontend telemetry streaming.</p>
+<div class="highlight"><pre><span></span><code>sequenceDiagram
+    autonumber
+    participant Load as 220V AC Power Strip Load
+    participant Sensor as ACS712-30A + 10k Divider
+    participant ESP as ESP32 (GPIO33 ADC1_CH5)
+    participant Denoiser as CurrentDenoiser (DSP)
+    participant MQTT as Mosquitto Broker (:1883)
+    participant ServerMqtt as server/mqtt.go
+    participant Registry as server/devices.go
+    participant Engine as server/simulation/engine.go
+    participant Carbon as server/carbon.go
+    participant UI as React Frontend Dashboard
+
+    Load-&gt;&gt;Sensor: Primary AC Current Flow (0.806 A RMS)
+    Sensor-&gt;&gt;ESP: Analog Voltage Swing (2.5V quiescent ± 26.6mV RMS)
+    Note over ESP: main.cpp:687 readStripAmps()&lt;br/&gt;Samples 1200 ADC counts over 100ms
+    ESP-&gt;&gt;Denoiser: processWindow(sampleBuf, n) (current_denoiser.h:27)
+    Note over Denoiser: 1. Transient Spike Suppression&lt;br/&gt;2. Period-Differencing Detrending (50Hz/60Hz)&lt;br/&gt;3. Noise Variance Subtraction (300 counts)&lt;br/&gt;4. Autocorrelation Check (minNormCov &lt; -0.20)&lt;br/&gt;5. Stage 2 EMA Smoothing &amp; Deadband
+    Denoiser--&gt;&gt;ESP: Returns Amps = 0.806 A
+    Note over ESP: main.cpp:981 readAndPublish()&lt;br/&gt;Calculates stripW = 0.806A * 230V = 185.4W&lt;br/&gt;Serializes JSON
+    ESP-&gt;&gt;MQTT: PUBLISH econ/telemetry/zone_1 {&quot;stripW&quot;: 185.4, ...}
+    MQTT-&gt;&gt;ServerMqtt: Ingest MQTT Payload (server/mqtt.go:148 handleTelemetry)
+    ServerMqtt-&gt;&gt;ServerMqtt: json.Unmarshal into telemetryMsg.StripW
+    ServerMqtt-&gt;&gt;Registry: observe(suffix, msg, payload) (devices.go:86)
+    Registry-&gt;&gt;Registry: persistMeasured(&quot;zone_1&quot;, &quot;Level 4&quot;, &quot;stripW&quot;, 185.4)
+    ServerMqtt-&gt;&gt;Engine: IngestTelemetry(ref, suffix, Measurement{StripW: 185.4})
+    Note over Engine: engine.go:704-706&lt;br/&gt;z.HwStripW = 185.4&lt;br/&gt;z.HwStripAt = time.Now()
+    Engine-&gt;&gt;Carbon: Scope 2 Carbon Evaluation (carbon.go:471-597)
+    Note over Carbon: Multiplies StripW by Grid Emission Factor&lt;br/&gt;Checks Abnormal Power Draw for Maintenance Alerts
+    Engine-&gt;&gt;UI: FlatBuffers Telemetry Stream via WebSockets
+    Note over UI: ZoneDataAddStripW(builder, float32(stripW))&lt;br/&gt;Rendered on Live Zone Power Graph
+</code></pre></div>
+
+<h4 id="detailed-step-by-step-code-references">Detailed Step-by-Step Code References:</h4>
+<ol>
+<li><strong>Physical Front End</strong>: ACS712 Hall sensor in series with the AC power strip conductor. Output ($V_{CC}/2 \pm 66\,\text{mV/A}$) enters a 10kΩ/10kΩ divider, landing on <strong>ESP32 GPIO 33</strong> (<code>STRIP_ADC_PIN</code>).</li>
+<li><strong>Firmware DSP Denoising (<code>edge/esp32/src/main.cpp:687–726</code>, <code>current_denoiser.h:27–173</code>)</strong>:
+   <code>readStripAmps()</code> samples 1200 ADC counts over 100 ms via <code>analogRead(STRIP_ADC_PIN)</code>. <code>stripDenoiser.processWindow()</code> suppresses spikes (<code>:43–46</code>), eliminates intra-window DC drift via period-differencing (<code>:54–90</code>), subtracts ADC noise variance $\sigma^2 = 300$ (<code>:103–105</code>), evaluates autocorrelation covariance ($&lt; -0.20$, <code>:114–150</code>), and applies Stage 2 EMA smoothing ($\alpha = 0.35$) with a $0.03\,\text{A}$ deadband (<code>:168–172</code>).</li>
+<li><strong>MQTT Publish (<code>main.cpp:981, 1017–1020</code>)</strong>:
+   Computes <code>stripW = round(stripAmps * gCfg.plugMainsV * 10) / 10.0</code>, serializes via ArduinoJson into <code>doc["stripW"]</code>, and publishes to <code>econ/telemetry/&lt;ZONE_TOPIC&gt;</code>.</li>
+<li><strong>Broker Ingestion &amp; Routing</strong>: Mosquitto authenticates client <code>econ-esp32-zone_1</code>, checks ACLs, and routes to <code>econ/telemetry/+</code>.</li>
+<li><strong>Go Backend Ingestion (<code>server/mqtt.go:148–209</code>)</strong>:
+   <code>handleTelemetry()</code> unmarshals JSON into <code>telemetryMsg</code>. If <code>RawFallback == true</code>, routes <code>rawStripSamples</code> to <code>simulation.NewCurrentDenoiser()</code> to compute True-RMS server-side (<code>:166–176</code>).</li>
+<li><strong>Device Registry &amp; State Ingestion (<code>server/devices.go:154, 164</code>, <code>server/simulation/engine.go:704–707</code>)</strong>:
+   <code>registry.observe()</code> records arrival statistics and enqueues to TimescaleDB. <code>engine.IngestTelemetry()</code> binds <code>z.HwStripW = 185.4</code> and sets <code>z.HwStripAt = time.Now()</code>.</li>
+<li><strong>Downstream Carbon &amp; UI Streaming</strong>:
+   <code>server/carbon.go:471–475</code> computes Scope 2 Operational Carbon ($kg\,\text{CO}_2\text{e} = \frac{\text{Watts} \times \text{hours}}{1000} \times \text{GridFactor}$). <code>server/simulation/engine.go:2758–2763</code> packs <code>stripW</code> into the FlatBuffers binary vector and streams it to the dashboard at 1 Hz.</li>
+</ol>
+<hr />
+<h3 id="102-trace-2-simulation-step-to-persistence-websocket-streaming">10.2 Trace #2: Simulation Step to Persistence &amp; WebSocket Streaming</h3>
+<p>This trace tracks an internal physics step as telemetry updates room states, triggers database writes, and streams binary frames to clients.</p>
+<div class="highlight"><pre><span></span><code>sequenceDiagram
+    autonumber
+    participant Phys as Simulation Engine (server/simulation/engine.go)
+    participant Hardy as Hardy Cross Solver (engine.go:586)
+    participant DB as TimescaleDB Worker (server/db.go)
+    participant FB as FlatBuffers Builder (schema/telemetry.fbs)
+    participant WS as WebSocket Hub (server/main.go)
+    participant Client as Browser Frontend Client
+
+    Note over Phys: 30 FPS Ticker Fires (dt = 0.033s)
+    Phys-&gt;&gt;Hardy: doHardyCross()
+    Hardy--&gt;&gt;Phys: Returns P_ahu, Q_v branch flows
+    Phys-&gt;&gt;Phys: tick(dt) Forward Euler 2R1C Integration (engine.go:2050-2200)
+    Phys-&gt;&gt;Phys: applyHardware() Smoothly blends sensor data (engine.go:1297)
+
+    par Database Persistence (Every 1.0s)
+        Phys-&gt;&gt;DB: Persist(&quot;zone_1&quot;, &quot;temp&quot;, 24.2) (engine.go:2430)
+        DB-&gt;&gt;DB: writeCh &lt;- reading (buffer capacity 8192)
+        Note over DB: writeLoop() batches up to 512 rows (db.go:164)
+        DB-&gt;&gt;DB: Executes multi-row SQL INSERT into sensor_readings
+    and Real-Time Streaming (Every 33ms)
+        Phys-&gt;&gt;FB: broadcast() serializes SimState (engine.go:2713-2856)
+        FB-&gt;&gt;FB: Packs ZoneData, VavData, GlobalData vectors
+        FB--&gt;&gt;Phys: Returns binary finished byte buffer (buf)
+        Phys-&gt;&gt;WS: Asynchronously dispatches buf to client connections
+        WS-&gt;&gt;Client: Transmits binary frame over WebSocket (:8080/ws)
+        Note over Client: useDigitalTwin.js decodes ArrayBuffer via FlatBuffers&lt;br/&gt;Updates React 3D Heatmap Shader
+    end
+</code></pre></div>
+
+<h4 id="detailed-step-by-step-code-references_1">Detailed Step-by-Step Code References:</h4>
+<ol>
+<li><strong>Physics Execution (<code>server/simulation/engine.go:2050–2200</code>)</strong>:
+   <code>Engine.tick(dt)</code> evaluates Forward Euler equations for $T_{\text{air}}$ and $T_{\text{wall}}$. <code>doHardyCross()</code> (<code>:586–599</code>) recalculates duct system resistance $R_{\text{system}}$ and static pressure $P_{\text{ahu}}$.</li>
+<li><strong>Sensor Blending &amp; Shadow Twin (<code>engine.go:1297–1316</code>)</strong>:
+   <code>applyHardware()</code> nudges simulation temperature toward physical measurement <code>z.Temp += (z.HwTemp - z.Temp) * 0.1</code>. The sensor-free Shadow Twin integrates in parallel (<code>z.ShadowTemp</code>), updating residual EMA <code>z.ResidualEma += (|z.HwTemp - z.ShadowTemp| - z.ResidualEma) * 0.02</code>.</li>
+<li><strong>Asynchronous Database Queue (<code>server/db.go:45–77, 164–216</code>)</strong>:
+   <code>engine.broadcast()</code> enqueues metrics into <code>writeCh chan reading</code> (capacity 8192). Background worker <code>writeLoop()</code> batches up to 512 rows or flushes every 500 ms, executing parameterized multi-row SQL inserts into hypertable <code>sensor_readings</code>.</li>
+<li><strong>FlatBuffers Binary Encoding (<code>server/simulation/engine.go:2713–2856</code>)</strong>:
+   Encodes <code>ZoneData</code>, <code>VavData</code>, and <code>GlobalData</code> into a <code>SimState</code> FlatBuffers buffer using <code>server/schema/telemetry.fbs</code>.</li>
+<li><strong>WebSocket Broadcast (<code>server/main.go:211–335</code>)</strong>:
+   Iterates active WebSocket client connections, writing <code>websocket.BinaryMessage</code> buffers without blocking the engine physics lock.</li>
+</ol>
+<hr />
+<h3 id="103-trace-3-aiml-foundation-model-forecast-to-3d-digital-twin-webgl-heatmap-shader">10.3 Trace #3: AI/ML Foundation Model Forecast to 3D Digital Twin WebGL Heatmap Shader</h3>
+<p>This trace follows a machine learning forecast query from the Go engine through the Python foundation model, into the FlatBuffers binary stream, and onto the WebGL 3D canvas.</p>
+<div class="highlight"><pre><span></span><code>sequenceDiagram
+    autonumber
+    participant Engine as Go Engine (server/forecast.go)
+    participant FastAPI as Python ML Microservice (backend/forecasting/main.py)
+    participant TimesFM as Google TimesFM (timesfm_forecaster.py)
+    participant FB as FlatBuffers Builder (engine.go:2713)
+    participant WSHook as useDigitalTwin.js (dashboard/src)
+    participant Zustand as buildingStore.js / React State
+    participant Shader as GLSL Thermal Shader (BuildingModel.jsx)
+    participant Recharts as ForecastChart.jsx
+
+    Engine-&gt;&gt;FastAPI: POST /forecast/load {&quot;history&quot;: [0.42, 0.45, ...], &quot;horizon&quot;: 12}
+    FastAPI-&gt;&gt;TimesFM: forecast(history, horizon=12)
+    Note over TimesFM: Executes zero-shot forward pass on GPU/MPS/CPU&lt;br/&gt;Computes point trajectory + decile quantiles (q1..q9)
+    TimesFM--&gt;&gt;FastAPI: Returns {&quot;point&quot;: [0.48, ...], &quot;quantiles&quot;: {&quot;q1&quot;: [...], &quot;q9&quot;: [...]}}
+    FastAPI--&gt;&gt;Engine: JSON Response 200 OK
+    Note over Engine: BuildForecastGraph() checks plausibility (forecast.go:182)&lt;br/&gt;Embeds forecast into ForecastGraphData
+    Engine-&gt;&gt;FB: Pack SimState with live telemetry &amp; forecast
+    Engine-&gt;&gt;WSHook: WebSocket Binary Message (:8080/ws)
+    WSHook-&gt;&gt;WSHook: SimState.getRootAsSimState(buf) (useDigitalTwin.js:280)
+    WSHook-&gt;&gt;Zustand: setSimData(newSimData)
+
+    par 3D WebGL Digital Twin Rendering
+        Zustand-&gt;&gt;Shader: Passes live zone temperature &amp; setpoint
+        Note over Shader: BuildingModel.jsx ZoneRenderer evaluates GLSL:&lt;br/&gt;deviation = (temp - setpoint) / deadband&lt;br/&gt;gl_FragColor = vec4(heatmap(deviation), opacity)
+        Shader--&gt;&gt;Shader: Zone mesh color dynamically shifts on 3D canvas!
+    and Predictive Forecast Chart Rendering
+        Zustand-&gt;&gt;Recharts: Passes forecastSeries &amp; q9 upperBand
+        Note over Recharts: ForecastChart.jsx renders SVG lines:&lt;br/&gt;&lt;Line dataKey=&quot;mw&quot; stroke=&quot;var(--accent-blue)&quot; /&gt;&lt;br/&gt;&lt;Line dataKey=&quot;hi&quot; stroke=&quot;var(--accent-yellow)&quot; strokeDasharray=&quot;3 3&quot; /&gt;
+        Recharts--&gt;&gt;Recharts: Predictive load trajectory &amp; decile bands rendered!
+    end
+</code></pre></div>
+
+<h4 id="detailed-step-by-step-code-references_2">Detailed Step-by-Step Code References:</h4>
+<ol>
+<li><strong>Forecast Query Dispatch (<code>server/forecast.go:44–126, 594–681</code>)</strong>:
+   <code>BuildForecastGraph()</code> extracts the rolling 12-sample load history from <code>engine.loadHistory</code>. Concurrently dispatches an HTTP POST request to the Python microservice at <code>http://localhost:8000/forecast/load</code>.</li>
+<li><strong>Zero-Shot Foundation Model Inference (<code>backend/forecasting/timesfm_forecaster.py:182–243</code>)</strong>:
+   FastAPI route <code>/forecast/load</code> (<code>main.py:122–145</code>) calls <code>TimesFmForecaster.forecast()</code>. The model evaluates the univariate sequence on Apple Silicon MPS or CUDA GPU, returning a 12-step point trajectory along with quantile deciles <code>q1</code> through <code>q9</code>.</li>
+<li><strong>Plausibility Auditing &amp; Graph Assembly (<code>server/forecast.go:182–226</code>)</strong>:
+   <code>checkPlausible()</code> audits the forecast peak against the building's historical load bounds. The result is packed into <code>ForecastGraphData</code> with point series and upper quantile deciles.</li>
+<li><strong>WebSocket Binary Serialization (<code>server/simulation/engine.go:2713–2856</code>)</strong>:
+   The engine encodes zone temperatures and global metrics into binary FlatBuffers <code>SimState</code> bytes and transmits them across WebSocket connections.</li>
+<li><strong>Frontend Reception &amp; Unpacking (<code>dashboard/src/useDigitalTwin.js:241–397</code>)</strong>:
+   <code>ws.onmessage</code> ingests incoming <code>ArrayBuffer</code> data, calls <code>SimState.getRootAsSimState(buf)</code>, and maps zone temperatures into React state (<code>setSimData</code>).</li>
+<li><strong>WebGL 3D Canvas Shader Update (<code>dashboard/src/BuildingModel.jsx:319–434</code>)</strong>:
+   <code>ZoneRenderer</code> extracts <code>simState.zones[zoneId].temp</code>. In <code>useFrame</code>, <code>material.uniforms.temperature.value</code> lerps toward the live temperature. The custom GLSL fragment shader evaluates <code>deviation = (temperature - setpoint) / deadband</code>, shifting the zone mesh color from green (optimal) to yellow/red (overheating) or blue (overcooling).</li>
+<li><strong>Forecast Chart Rendering (<code>dashboard/src/ForecastChart.jsx:150–260</code>)</strong>:
+   Recharts <code>&lt;ResponsiveContainer&gt;</code> renders <code>&lt;Line dataKey="mw"&gt;</code> for the point forecast and <code>&lt;Line dataKey="hi" strokeDasharray="3 3"&gt;</code> for the 90th percentile risk band.</li>
+</ol>
+<hr />
+<h2 id="11-summary-source-file-line-range-index">11. Summary Source File &amp; Line Range Index</h2>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Component / Subsystem</th>
+<th style="text-align: left;">Repository Source File Path</th>
+<th style="text-align: center;">Exact Line Range</th>
+<th style="text-align: left;">Core Function / Identifier</th>
+<th style="text-align: center;">Architectural Layer</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><strong>ESP32 Firmware Core &amp; Sensor Sampling</strong></td>
+<td style="text-align: left;"><code>edge/esp32/src/main.cpp</code></td>
+<td style="text-align: center;">Lines 1–1100</td>
+<td style="text-align: left;"><code>setup()</code>, <code>loop()</code>, <code>readSht30()</code>, <code>readStripAmps()</code></td>
+<td style="text-align: center;">Layer 1 (Edge)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>ESP32 Current DSP Denoising</strong></td>
+<td style="text-align: left;"><code>edge/esp32/src/current_denoiser.h</code></td>
+<td style="text-align: center;">Lines 27–173</td>
+<td style="text-align: left;"><code>CurrentDenoiser::processWindow()</code></td>
+<td style="text-align: center;">Layer 1 (Edge)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Pico MicroPython Firmware</strong></td>
+<td style="text-align: left;"><code>edge/pico/main.py</code></td>
+<td style="text-align: center;">Lines 1–364</td>
+<td style="text-align: left;"><code>run_serial()</code>, <code>run_wifi()</code>, <code>wdt.feed()</code></td>
+<td style="text-align: center;">Layer 1 (Edge)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Pico Dual PIR C++ Firmware</strong></td>
+<td style="text-align: left;"><code>edge/pico/src/main.cpp</code></td>
+<td style="text-align: center;">Lines 1–96</td>
+<td style="text-align: left;"><code>setup()</code>, <code>loop()</code>, <code>sendTelemetry()</code></td>
+<td style="text-align: center;">Layer 1 (Edge)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Gateway Failsafe Daemon</strong></td>
+<td style="text-align: left;"><code>edge/raspberry_pi/gateway.py</code></td>
+<td style="text-align: center;">Lines 1–155</td>
+<td style="text-align: left;"><code>failsafe_loop()</code>, <code>on_message()</code></td>
+<td style="text-align: center;">Layer 2 (Broker)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Mosquitto ACL Configuration</strong></td>
+<td style="text-align: left;"><code>server/mosquitto/acl</code></td>
+<td style="text-align: center;">Lines 1–15</td>
+<td style="text-align: left;"><code>user econ-engine</code>, <code>user econ-node</code></td>
+<td style="text-align: center;">Layer 2 (Broker)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>MQTT Backend Subscriber &amp; Fallback DSP</strong></td>
+<td style="text-align: left;"><code>server/mqtt.go</code></td>
+<td style="text-align: center;">Lines 58–122, 148–209</td>
+<td style="text-align: left;"><code>startMQTT()</code>, <code>handleTelemetry()</code></td>
+<td style="text-align: center;">Layer 2 (Broker)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>2R1C Thermodynamic Integration</strong></td>
+<td style="text-align: left;"><code>server/simulation/engine.go</code></td>
+<td style="text-align: center;">Lines 2050–2200</td>
+<td style="text-align: left;"><code>func (e *Engine) tick(dt float64)</code></td>
+<td style="text-align: center;">Layer 3 (Engine)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Hardy Cross Fluid Airflow Solver</strong></td>
+<td style="text-align: left;"><code>server/simulation/engine.go</code></td>
+<td style="text-align: center;">Lines 570–599</td>
+<td style="text-align: left;"><code>sizeFanToBuilding()</code>, <code>doHardyCross()</code></td>
+<td style="text-align: center;">Layer 3 (Engine)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>RLS Online Room Dynamics</strong></td>
+<td style="text-align: left;"><code>server/simulation/dynamics.go</code></td>
+<td style="text-align: center;">Lines 226–376, 505–587</td>
+<td style="text-align: left;"><code>observeRoom()</code>, <code>update()</code>, <code>SetbackCeiling()</code></td>
+<td style="text-align: center;">Layer 3 (Engine)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Online Learned Baselines</strong></td>
+<td style="text-align: left;"><code>server/simulation/baselines.go</code></td>
+<td style="text-align: center;">Lines 128–157, 227–254</td>
+<td style="text-align: left;"><code>observe()</code>, <code>score()</code></td>
+<td style="text-align: center;">Layer 3 (Engine)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Autonomous Plug-Load Controller (APLC)</strong></td>
+<td style="text-align: left;"><code>server/simulation/plugs.go</code></td>
+<td style="text-align: center;">Lines 135–181, 209–243</td>
+<td style="text-align: left;"><code>plugTick()</code>, <code>PlugSnapshot()</code></td>
+<td style="text-align: center;">Layer 3 (Engine)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Pre-Cooling Decision Poller</strong></td>
+<td style="text-align: left;"><code>server/precool.go</code></td>
+<td style="text-align: center;">Lines 52–192</td>
+<td style="text-align: left;"><code>func precoolLoop(...)</code></td>
+<td style="text-align: center;">Layer 3 (Engine)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Vacancy Setback Optimizer</strong></td>
+<td style="text-align: left;"><code>server/simulation/engine.go</code></td>
+<td style="text-align: center;">Lines 862–974</td>
+<td style="text-align: left;"><code>func (e *Engine) actuate()</code></td>
+<td style="text-align: center;">Layer 3 (Engine)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Shadow Twin &amp; AFDD Diagnostics</strong></td>
+<td style="text-align: left;"><code>server/simulation/engine.go</code></td>
+<td style="text-align: center;">Lines 1297–1316, 2186–2198</td>
+<td style="text-align: left;"><code>applyHardware()</code>, <code>ResidualEma</code></td>
+<td style="text-align: center;">Layer 3 (Engine)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Scope 2 Carbon &amp; Maintenance Alerts</strong></td>
+<td style="text-align: left;"><code>server/carbon.go</code></td>
+<td style="text-align: center;">Lines 118–150, 420–530</td>
+<td style="text-align: left;"><code>CalculateScope2Emissions()</code>, alerts</td>
+<td style="text-align: center;">Layer 3 (Engine)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>PeakLoadLSTM Neural Network</strong></td>
+<td style="text-align: left;"><code>backend/forecasting/model.py</code></td>
+<td style="text-align: center;">Lines 5–22</td>
+<td style="text-align: left;"><code>class PeakLoadLSTM(nn.Module)</code></td>
+<td style="text-align: center;">Layer 4 (AI/ML)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Google TimesFM Foundation Forecaster</strong></td>
+<td style="text-align: left;"><code>backend/forecasting/timesfm_forecaster.py</code></td>
+<td style="text-align: center;">Lines 47–74, 182–243</td>
+<td style="text-align: left;"><code>TimesFmForecaster.forecast()</code></td>
+<td style="text-align: center;">Layer 4 (AI/ML)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>FastAPI Forecasting Server</strong></td>
+<td style="text-align: left;"><code>backend/forecasting/main.py</code></td>
+<td style="text-align: center;">Lines 30–43, 122–145, 174–221</td>
+<td style="text-align: left;"><code>/health</code>, <code>/forecast/load</code>, <code>/predict</code></td>
+<td style="text-align: center;">Layer 4 (AI/ML)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Go Forecast Orchestrator &amp; IPC</strong></td>
+<td style="text-align: left;"><code>server/forecast.go</code></td>
+<td style="text-align: center;">Lines 44–126, 182–226, 594–681</td>
+<td style="text-align: left;"><code>BuildForecastGraph()</code>, <code>checkPlausible()</code></td>
+<td style="text-align: center;">Layer 4 (AI/ML)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Offline Model Catalog &amp; Exporter</strong></td>
+<td style="text-align: left;"><code>server/modelcatalog.go</code>, <code>modelexport.go</code></td>
+<td style="text-align: center;">Lines 34–85, Lines 23–60</td>
+<td style="text-align: left;"><code>GetRecommendations()</code>, <code>ExportBundle()</code></td>
+<td style="text-align: center;">Layer 4 (AI/ML)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>TimescaleDB Schema &amp; Policies</strong></td>
+<td style="text-align: left;"><code>server/db/init.sql</code></td>
+<td style="text-align: center;">Lines 1–53</td>
+<td style="text-align: left;"><code>CREATE TABLE sensor_readings</code>, hypertables</td>
+<td style="text-align: center;">Layer 5 (Database)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Database Async Write Buffer &amp; Batcher</strong></td>
+<td style="text-align: left;"><code>server/db.go</code></td>
+<td style="text-align: center;">Lines 45–77, 164–216</td>
+<td style="text-align: left;"><code>initDB()</code>, <code>writeLoop()</code></td>
+<td style="text-align: center;">Layer 5 (Database)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Historical &amp; Series Query Handlers</strong></td>
+<td style="text-align: left;"><code>server/db.go</code></td>
+<td style="text-align: center;">Lines 218–399</td>
+<td style="text-align: left;"><code>historyHandler()</code>, <code>seriesHandler()</code></td>
+<td style="text-align: center;">Layer 5 (Database)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>REST API Server &amp; Route Dispatcher</strong></td>
+<td style="text-align: left;"><code>server/main.go</code></td>
+<td style="text-align: center;">Lines 25–185</td>
+<td style="text-align: left;"><code>main()</code>, route registration (32 endpoints)</td>
+<td style="text-align: center;">Layer 6 (API)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>WebSocket Connection &amp; Broadcast</strong></td>
+<td style="text-align: left;"><code>server/main.go</code></td>
+<td style="text-align: center;">Lines 211–335</td>
+<td style="text-align: left;"><code>handleWebSocket()</code></td>
+<td style="text-align: center;">Layer 6 (API)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>CSWSH &amp; Token Security Gates</strong></td>
+<td style="text-align: left;"><code>server/auth.go</code></td>
+<td style="text-align: center;">Lines 37–155</td>
+<td style="text-align: left;"><code>checkOrigin()</code>, <code>tokenMatches()</code></td>
+<td style="text-align: center;">Layer 6 (API)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>FlatBuffers Binary Schema</strong></td>
+<td style="text-align: left;"><code>server/schema/telemetry.fbs</code></td>
+<td style="text-align: center;">Lines 1–77</td>
+<td style="text-align: left;"><code>table ZoneData</code>, <code>table SimState</code></td>
+<td style="text-align: center;">Layer 6 (API)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Frontend Bootloader &amp; State Store</strong></td>
+<td style="text-align: left;"><code>dashboard/src/main.jsx</code>, <code>buildingStore.js</code></td>
+<td style="text-align: center;">Lines 12–19, Lines 19–84</td>
+<td style="text-align: left;">Two-stage bootloader, model switcher</td>
+<td style="text-align: center;">Layer 7 (Frontend)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Digital Twin WebSocket Hook</strong></td>
+<td style="text-align: left;"><code>dashboard/src/useDigitalTwin.js</code></td>
+<td style="text-align: center;">Lines 261–403</td>
+<td style="text-align: left;">FlatBuffers ArrayBuffer decoding @ 30 FPS</td>
+<td style="text-align: center;">Layer 7 (Frontend)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>3D BIM Model &amp; GLSL Heatmap Shader</strong></td>
+<td style="text-align: left;"><code>dashboard/src/BuildingModel.jsx</code></td>
+<td style="text-align: center;">Lines 12–60, 319–434</td>
+<td style="text-align: left;">CSG subtraction, custom GLSL shader</td>
+<td style="text-align: center;">Layer 7 (Frontend)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Predictive Forecast Chart Component</strong></td>
+<td style="text-align: left;"><code>dashboard/src/ForecastChart.jsx</code></td>
+<td style="text-align: center;">Lines 94–145, 150–260</td>
+<td style="text-align: left;">Honest zero-curve fallback, Recharts deciles</td>
+<td style="text-align: center;">Layer 7 (Frontend)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Operational Telemetry &amp; Carbon Panels</strong></td>
+<td style="text-align: left;"><code>dashboard/src/GlobalMetricsPanel.jsx</code></td>
+<td style="text-align: center;">Lines 1–624</td>
+<td style="text-align: left;">Power gauges, COP, Scope 2 emissions</td>
+<td style="text-align: center;">Layer 7 (Frontend)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>APLC Plug-Load Panel</strong></td>
+<td style="text-align: left;"><code>dashboard/src/PlugLoadPanel.jsx</code></td>
+<td style="text-align: center;">Lines 1–320</td>
+<td style="text-align: left;">Non-HVAC sockets, phantom shedding</td>
+<td style="text-align: center;">Layer 7 (Frontend)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>AI Insights &amp; Evidence Visualization</strong></td>
+<td style="text-align: left;"><code>dashboard/src/AiInsightsPanel.jsx</code>, <code>RecommendationEvidence.jsx</code></td>
+<td style="text-align: center;">Lines 58–109, Lines 16–100</td>
+<td style="text-align: left;">Visual $\sigma$-strip, RLS response curves</td>
+<td style="text-align: center;">Layer 7 (Frontend)</td>
+</tr>
+</tbody>
+</table>
+</body>
+</html>

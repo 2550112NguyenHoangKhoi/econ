@@ -1,7 +1,7 @@
-# BRIEFING — 2026-09-06T03:54:00Z
+# BRIEFING — 2026-09-06T20:28:00Z
 
 ## Mission
-Replace heuristic occupancy recommendation rule in backend with a genuine statistical model, remove synthetic forecast curve in frontend, implement edge compute-offloading fallback for ESP32/Pico with raw streaming to backend, and audit hardware compatibility.
+Expand the dashboard's Hardware Inspector and UI capabilities to provide full manual controls, add sustainability recommendations, expose the engine's Simulation vs. Real Mode toggle, and fully integrate the offline Local AI Models for live inference.
 
 ## 🔒 My Identity
 - Archetype: sentinel
@@ -30,6 +30,17 @@ Replace heuristic occupancy recommendation rule in backend with a genuine statis
 - Victory Auditor: to be spawned on victory claim
 - Victory Auditor (Current): 2e5bdc35-6a3f-4c82-aded-f60bcf7dc8fa
 - Victory Auditor Workspace: /Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_victory_auditor_7
+- Active Orchestrator: 8f3b87b9-c846-4cc3-abc8-fa6041d45164
+- Active Orchestrator: 8394e2fb-4b05-41f5-a6c7-6750f2fb2456
+- Active Orchestrator Workspace: /Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_orchestrator_8
+- Victory Auditor: bf87b1a9-6724-41d1-a2ee-58836d37dd50
+- Victory Auditor Workspace: /Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_victory_auditor_8
+- Active Orchestrator: b976a556-854f-458a-9757-5f48815efe6f
+- Active Orchestrator Workspace: /Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_orchestrator_10
+- Active Orchestrator: 338e1187-ed26-44bb-9a9b-415fdd67363a
+- Active Orchestrator Workspace: /Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_orchestrator_11
+- Victory Auditor (Current): e6cb22d3-a743-4802-94cc-cb0395409cc1
+- Victory Auditor Workspace: /Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_victory_auditor_11
 
 ## 🔒 Key Constraints
 - No technical decisions — relay only
@@ -37,31 +48,36 @@ Replace heuristic occupancy recommendation rule in backend with a genuine statis
 - Must not write code, analyze problems, or make technical decisions
 
 ## User Context
-- **Last user request**: Replace heuristic occupancy recommendation with genuine statistical model, remove synthetic forecast curve in frontend, implement edge compute offload fallback for ESP32/Pico, and audit hardware compatibility.
+- **Last user request**: Expand the dashboard's Hardware Inspector and UI capabilities to provide full manual controls, add sustainability recommendations, expose the engine's Simulation vs. Real Mode toggle, and fully integrate the offline Local AI Models for live inference.
 - **Pending clarifications**: none
-- **Delivered results**: Full implementation, verification, and confirmed victory audit of R1 (Genuine Occupancy AI Model), R2 (Authentic Forecast Chart), R3 (Edge Compute Offload Fallback), and R4 (Hardware Compatibility Audit).
+- **Delivered results**: Full implementation, verification, and confirmed victory audit of R1 (Hardware Controls & IR Blaster), R2 (Simulation vs. Real Mode UI Toggle), R3 (Sustainability Recommendations Panel), and R4 (Local Offline AI Models Live Inference).
 
 ## Project Status
 - **Phase**: complete
-- **Routing Decision**: General (`teamwork_preview_orchestrator`) — full team requested for multi-component IoT system across backend (Go), frontend (React), and edge firmware (ESP32/Pico).
-- **Active Orchestrator**: 46861b31-5e22-4119-b325-3e31aadb5071 (`/Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_orchestrator_7`)
-- **Victory Auditor**: 2e5bdc35-6a3f-4c82-aded-f60bcf7dc8fa (`/Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_victory_auditor_7`)
-- **Monitoring Crons**: Cleaned up / cancelled.
+- **Routing Decision**: General (`teamwork_preview_orchestrator`)
+- **Active Orchestrator**: 338e1187-ed26-44bb-9a9b-415fdd67363a (`/Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_orchestrator_11`)
+- **Victory Auditor**: e6cb22d3-a743-4802-94cc-cb0395409cc1 (`/Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_victory_auditor_11`)
+- **Monitoring Crons**: Cancelled (task-36, task-38 killed).
 - **Subagents**: Cleaned up (kill_all).
 
 ## Victory Audit Status
 - **Triggered**: yes
 - **Verdict**: VICTORY CONFIRMED
-- **Auditor**: 2e5bdc35-6a3f-4c82-aded-f60bcf7dc8fa
+- **Auditor**: e6cb22d3-a743-4802-94cc-cb0395409cc1
 - **Audit Findings**:
-  - Phase A (Timeline): PASS — reconstructed complete chronological artifact and commit history without anomalies.
-  - Phase B (Integrity): PASS — zero hardcoded test bypasses, genuine mathematical models, strict data fidelity.
-  - Phase C (Independent Tests): PASS — 100% test pass rate across Go backend (unit + adversarial + MQTT fallback), C++ edge firmware (all 326 host test assertions + 36 CPU strain tests), and React dashboard (4/4 Puppeteer suites).
+  - Phase A (Timeline): PASS — verified full chronological artifact and commit history without anomalies.
+  - Phase B (Integrity): PASS — CLEAN. No bypasses, fake fixtures, or cheating. Authentic binary PyTorch weights (model_weights.pth, 209 KB) and fitted StandardScaler (scaler.pkl, 679 B).
+  - Phase C (Independent Tests): PASS — 100% test pass rate across Go 4-Tier E2E Suite (50/50), Go Server Suite (100%), Frontend E2E Controls (41/41), Operation Mode Toggle (23/23), Vite production build (0 errors), Firmware Offload Host Test (21/21), Standalone LSTM inference (2.2441 MW), and TimesFM MPS autoregression (12 steps, 9 quantiles).
 - **Retry count**: 0
 
 ## Artifact Index
 - `/Users/nguyenhoangkhoi/Documents/econ/.agents/ORIGINAL_REQUEST.md` — Authoritative record of user requests
 - `/Users/nguyenhoangkhoi/Documents/econ/ORIGINAL_REQUEST.md` — Root copy of original user requests
-- `/Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_orchestrator_7` — Orchestrator workspace
-- `/Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_victory_auditor_7` — Victory Auditor workspace
+- `/Users/nguyenhoangkhoi/Documents/econ/TEST_READY.md` — E2E Test Suite verification manifest
+- `/Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_orchestrator_11/DISPATCH.md` — Orchestrator dispatch task
+- `/Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_orchestrator_11/handoff.md` — Orchestrator completion handoff
+- `/Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_orchestrator_11/GATE_STATUS.md` — Verification gate status
+- `/Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_victory_auditor_11/DISPATCH.md` — Victory Auditor dispatch task
+- `/Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_victory_auditor_11/handoff.md` — Victory Auditor handoff report
+- `/Users/nguyenhoangkhoi/Documents/econ/.agents/sentinel/BRIEFING.md` — Sentinel persistent working memory
 - `/Users/nguyenhoangkhoi/Documents/econ/.agents/sentinel/handoff.md` — Sentinel handoff report

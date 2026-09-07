@@ -12,6 +12,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 )
@@ -29,7 +30,7 @@ import (
 //	GET /api/model         — metadata: model maturity, forecaster readiness, bundle contents
 //	GET /api/model/export  — the zip bundle (attachment)
 
-//go:embed modelbundle/recommender.py modelbundle/econ_local.py modelbundle/README.md modelbundle/sample_readings.json modelbundle/sample_rooms.json
+//go:embed modelbundle/recommender.py modelbundle/econ_local.py modelbundle/infer.py modelbundle/README.md modelbundle/sample_readings.json modelbundle/sample_rooms.json
 var modelBundleFS embed.FS
 
 // modelInfo is the /api/model metadata the dashboard's download card reads.
@@ -66,22 +67,52 @@ func forecastBaseURL() string {
 	return base
 }
 
+// findArtifactFile looks for model artifact files locally on disk.
+func findArtifactFile(filename string) string {
+	candidates := []string{
+		filename,
+		filepath.Join("backend", "forecasting", filename),
+		filepath.Join("..", "backend", "forecasting", filename),
+		filepath.Join("server", "modelbundle", filename),
+		filepath.Join("modelbundle", filename),
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		candidates = append(candidates,
+			filepath.Join(cwd, "backend", "forecasting", filename),
+			filepath.Join(cwd, "..", "backend", "forecasting", filename),
+			filepath.Join(cwd, "server", "modelbundle", filename),
+			filepath.Join(cwd, "modelbundle", filename),
+		)
+	}
+	for _, c := range candidates {
+		if fi, err := os.Stat(c); err == nil && !fi.IsDir() {
+			return c
+		}
+	}
+	return ""
+}
+
 // forecasterHealth asks the Python service whether it is up and has a trained model. Best
-// effort: a down forecaster just means the bundle ships without the LSTM artifacts.
+// effort: if HTTP is unreachable, it checks if local model artifacts exist on disk.
 func forecasterHealth() (reachable, ready bool) {
 	client := &http.Client{Timeout: 2 * time.Second}
 	resp, err := client.Get(forecastBaseURL() + "/health")
-	if err != nil {
-		return false, false
-	}
-	defer resp.Body.Close()
-	var h struct {
-		ModelReady bool `json:"model_ready"`
-	}
-	if json.NewDecoder(resp.Body).Decode(&h) != nil {
+	if err == nil {
+		defer resp.Body.Close()
+		var h struct {
+			ModelReady bool `json:"model_ready"`
+		}
+		if json.NewDecoder(resp.Body).Decode(&h) == nil {
+			return true, h.ModelReady
+		}
 		return true, false
 	}
-	return true, h.ModelReady
+
+	// Offline / native fallback: check if weights and scaler exist on local disk
+	if findArtifactFile("model_weights.pth") != "" && findArtifactFile("scaler.pkl") != "" {
+		return false, true
+	}
+	return false, false
 }
 
 func modelInfoHandler(engine *simulation.Engine) http.HandlerFunc {
@@ -133,30 +164,50 @@ func bundleContents(tier string, forecasterReady bool) []string {
 	}
 	if forecasterReady && tierRank(tier) >= tierRank("forecast-cpu") {
 		files = append(files,
-			"forecaster/model_weights.pth", "forecaster/scaler.pkl", "forecaster/config.json")
+			"forecaster/model_weights.pth", "forecaster/scaler.pkl", "forecaster/config.json", "infer.py")
 	}
 	return files
 }
 
 // forecasterArtifacts fetches the trained LSTM weights/scaler/config from the Python
-// service (base64) so they can be embedded in the zip. Returns nil on any failure — the
-// bundle degrades to the baseline model + recommender, which is the part that generates
-// recommendations anyway.
+// service (base64) so they can be embedded in the zip. Returns local disk artifacts on HTTP failure.
 func forecasterArtifacts() map[string]interface{} {
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Get(forecastBaseURL() + "/model/artifacts")
-	if err != nil {
-		return nil
+	if err == nil {
+		defer resp.Body.Close()
+		if resp.StatusCode == http.StatusOK {
+			var out map[string]interface{}
+			if json.NewDecoder(io.LimitReader(resp.Body, 64<<20)).Decode(&out) == nil {
+				return out
+			}
+		}
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil
+
+	// Offline fallback: read local artifacts directly from disk
+	wPath := findArtifactFile("model_weights.pth")
+	sPath := findArtifactFile("scaler.pkl")
+	if wPath != "" && sPath != "" {
+		wBytes, wErr := os.ReadFile(wPath)
+		sBytes, sErr := os.ReadFile(sPath)
+		if wErr == nil && sErr == nil {
+			return map[string]interface{}{
+				"model_ready": true,
+				"config": map[string]interface{}{
+					"input_size":      4,
+					"hidden_size":     64,
+					"num_layers":      2,
+					"output_size":     1,
+					"seq_len":         12,
+					"sensor_features": 2,
+					"feature_order":   []string{"room_temp", "airflow", "outdoor_temp", "outdoor_humidity"},
+				},
+				"weights_b64": base64.StdEncoding.EncodeToString(wBytes),
+				"scaler_b64":  base64.StdEncoding.EncodeToString(sBytes),
+			}
+		}
 	}
-	var out map[string]interface{}
-	if json.NewDecoder(io.LimitReader(resp.Body, 64<<20)).Decode(&out) != nil {
-		return nil
-	}
-	return out
+	return nil
 }
 
 func modelExportHandler(engine *simulation.Engine) http.HandlerFunc {
@@ -254,11 +305,18 @@ func modelExportHandler(engine *simulation.Engine) http.HandlerFunc {
 					}
 				}
 			}
+			if forecasterIncluded {
+				addEmbedded("infer.py", "modelbundle/infer.py")
+				addEmbedded("forecaster/infer.py", "modelbundle/infer.py")
+			}
 		}
 
 		usage := "python3 recommender.py sample_readings.json"
 		if roomsIncluded {
 			usage = "python3 econ_local.py analyze sample_rooms.json"
+		}
+		if forecasterIncluded {
+			usage += " | python3 infer.py --model lstm"
 		}
 		manifest := map[string]interface{}{
 			"generatedAt": time.Now().UTC().Format(time.RFC3339),

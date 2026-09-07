@@ -243,7 +243,7 @@ func TestPredictiveMaintenanceAlertGeneration(t *testing.T) {
 			},
 		},
 	}
-
+	engine.SetMode(simulation.ModeReal)
 	tracker := newCarbonTracker(engine)
 	now := time.Now()
 
