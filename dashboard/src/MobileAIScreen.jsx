@@ -59,23 +59,26 @@ export default function MobileAIScreen({
           upperBand: compareUpperBand, upperQuantile: compareUpperQuantile, peakUpperMw: comparePeakUpperMw } = useForecastCompare();
 
   const activeForecast = useMemo(() => {
-    const rawSeries = (Array.isArray(tfmSeries) && tfmSeries.length > 0)
+    const isValidNumericArray = (arr) => Array.isArray(arr) && arr.length > 0 &&
+      arr.every(v => v != null && (typeof v === 'number' || (typeof v === 'string' && !Number.isNaN(Number(v)))) && Number.isFinite(Number(v)));
+
+    const rawSeries = isValidNumericArray(tfmSeries)
       ? tfmSeries
-      : (Array.isArray(recForecast?.series) && recForecast.series.length > 0)
+      : isValidNumericArray(recForecast?.series)
         ? recForecast.series
         : null;
 
     const stepMin = compareStepMinutes || recForecast?.stepMinutes || 5;
-    const upper = (Array.isArray(compareUpperBand) && compareUpperBand.length > 0)
+    const upper = isValidNumericArray(compareUpperBand)
       ? compareUpperBand
-      : (Array.isArray(recForecast?.upperBand) && recForecast.upperBand.length > 0)
+      : isValidNumericArray(recForecast?.upperBand)
         ? recForecast.upperBand
         : null;
 
     const uq = compareUpperQuantile || recForecast?.upperQuantile || 'q9';
     const peakUp = comparePeakUpperMw ?? recForecast?.peakUpperMw ?? null;
     const lstmPeak = lstmCompare?.peakMw ?? recForecast?.lstmPeakMw ?? aiForecast?.predicted_peak_load ?? null;
-    const engineName = (timesfm?.available && tfmSeries?.length > 0)
+    const engineName = (timesfm?.available && rawSeries && rawSeries.length > 0)
       ? 'timesfm'
       : (recForecast?.engine || (aiForecast ? 'lstm' : 'fallback'));
 
@@ -83,7 +86,7 @@ export default function MobileAIScreen({
       ? rawSeries.map((mw, i) => ({
           t: `+${(i + 1) * stepMin}m`,
           mw: +Number(mw).toFixed(4),
-          hi: upper && upper[i] != null ? +Number(upper[i]).toFixed(4) : undefined,
+          hi: upper && upper[i] != null && Number.isFinite(Number(upper[i])) ? +Number(upper[i]).toFixed(4) : undefined,
         }))
       : [];
 

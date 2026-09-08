@@ -37,7 +37,9 @@ export function useForecastCompare(pollMs = 60000) {
   // caller cannot accidentally treat an absent forecast as a flat one.
   const timesfm = data?.timesfm || null;
   const lstm = data?.lstm || null;
-  const series = Array.isArray(timesfm?.series) && timesfm.series.length > 0 ? timesfm.series : null;
+  const isValidSeries = Array.isArray(timesfm?.series) && timesfm.series.length > 0 &&
+    timesfm.series.every(v => v != null && (typeof v === 'number' || (typeof v === 'string' && !Number.isNaN(Number(v)))) && Number.isFinite(Number(v)));
+  const series = isValidSeries ? timesfm.series.map(Number) : null;
 
   // The zero-shot model's predictive spread. TimesFM returns per-decile heads alongside
   // its central path, and until now they were decoded in Python and dropped at the Go

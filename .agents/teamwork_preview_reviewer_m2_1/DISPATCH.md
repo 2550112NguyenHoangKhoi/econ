@@ -1,25 +1,43 @@
-## 2026-09-04T07:58:27Z
-You are a Reviewer subagent in the ECON project.
-Your identity: teamwork_preview_reviewer_m2_1
-Your working directory: d:\ECON1\econ\.agents\teamwork_preview_reviewer_m2_1
-Project directory: d:\ECON1\econ
+# Reviewer 1 Dispatch — Milestone 2: Backend State Persistence
 
-CRITICAL CONSTRAINTS:
-- You are an objective reviewer and adversarial challenger.
-- First, read the authoritative user request at: d:\ECON1\econ\.agents\ORIGINAL_REQUEST.md (specifically the latest request ## 2026-09-04T07:14:00Z).
-- Read the global project architecture at: d:\ECON1\econ\PROJECT.md.
-- Read Worker handoff report at: d:\ECON1\econ\.agents\teamwork_preview_worker_m2_gen2\handoff.md.
+## Identity & Role
+- **Type**: `teamwork_preview_reviewer`
+- **Role**: `Backend Persistence Code Reviewer & Build Verifier`
+- **Working Directory**: `/Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_reviewer_m2_1`
+- **Parent**: Project Orchestrator (`/Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_orchestrator_13`)
 
-REVIEW SCOPE (Milestone 2: Go Backend & TimescaleDB Update):
-1. Review all Go backend changes in `server/`:
-   - `server/db.go`: Verify `initDB()` retry logic, `migrateSchema()` non-destructive DDL, `reading` struct, 7-column batch INSERT query in `writeLoop()`, `seriesAllowed` mapping.
-   - `server/mqtt.go`: Verify `telemetryMsg` struct parsing `stripW *float64` (`json:"stripW"`), `handleTelemetry` ingestion into `simulation.Measurement`.
-   - `server/devices.go`: Verify `track("stripW", msg.StripW)` and `persistMeasured()`.
-   - `server/simulation/engine.go`: Verify `HwStripW`, `stripFresh()`, `/api/hardware` output, zone persistence in `broadcast()`, and FlatBuffers serialization in `ZoneData.go`.
-2. Run build and tests:
-   `docker run --rm -v "d:\ECON1\econ\server:/app" -w /app golang:1.22-alpine go test -v ./...`
-3. Inspect live container logs:
-   `docker logs --tail 50 econ_wifi_ch_a-server-1`
-   Verify zero `batch insert failed` errors.
-4. Output your explicit gate verdict: APPROVE or REQUEST_CHANGES.
-Write `analysis.md` and complete `handoff.md` in your working directory, then send a message to the orchestrator.
+## Authoritative Context & Input Reports
+- Authoritative User Request: `/Users/nguyenhoangkhoi/Documents/econ/.agents/ORIGINAL_REQUEST.md` (MUST read first)
+- Worker M2 Handoff: `/Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_worker_m2/handoff.md`
+- Project Plan: `/Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_orchestrator_13/PROJECT.md`
+
+## Review Scope & Instructions
+Inspect Worker M2's implementation across:
+1. `server/state_store.go` (`StateStore` concurrency, dual-layer storage logic, atomic file rename)
+2. `server/stateapi.go` (`stateHandler`, `GET /api/state`, `POST /api/state`, `StateHub`)
+3. `server/main.go` (route registration, cold-boot engine restoration, `/ws` `state_sync` & `state_update`)
+4. `server/db.go` (schema migration for `dashboard_state`)
+5. `dashboard/src/useStatePersistence.js` & `dashboard/src/App.jsx`
+6. `server/state_persistence_test.go` (unit test suite)
+
+## Verification Commands Required
+Execute the following verification commands:
+- `cd server && go test -v -run TestStatePersistence .` (MUST pass 100%)
+- `cd server && go test ./...` (All backend tests MUST pass)
+- `cd dashboard && npm run build` (MUST succeed with exit code 0)
+- `cd dashboard && npm test` (MUST pass with 0 failures)
+
+Document your findings and verdict (`APPROVE` or `REQUEST_CHANGES`) in `/Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_reviewer_m2_1/handoff.md` and notify parent.
+
+## 2026-09-08T06:04:33Z
+You are Reviewer 1 (Backend Persistence Code Reviewer & Build Verifier).
+Your working directory is /Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_reviewer_m2_1.
+Your task instructions are in /Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_reviewer_m2_1/DISPATCH.md.
+Authoritative user request: /Users/nguyenhoangkhoi/Documents/econ/.agents/ORIGINAL_REQUEST.md.
+Worker M2 handoff: /Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_worker_m2/handoff.md.
+Project plan: /Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_orchestrator_13/PROJECT.md.
+
+Review Worker M2's implementation of backend state persistence across server/state_store.go, server/stateapi.go, server/main.go, server/db.go, server/state_persistence_test.go, and dashboard/src/useStatePersistence.js.
+Run verification commands: go test -v -run TestStatePersistence ., go test ./... in server/, and npm run build in dashboard/.
+Document your review and verdict (APPROVE or REQUEST_CHANGES) in /Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_reviewer_m2_1/handoff.md and report to parent.
+

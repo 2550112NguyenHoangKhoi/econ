@@ -101,6 +101,16 @@ func migrateSchema() {
 		   detail    TEXT
 		 )`,
 		`CREATE INDEX IF NOT EXISTS idx_device_events ON device_events (device_id, time DESC)`,
+
+		// Dashboard state persistence: key-value store for preferences, UI toggles,
+		// and operational controls that survive backend redeploys and container restarts.
+		`CREATE TABLE IF NOT EXISTS dashboard_state (
+		   key        TEXT PRIMARY KEY,
+		   value      JSONB NOT NULL,
+		   updated_at TIMESTAMPTZ NOT NULL,
+		   updated_by TEXT
+		 )`,
+		`CREATE INDEX IF NOT EXISTS idx_dashboard_state_updated ON dashboard_state (updated_at DESC)`,
 	}
 	for _, s := range stmts {
 		if _, err := DB.Exec(s); err != nil {

@@ -35,49 +35,49 @@
 #define MODEL_INPUT_BYTES          (MODEL_INPUT_WIDTH * MODEL_INPUT_HEIGHT * MODEL_INPUT_CHANNELS) // 9,216 bytes
 
 // Static Tensor Arena Memory Budget (Internal SRAM)
-#define TENSOR_ARENA_SIZE          (32 * 1024)                               // 80 KB (81,920 bytes)
+#define TENSOR_ARENA_SIZE          (80 * 1024)                               // 80 KB (81,920 bytes)
 
 // =============================================================================
 // 2. Conflict-Free ESP32 WROOM Pinout Mappings
 // =============================================================================
 // Camera Timing and Clock Signals
 #ifndef PIN_CAM_XCLK
-  #define PIN_CAM_XCLK   18 // 20 MHz LEDC PWM clock output
+  #define PIN_CAM_XCLK   23 // 20 MHz LEDC PWM clock output
 #endif
 #ifndef PIN_CAM_PCLK
-  #define PIN_CAM_PCLK   14 // Pixel Clock input from camera
+  #define PIN_CAM_PCLK   35 // Pixel Clock input from camera
 #endif
 #ifndef PIN_CAM_VSYNC
-  #define PIN_CAM_VSYNC  36 // Vertical Sync input (SENSOR_VP, input-only)
+  #define PIN_CAM_VSYNC  39 // Vertical Sync input (SENSOR_VP, input-only)
 #endif
 #ifndef PIN_CAM_HREF
-  #define PIN_CAM_HREF   39 // Horizontal Reference input (SENSOR_VN, input-only)
+  #define PIN_CAM_HREF   36 // Horizontal Reference input (SENSOR_VN, input-only)
 #endif
 
 // Parallel 8-Bit Data Bus (D0..D7)
 #ifndef PIN_CAM_D0
-  #define PIN_CAM_D0     35 // Data bit 0 (LSB) - Changed from 33 (StripW)
+  #define PIN_CAM_D0     4
 #endif
 #ifndef PIN_CAM_D1
-  #define PIN_CAM_D1     32 // Data bit 1
+  #define PIN_CAM_D1     13
 #endif
 #ifndef PIN_CAM_D2
-  #define PIN_CAM_D2     17 // Data bit 2
+  #define PIN_CAM_D2     14
 #endif
 #ifndef PIN_CAM_D3
-  #define PIN_CAM_D3     16 // Data bit 3
+  #define PIN_CAM_D3     16
 #endif
 #ifndef PIN_CAM_D4
-  #define PIN_CAM_D4     15 // Data bit 4
+  #define PIN_CAM_D4     17
 #endif
 #ifndef PIN_CAM_D5
-  #define PIN_CAM_D5     26 // Data bit 5
+  #define PIN_CAM_D5     18
 #endif
 #ifndef PIN_CAM_D6
-  #define PIN_CAM_D6     19 // Data bit 6
+  #define PIN_CAM_D6     19
 #endif
 #ifndef PIN_CAM_D7
-  #define PIN_CAM_D7     5  // Data bit 7 (MSB) — Repurposed from legacy PIR GPIO5
+  #define PIN_CAM_D7     34 // Data bit 7 (MSB)
 #endif
 
 // SCCB / I2C Configuration Bus (Shared with SHT30 0x44, ACD1200 0x2A, BH1750 0x23)

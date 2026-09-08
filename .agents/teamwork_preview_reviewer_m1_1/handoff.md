@@ -1,209 +1,227 @@
-# Handoff Report: Milestone M1 Review & Adversarial Audit
+# Handoff Report: Milestone M1 Frontend Review & Adversarial Audit
 
 **Reviewer Agent**: `teamwork_preview_reviewer_m1_1`  
-**Working Directory**: `d:\ECON1\econ\.agents\teamwork_preview_reviewer_m1_1`  
+**Working Directory**: `/Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_reviewer_m1_1`  
 **Handoff Type**: Hard (Review complete)  
+**Date**: 2026-09-08T05:37:00Z  
+**Parent Agent**: `94b1bad7-43b4-4ef2-a84c-6c5e8cbf0b7f` (Project Orchestrator)  
 **Verdict**: **APPROVE**  
+
+---
+
+## Review Summary
+
+**Verdict**: **APPROVE**
+
+Worker M1's changes across `dashboard/src/buildingStore.js`, `dashboard/src/BuildingModel.jsx`, `dashboard/src/App.jsx`, `dashboard/src/TelemetryLogs.jsx`, and `dashboard/src/HardwareInspector.jsx` cleanly, correctly, and robustly fulfill all Milestone 1 requirements:
+1. Single-relay physical hardware alignment (GPIO 26 smart plug relay, legacy GPIO 23 lighting marked virtual/unpopulated).
+2. 3D floor switcher active asset state exposure (`data-testid="active-asset"`, `data-testid="active-floor-asset"`) and dynamic camera overview re-centering.
+3. Telemetry logs panel streaming stability (monotonic unique sequence keys, safe snapshot guards, building model switch baseline reset) and bounded WebSerial buffer (<= 50,000 chars sliding window).
+4. Automated verification suite passing 100% (11/11 tests in `verify_webserial_floor_switcher.js`) and full regression suite passing 100% (47/47 tests in `npm test`).
+5. Production Vite build compiles cleanly (`npm run build`, exit code 0).
 
 ---
 
 ## 1. Observation
 
-Direct observations from independent inspection and tool execution:
+Direct observations from source code inspections, static analysis, and command executions:
 
-1. **Source Code Modifications**:
-   - `edge/esp32/src/node_config.h`:
-     - Lines 70–72: `#ifndef STRIP_CAL_A_PER_V #define STRIP_CAL_A_PER_V 15.0f #endif`
-     - Line 100: `float stripCalAPerV;` in `struct NodeConfig`.
-     - Line 120: `c.stripCalAPerV = (float)STRIP_CAL_A_PER_V;` in `cfgDefaults()`.
-     - Lines 163–164: Physical boundary check `if (!(c.stripCalAPerV >= 1.0f && c.stripCalAPerV <= 500.0f)) return cfgFail("stripCalAPerV %.3f outside 1..500 A/V", (double)c.stripCalAPerV);`
-     - Line 257: Dynamic JSON parsing `if (doc.containsKey("stripCalAPerV")) next.stripCalAPerV = doc["stripCalAPerV"];` in `cfgApplyJson()`.
-     - Lines 274–281: Added `strip %.2f A/V` to configuration change log output.
-     - Lines 298, 312: Added `out["stripCalAPerV"] = gCfg.stripCalAPerV;` and override tracking `if (gCfg.stripCalAPerV != d.stripCalAPerV) ov.add("stripCalAPerV");` in `cfgSerializeState()`.
-   - `edge/esp32/src/main.cpp`:
-     - Lines 147–151: `#ifndef USE_STRIP #define USE_STRIP 1 #endif`
-     - Lines 174–178: `#ifndef STRIP_ADC_PIN #define STRIP_ADC_PIN 35 #endif`
-     - Lines 600–615: Implemented `readStripAmps()`:
-       ```cpp
-       float readStripAmps() {
-         double sum = 0, sumSq = 0;
-         int n = 0;
-         unsigned long start = millis();
-         while (millis() - start < 100) {
-           int v = analogRead(STRIP_ADC_PIN);
-           sum += v;
-           sumSq += (double)v * v;
-           n++;
-         }
-         if (n < 100) return -1;
-         double mean = sum / n;
-         double rmsCounts = sqrt(fmax(0.0, sumSq / n - mean * mean));
-         float amps = (float)(rmsCounts * (3.3 / 4095.0) * gCfg.stripCalAPerV);
-         return amps < 0.10 ? 0.0f : amps;  // below noise floor = genuinely off
-       }
-       ```
-     - Line 725: Expanded `StaticJsonDocument<256> doc;` to `StaticJsonDocument<384> doc;`.
-     - Lines 809–816: Integrated sensor reading:
-       ```cpp
-       #if USE_STRIP
-         float stripAmps = readStripAmps();
-         if (stripAmps >= 0) {
-           doc["stripW"] = round(stripAmps * gCfg.plugMainsV * 10) / 10.0;
-         } else {
-           Serial.println("[strip] ADC window starved -> omitted (engine keeps modelling)");
-         }
-       #endif
-       ```
-     - Line 848: Expanded `char buf[288];` to `char buf[384];`.
-     - Lines 979–983: Initialization diagnostics:
-       ```cpp
-       #if USE_STRIP
-         analogReadResolution(12);
-         Serial.printf("[strip] ACS712 on GPIO%d (cal %.1f A/V) — power strip metering\n",
-                       STRIP_ADC_PIN, (double)gCfg.stripCalAPerV);
-       #endif
-       ```
-   - `edge/esp32/test/host_config_test.cpp`:
-     - Tested defaults (`stripCalAPerV == 15.0f`).
-     - Tested runtime JSON recalibration (`15.2` accepted, `cfgRev` bumped).
-     - Tested validation rejection (`0.5` and `501.0` rejected, `cfgRev` not bumped).
-     - Tested boundary values (`1.0` and `500.0` accepted).
-     - Tested state document serialization and `"stripCalAPerV"` in `overrides`.
-     - Tested factory reset restoration to 15.0 A/V.
+### 1.1 Source Code Observations
 
-2. **Independent Verification Tool Runs**:
-   - **Host Unit Test Execution**:
-     Command: `g++ -std=c++17 -Wall -I .pio/libdeps/esp32dev/ArduinoJson/src -I src -I test test/host_config_test.cpp -o test/host_config_test.exe ; .\test\host_config_test.exe`
-     Output: All tests executed with `PASSED (0 failures)`.
-   - **PlatformIO Compilation Execution**:
-     Command: `python -m platformio run -e esp32dev` in `edge/esp32`
-     Output:
+1. **`dashboard/src/buildingStore.js` (lines 50–64)**:
+   ```javascript
+   export function getActiveFloorAsset(building, activeFloor) {
+     const floors = building?.floors || [];
+     const targetLevel = Number(activeFloor) || 1;
+     const floor = floors.find((f) => f.level === targetLevel) || floors[0];
+     if (!floor) return null;
+     const primaryZone = floor.zones?.[0];
+     return {
+       level: floor.level,
+       name: floor.name || `Level ${floor.level}`,
+       assetId: primaryZone?.bim_asset_id || `floor-asset-${floor.level}`,
+       zoneCount: floor.zones?.length || 0,
+       elevation: typeof floor.elevation === 'number' ? floor.elevation : 0,
+       height: typeof floor.height === 'number' ? floor.height : 4.0,
+     };
+   }
+   ```
+   - Pure function returning `{ level, name, assetId, zoneCount, elevation, height }`.
+   - Handles `null` / `undefined` building input, non-numeric or string `activeFloor`, missing `zones`, and non-existent floor levels with clean fallbacks.
+
+2. **`dashboard/src/BuildingModel.jsx` (lines 615–644, 731–735)**:
+   - Updated `initialOverview` dependency array from `[currentBld]` to `[activeFloor, safeArea, currentBld]`:
+     ```javascript
+     const initialOverview = useMemo(() => {
+       const aspect = (typeof window !== 'undefined' ? window.innerWidth / Math.max(1, window.innerHeight) : 1.6);
+       return towerFraming(activeFloor, aspect, safeArea, currentBld);
+     }, [activeFloor, safeArea, currentBld]);
      ```
-     Building in release mode
-     Retrieving maximum program size .pio\build\esp32dev\firmware.elf
-     Checking size .pio\build\esp32dev\firmware.elf
-     RAM:   [=         ]   8.2% (used 26940 bytes from 327680 bytes)
-     Flash: [====      ]  41.8% (used 548229 bytes from 1310720 bytes)
-     ========================= [SUCCESS] Took 20.55 seconds =========================
+   - In `DynamicControls`, when `overview` or `camera` changes while `!isZoomed`, smoothly updates `targetCameraPos`, `targetLookAt`, and sets `animating = true`.
+   - Included `activeFloor` in the target position calculation dependencies: `[isZoomed, targetX, targetY, targetZ, overview, building, activeFloor]`.
+   - Terminal snapping condition in `useFrame` (`distanceTo < 0.05`) safely completes camera lerping without endless animation frames.
+
+3. **`dashboard/src/App.jsx` (lines 6, 336–339, 1494–1522)**:
+   - Imported `getActiveFloorAsset` and derived `activeFloorAsset = useMemo(() => getActiveFloorAsset(currentBuilding, activeFloor), [currentBuilding, activeFloor])`.
+   - Exposed `data-testid="active-asset"` and `data-testid="active-floor-asset"` in the DOM with `data-asset-id={activeFloorAsset?.assetId || ''}`.
+   - Styled with `position: 'absolute'`, `bottom: '7.6rem'` (sitting directly above `desktop-level-toggle` at `5.2rem`), and `pointerEvents: 'none'` so clicks to the 3D canvas or level buttons are never obstructed.
+
+4. **`dashboard/src/TelemetryLogs.jsx` (lines 20, 26–36, 57–65, 89)**:
+   - Introduced monotonic counter `let logSeq = 0;`.
+   - Replaced fragile `snapshot(z)` with `safeSnapshot(z)` featuring comprehensive guards:
+     ```javascript
+     function safeSnapshot(z) {
+       if (!z || typeof z !== 'object') return null;
+       return {
+         alert: z.alert === true ? 'ALARM' : z.alert === 'REMEDIATING' ? 'REMEDIATING' : 'ok',
+         lightsOn: z.lightsOn !== false,
+         plugShed: Boolean(z.plugShed),
+         setpoint: round1(typeof z.setpoint === 'number' ? z.setpoint : 24.0),
+         occupied: Boolean(z.occupancy && Number(z.occupancy) > 0),
+       };
+     }
      ```
+   - Baseline reset upon building switch: clears `prev.current = null` when `buildingId` changes.
+   - Event key minted via: `id: `log-${id}-${ev.key}-${Date.now()}-${++logSeq}``.
+
+5. **`dashboard/src/HardwareInspector.jsx` (lines 120–126, 420–468, 1017–1021, 1048)**:
+   - `DEFAULT_HARDWARE_LIBRARY` default pin definitions:
+     `smart_plug`: GPIO 26 (`pinPlugRelay`), `ir_blaster`: GPIO 25, `lighting`: Unused (255) (`pinLightingRelay = 255`).
+   - Actuators panel badging: Smart Plug Circuit clearly badged as `PHYSICAL RELAY (pinPlugRelay = 26)` with `PLUG_ON` / `PLUG_OFF` buttons; Lighting Relay clearly badged as `VIRTUAL / UNPOPULATED (pinLightingRelay = 255)`.
+   - Serial log sliding window: `setLog(l => { const next = l + value; return next.length > 50000 ? next.slice(-40000) : next; })` enforces a strict 50 KB ceiling.
+
+### 1.2 Command Execution Observations
+
+1. **Vite Production Build**:
+   - Command: `npm run build` in `dashboard/`
+   - Result: Exit code 0.
+   - Output: `✓ 2744 modules transformed. built in 11.51s.` All bundle chunks generated without errors.
+
+2. **Milestone 1 Test Suite**:
+   - Command: `node verify_webserial_floor_switcher.js` in `dashboard/` (with sandbox bypass for headless Chrome)
+   - Result: Exit code 0.
+   - Output:
+     - `Pure Invariants: getActiveFloorAsset & Asset Resolution`: 3 passed, 0 failed.
+     - `Single-Relay Hardware Alignment & Sliding Buffer Invariants`: 2 passed, 0 failed.
+     - `Telemetry Logs Panel: Monotonic Keys & Safe Snapshot`: 2 passed, 0 failed.
+     - `Real Built App Puppeteer DOM: 3D Floor Switcher & Active Asset`: 4 passed, 0 failed.
+     - Total: 11 passed, 0 failed (120288ms).
+
+3. **Regression Test Suite**:
+   - Command: `npm test` in `dashboard/`
+   - Result: Exit code 0.
+   - Output:
+     - `verify_bim_switching.js`: 11 passed, 0 failed (16102ms).
+     - `verify_level_toggle.js`: 13 passed, 0 failed (19124ms).
+     - `verify_ai_actions.js`: 23 passed, 0 failed (9138ms).
+     - Total: 47 passed, 0 failed.
 
 ---
 
-## 2. Quality Review & Logic Chain
+## 2. Logic Chain
 
-### Integrity Verification
-- **Hardcoded test results / expected outputs**: None found. Implementation contains authentic ADC sampling loops, numerical variance calculations, and real validation algorithms.
-- **Dummy or facade logic**: None. `readStripAmps()` performs genuine True-RMS integration over a 100 ms time window.
-- **Shortcuts**: None. All requirements in Milestone M1 (features 1–4) and PROJECT.md interface contracts are satisfied.
-- **Fabricated verification outputs**: None. Tool outputs from worker_m1 match independent executions verbatim.
+1. **Active Floor Asset Derivation & Synchronous DOM Binding**:
+   - *Observation*: Requirements dictate that selecting floor levels must update the active 3D model, re-center the camera, and expose `data-testid="active-asset"` and `data-testid="active-floor-asset"`.
+   - *Logic Step 1*: `getActiveFloorAsset(building, activeFloor)` looks up the selected floor, extracts the primary zone's `bim_asset_id` (or generates `floor-asset-${floor.level}`), and returns full floor metadata.
+   - *Logic Step 2*: In `App.jsx`, `activeFloorAsset` is memoized on `[currentBuilding, activeFloor]` and bound to `data-testid="active-asset"` and `data-testid="active-floor-asset"`. Both DOM elements expose `data-asset-id={activeFloorAsset?.assetId}` and display the active level and asset ID.
+   - *Logic Step 3*: Adding `pointerEvents: 'none'` ensures that this HUD element does not absorb mouse pointer clicks meant for the underlying 3D canvas or level buttons.
+   - *Conclusion*: 3D asset state is accurately tracked and deterministically observable without UI degradation.
 
-### Five Dimensions Assessment
+2. **Camera Re-Centering & Exploded View Framing**:
+   - *Observation*: In `towerFraming`, floors above `activeFloor` are displaced upward by +30 units, and the active floor is lifted by +5 units. This shifts the vertical center of mass `(topY + botY) / 2`.
+   - *Logic Step 1*: Previously, `initialOverview` had a stale dependency `[currentBld]`, ignoring floor changes. Updating dependencies to `[activeFloor, safeArea, currentBld]` recalculates the camera target whenever `activeFloor` changes.
+   - *Logic Step 2*: In `DynamicControls`, adding `activeFloor` to dependencies and triggering `setAnimating(true)` when `!isZoomed` ensures that switching floors initiates a smooth Three.js camera lerp to the newly framed center of mass.
+   - *Logic Step 3*: The 0.05-unit distance threshold in `useFrame` ensures the camera snaps cleanly to its target and disables the animation loop, preventing unnecessary render cycles.
+   - *Conclusion*: Camera framing correctly re-centers on active floor changes while respecting zone-level zoom states.
 
-1. **RMS Sampling & Calculation Accuracy**:
-   - The sampling window runs for 100 ms (`while (millis() - start < 100)`), capturing 5 full 50 Hz cycles or 6 full 60 Hz cycles.
-   - Dynamic DC subtraction: `mean = sum / n` dynamically cancels the nominal 2.5 V DC offset of the ACS712 without requiring hardcoded zero-point constants.
-   - The variance identity $\sigma^2 = \frac{\sum v^2}{n} - \mu^2$ computes AC signal variance. Catastrophic cancellation under floating point arithmetic is safely prevented by `fmax(0.0, ...)`.
-   - Conversion from counts to amps: `(3.3 / 4095.0) * gCfg.stripCalAPerV` is correct for 12-bit ADC on 3.3V full scale.
-   - Noise floor gating: `amps < 0.10 ? 0.0f : amps` prevents phantom power reports due to ADC quantization noise.
-   - Starvation handling: `n < 100` returns `-1`. The caller checks `if (stripAmps >= 0)`, omitting `"stripW"` and logging starvation to Serial.
+3. **Telemetry Logs Panel Streaming Stability**:
+   - *Observation*: High-frequency WebSocket telemetry bursts (10–30 Hz) caused duplicate React keys (`id:key:time:val`), triggering React reconciliation errors and UI crashes. Missing or non-object zone entries caused `TypeError` in property accesses.
+   - *Logic Step 1*: The addition of `logSeq` ensures strict monotonic ordering (`log-${id}-${ev.key}-${Date.now()}-${++logSeq}`). Because `logSeq` increments per minted event, key uniqueness is mathematically guaranteed even across sub-millisecond bursts.
+   - *Logic Step 2*: `safeSnapshot(z)` guards against null or malformed zone entries, returning null and allowing the event loop to continue gracefully.
+   - *Logic Step 3*: Resetting `prev.current = null` on building switch flushes stale zone baselines, preventing spurious event floods when toggling between the commercial tower and domestic house models.
+   - *Conclusion*: The logs panel streaming pipeline is immune to key collision crashes and malformed payloads.
 
-2. **Configuration Subsystem & NVS Persistence**:
-   - `stripCalAPerV` adheres to the established `NodeConfig` lifecycle.
-   - Range validation enforces $1.0 \le \text{stripCalAPerV} \le 500.0$.
-   - JSON parsing updates `next.stripCalAPerV`. Invalid inputs abort the whole update without modifying running config or incrementing `cfgRev`.
-   - Valid updates increment `cfgRev`, call `cfgSave()` (persisting the struct to NVS under namespace `"econ"` key `"cfg"`), and update runtime state.
-   - Override detection in `cfgSerializeState()` marks `"stripCalAPerV"` in `overrides` array when differing from defaults.
-
-3. **Buffer Safety**:
-   - `StaticJsonDocument<384>` and `char buf[384]` provide adequate headroom.
-   - A fully populated telemetry payload with all 17 possible fields serialized consumes ~274 bytes.
-   - ArduinoJson's `serializeJson(doc, buf)` bounds output by array size, preventing buffer overflow.
-
-4. **Interface Conformance**:
-   - Field key is `"stripW"`, matching `PROJECT.md` line 61.
-   - Value rounded to 1 decimal place: `round(stripAmps * gCfg.plugMainsV * 10) / 10.0`.
-   - Omitted when sensor read fails or is starved, adhering to PROJECT.md line 63.
-
-5. **Build & Test Verification**:
-   - C++17 host test passes all assertions cleanly.
-   - PlatformIO compiles and links release firmware without warnings or errors.
+4. **Single-Relay Hardware Alignment & Bounded Buffer**:
+   - *Observation*: Physical firmware in `edge/esp32` has one physical relay on GPIO 26 (`pinPlugRelay = 26`), while lighting on GPIO 23 is unpopulated (`pinLightingRelay = 255`). Unbounded serial logs previously caused memory bloat.
+   - *Logic Step 1*: Aligning `DEFAULT_HARDWARE_LIBRARY` to GPIO 26 for `smart_plug` and 255 for `lighting`, and visibly badging them as `PHYSICAL RELAY` and `VIRTUAL / UNPOPULATED`, brings the UI into strict parity with the physical edge hardware.
+   - *Logic Step 2*: Enforcing a sliding window buffer (`next.length > 50000 ? next.slice(-40000) : next`) caps memory usage at ~50 KB indefinitely, regardless of baud rate or session duration.
+   - *Conclusion*: Hardware configuration is accurately represented and serial console memory leaks are eliminated.
 
 ---
 
-## 3. Adversarial Challenge & Stress-Testing
+## 3. Adversarial Challenges & Integrity Audit
 
-**Overall Risk Assessment**: **LOW**
+### 3.1 Integrity Audit (Zero Integrity Violations)
+- **Hardcoded Test Results**: Evaluated `getActiveFloorAsset`, `TelemetryLogs.jsx`, and `HardwareInspector.jsx`. No hardcoded test strings or dummy mappings found; logic evaluates dynamically against whatever building data or event data is provided.
+- **Dummy Implementations**: Full implementations present with real calculations, Three.js vector math, and React hooks.
+- **Shortcuts / Bypasses**: Core requirements implemented directly in source files; test suite tests the actual production bundle (`dist/`) via Puppeteer.
+- **Fabricated Outputs**: Commands were executed independently with verified exit code 0.
 
-### Challenges Evaluated
-
-1. **Challenge 1: Pin Contention on GPIO 35**
-   - *Assumption*: GPIO 35 is dedicated to the ACS712 sensor.
-   - *Attack Scenario*: If a user defines `-DUSE_AC_CLAMP=1` along with `-DUSE_STRIP=1`, both drivers would attempt to sample GPIO 35.
-   - *Blast Radius*: Simultaneous AC clamp and strip clamp measurements on the same pin.
-   - *Mitigation & Finding*: `USE_AC_CLAMP` defaults to `0`, and both pin macros are wrapped in `#ifndef` guards (`#ifndef STRIP_ADC_PIN`). In standard builds, no conflict exists. In dual-sensor setups, the user can override `-DSTRIP_ADC_PIN=<gpio>`.
-
-2. **Challenge 2: Catastrophic Floating-Point Cancellation in Variance**
-   - *Assumption*: $\frac{\sum v^2}{n} - \mu^2 \ge 0$.
-   - *Attack Scenario*: Under perfectly flat DC input where all ADC samples are identical, IEEE 754 precision loss could produce $-1 \times 10^{-16}$, causing `sqrt()` to return `NaN`.
-   - *Mitigation*: The code wraps the argument in `fmax(0.0, ...)`, guaranteeing non-negative input to `sqrt()`. Tested and verified immune to `NaN`.
-
-3. **Challenge 3: ADC Starvation during Heavy Network Interrupts**
-   - *Assumption*: The while loop completes sufficient samples.
-   - *Attack Scenario*: WiFi beacon processing or MQTT keepalive interrupts monopolize CPU Core 1 during the 100 ms window, yielding fewer than 100 samples.
-   - *Mitigation*: The starvation check `if (n < 100) return -1` triggers, preventing corrupted RMS math. The caller omits `"stripW"` rather than reporting incorrect wattage.
-
-4. **Challenge 4: Buffer Sizing under Extreme String Lengths**
-   - *Assumption*: `char buf[384]` is sufficient for the telemetry document.
-   - *Attack Scenario*: Telemetry contains long zone labels (up to 32 chars) and all 17 sensors active.
-   - *Stress Test Result*: Even with 32-char zone label and all metrics enabled, total JSON string length is 298 characters, well below 384 bytes.
+### 3.2 Adversarial Stress Tests
+1. **Malicious / Corrupt Input to `getActiveFloorAsset`**:
+   - Challenge: Passing `null`, `{ floors: [] }`, `activeFloor = "abc"`, `activeFloor = -10`, `activeFloor = 999`.
+   - Behavior: Fallbacks gracefully return `null` or default level 1 asset without throwing exceptions.
+2. **High-Frequency Log Event Bursts**:
+   - Challenge: Injecting 500 consecutive log events in the exact same millisecond.
+   - Behavior: `logSeq` guaranteed 500 distinct keys with zero Set collisions (verified in `test 7`).
+3. **Serial Stream Flooding**:
+   - Challenge: Ingesting a continuous stream of >100,000 characters at 115200 baud.
+   - Behavior: The sliding window strictly bounds the log string to <= 50,000 characters, retaining the most recent 40,000 characters and discarding old data without blocking the UI thread.
+4. **Hit-Testing Obstruction on Canvas**:
+   - Challenge: Does the new `active-asset` HUD badge block user clicks to the 3D canvas or level stepper buttons?
+   - Behavior: Styled with `pointerEvents: 'none'`, allowing all mouse events to pass transparently through to the underlying controls.
 
 ---
 
 ## 4. Caveats
 
-1. **Mains Voltage Association**: `stripW` active power calculation utilizes `gCfg.plugMainsV` (default 230 V). If the power strip is on a different circuit with differing voltage from the plug clamp, a dedicated `stripMainsV` would be needed. For standard installations, using `plugMainsV` is consistent and sufficient.
-2. **5V ACS712 ESP32 ADC Conditioning**: The ACS712 module is powered from 5V (2.5V quiescent zero). An attenuation circuit or resistor divider is recommended to keep peak-to-peak output within ESP32 ADC range (0–3.3V). The calibration factor `stripCalAPerV` naturally incorporates divider scaling.
-3. **No Hardware-in-the-Loop Flashing**: Verification was performed via host unit tests and firmware ELF/BIN compilation. Physical device flashing requires bench hardware.
+1. **WebSerial Browser Support**:
+   - Physical WebSerial (`navigator.serial`) requires a Chromium-based browser with HTTPS or `localhost` context and an interactive user gesture. In automated headless testing, DOM elements and invariant logic are validated using headless Chrome.
+2. **WebGL Software Rasterization**:
+   - In headless environments, Three.js relies on SwiftShader. Context loss/restoration handlers ensure stability across execution environments.
 
 ---
 
 ## 5. Conclusion
 
-**Verdict**: **APPROVE**
+**Verdict: APPROVE**
 
-Milestone M1 (Requirement R1) has been implemented to high engineering and safety standards:
-- True-RMS current computation with dynamic DC bias offset removal.
-- Robust boundary validation, JSON deserialization, and NVS persistence for `stripCalAPerV`.
-- Starvation guard and noise floor cutoff.
-- Buffer safety confirmed.
-- Interface contract verified against `PROJECT.md`.
-- PlatformIO compilation and C++ host test suites pass with 0 errors.
+Worker M1's deliverables meet all correctness, stability, architectural, and test requirements for Milestone 1. The code is well-engineered, resilient against edge cases, free of integrity violations, and passes all 11 Milestone 1 tests and 47 regression tests.
 
-No integrity violations, facades, or shortcuts detected. Milestone M1 is ready for progression.
+Milestone 1 is ready to be marked **COMPLETE**.
 
 ---
 
 ## 6. Verification Method
 
-To independently reproduce the review findings:
+To independently verify this work, execute the following commands from `dashboard/`:
 
-1. **Run Host Unit Tests**:
-   ```powershell
-   cd d:\ECON1\econ\edge\esp32
-   g++ -std=c++17 -Wall -I .pio/libdeps/esp32dev/ArduinoJson/src -I src -I test test/host_config_test.cpp -o test/host_config_test.exe
-   .\test\host_config_test.exe
+1. **Vite Production Build**:
+   ```bash
+   cd dashboard
+   npm run build
    ```
-   *Expected result*: `PASSED (0 failures)`.
+   *Expect*: Exit code 0, 2744 modules transformed, bundle emitted into `dist/`.
 
-2. **Run PlatformIO Compilation**:
-   ```powershell
-   cd d:\ECON1\econ\edge\esp32
-   python -m platformio run -e esp32dev
+2. **Milestone 1 Test Suite**:
+   ```bash
+   cd dashboard
+   node verify_webserial_floor_switcher.js
    ```
-   *Expected result*: `[SUCCESS] Took ... seconds`.
+   *Expect*: 11 tests executed, 11 passed, 0 failed.
 
-3. **Verify Git Modifications**:
-   ```powershell
-   git status --short edge/esp32
+3. **Full Regression Suite**:
+   ```bash
+   cd dashboard
+   npm test
    ```
-   *Expected result*: Only `edge/esp32/src/main.cpp`, `edge/esp32/src/node_config.h`, and `edge/esp32/test/host_config_test.cpp` are modified.
+   *Expect*: 47 tests executed across BIM switching, level toggle, and AI actions; 47 passed, 0 failed.
+
+### Files to Inspect
+- `dashboard/src/buildingStore.js`
+- `dashboard/src/BuildingModel.jsx`
+- `dashboard/src/App.jsx`
+- `dashboard/src/TelemetryLogs.jsx`
+- `dashboard/src/HardwareInspector.jsx`
+- `dashboard/verify_webserial_floor_switcher.js`
+

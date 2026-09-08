@@ -1,293 +1,174 @@
-# Adversarial Verification & Challenge Report: ACS712 True-RMS Power Algorithm
+# Handoff Report: Challenger 1 (3D Viewer & Floor Switcher Adversarial Challenge)
 
 **Agent**: `teamwork_preview_challenger_m1_1`  
-**Working Directory**: `d:\ECON1\econ\.agents\teamwork_preview_challenger_m1_1`  
-**Handoff Type**: Hard (Empirical verification and adversarial challenge complete)  
-**Verdict**: **APPROVE** (with hardware operational recommendation documented)
+**Working Directory**: `/Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_challenger_m1_1`  
+**Handoff Type**: Hard  
+**Date**: 2026-09-08T05:46:00Z  
+**Parent Agent**: `94b1bad7-43b4-4ef2-a84c-6c5e8cbf0b7f` (Project Orchestrator)  
+**Verdict**: `REQUEST_CHANGES`
 
 ---
 
 ## 1. Observation
 
-1. **Target Algorithm Under Review**:
-   - `edge/esp32/src/main.cpp` lines 600–615 (`readStripAmps()`):
-     ```cpp
-     float readStripAmps() {
-       double sum = 0, sumSq = 0;
-       int n = 0;
-       unsigned long start = millis();
-       while (millis() - start < 100) {
-         int v = analogRead(STRIP_ADC_PIN);
-         sum += v;
-         sumSq += (double)v * v;
-         n++;
-       }
-       if (n < 100) return -1;
-       double mean = sum / n;
-       double rmsCounts = sqrt(fmax(0.0, sumSq / n - mean * mean));
-       float amps = (float)(rmsCounts * (3.3 / 4095.0) * gCfg.stripCalAPerV);
-       return amps < 0.10 ? 0.0f : amps;  // below noise floor = genuinely off
-     }
-     ```
-   - `edge/esp32/src/main.cpp` lines 810–816 (`readAndPublish()`):
-     ```cpp
-     #if USE_STRIP
-       float stripAmps = readStripAmps();
-       if (stripAmps >= 0) {
-         doc["stripW"] = round(stripAmps * gCfg.plugMainsV * 10) / 10.0;
-       } else {
-         Serial.println("[strip] ADC window starved -> omitted (engine keeps modelling)");
-       }
-     #endif
-     ```
-   - `edge/esp32/src/node_config.h` lines 70–72, 100, 120, 163–164:
-     `stripCalAPerV` default `15.0f`, validation range `1.0f .. 500.0f`, `plugMainsV` default `230.0f`.
+### 1.1 Scope & Test Execution
+As Challenger 1, an empirical adversarial stress harness (`dashboard/verify_adversarial_floor_switcher.js`) was implemented and executed across 14 rigorous challenge vectors covering:
+1. Pure invariant stress testing and boundary oracle for `getActiveFloorAsset` in `dashboard/src/buildingStore.js`.
+2. Mathematical stability of 3D camera overview framing (`towerFraming` in `dashboard/src/BuildingModel.jsx`).
+3. Real built application (`dist/`) Puppeteer DOM stress testing:
+   - Rapid floor hopping sequence (1 -> 15 -> 7 -> 2 -> 14 -> 1).
+   - Stepper boundary underflow (10x prev at L1) and overflow (15x next past L15).
+   - Commercial tower (15 floors) <-> Domestic home (1 floor) rapid switching and oscillation.
+   - Active asset badge hit-test transparency (`pointer-events: none`).
+   - Exact DOM synchronization of `data-testid="active-asset"` and `data-testid="active-floor-asset"` across building levels.
 
-2. **Verification Test Harnesses Created**:
-   - `edge/esp32/test/host_strip_power_test.cpp`: C++ host test compiling against `node_config.h`, `arduino_shim.h`, and `ArduinoJson.h`.
-   - `edge/esp32/test/verify_strip_power.py`: Statistical Python adversarial verification harness testing DC offsets, noise floor, starvation, harmonics, clipping, and grid frequency variations.
+### 1.2 Execution Logs & Empirical Results
+Command executed:
+```bash
+node verify_adversarial_floor_switcher.js
+```
 
-3. **Empirical Execution Outputs**:
-   - **Host C++ Test Suite**:
-     Command:
-     ```powershell
-     g++ -std=c++17 -Wall -I .pio/libdeps/esp32dev/ArduinoJson/src -I src -I test test/host_strip_power_test.cpp -o test/host_strip_power_test.exe ; .\test\host_strip_power_test.exe
-     ```
-     Verbatim Output:
-     ```
-     === ACS712 True-RMS Adversarial Host Test Suite ===
+Test Results Output:
+```
+╔══════════════════════════════════════════════════════════════════════════╗
+║  CHALLENGER 1: 3D FLOOR SWITCHER & ACTIVE ASSET EMPIRICAL STRESS HARNESS ║
+╚══════════════════════════════════════════════════════════════════════════╝
 
-     strip_power: DC offset subtraction with zero current
-       ok   DC offset 0.50V results in exactly 0.0A
-       ok   DC offset 1.00V results in exactly 0.0A
-       ok   DC offset 1.65V results in exactly 0.0A
-       ok   DC offset 2.00V results in exactly 0.0A
-       ok   DC offset 2.50V results in exactly 0.0A
-       ok   DC offset 2.80V results in exactly 0.0A
-       ok   DC offset 3.20V results in exactly 0.0A
-     strip_power: DC offset invariance with 5A peak AC signal (3.535A RMS)
-       ok   DC 1.00V: amps=3.535A, watts=813.2W (expected ~813.2W)
-       ok   DC 1.65V: amps=3.536A, watts=813.2W (expected ~813.2W)
-       ok   DC 2.00V: amps=3.535A, watts=813.0W (expected ~813.2W)
-       ok   DC 2.50V: amps=3.536A, watts=813.2W (expected ~813.2W)
-       ok   DC 2.80V: amps=3.536A, watts=813.2W (expected ~813.2W)
-     strip_power: noise floor gating (< 0.10A -> 0.0W)
-       ok   0.07A RMS (< 0.10A) is clamped to 0.0A
-       ok   ADC noise of +-3 counts is clamped to 0.0A (below 0.10A threshold)
-       ok   0.15A RMS (> 0.10A) is correctly reported
-     strip_power: known currents benchmark at 230V mains
-       ok   Target 1.000A: got 1.000A, 230.0W (exp 230.0W)
-       ok   Target 2.000A: got 2.000A, 460.0W (exp 460.0W)
-       ok   Target 3.536A: got 3.536A, 813.2W (exp 813.2W)
-       ok   Target 5.000A: got 4.999A, 1149.8W (exp 1150.0W)
-       ok   Target 10.000A: got 10.000A, 2299.9W (exp 2300.0W)
-     strip_power: starved sampling guard and telemetry omission
-       ok   Sample count N=0 returns -1
-       ok   Sample count N=0 omits stripW from JSON document
-       ok   Sample count N=1 returns -1
-       ok   Sample count N=1 omits stripW from JSON document
-       ok   Sample count N=10 returns -1
-       ok   Sample count N=10 omits stripW from JSON document
-       ok   Sample count N=50 returns -1
-       ok   Sample count N=50 omits stripW from JSON document
-       ok   Sample count N=99 returns -1
-       ok   Sample count N=99 omits stripW from JSON document
-       ok   Sample count N=100 succeeds and does not return -1
-       ok   Sample count N=100 populates stripW in JSON document
-     strip_power: non-linear load with 3rd and 5th harmonics
-       ok   SMPS harmonics: RMS current within 0.01A of theoretical 1.703A
-       ok   SMPS harmonics: Watts within 0.5W of theoretical 391.7W
-     strip_power: grid frequency deviation over 100ms window
-       ok   Grid freq 49.0 Hz: got 819.3W (leakage error < 1.0%)
-       ok   Grid freq 50.0 Hz: got 813.2W (leakage error < 1.0%)
-       ok   Grid freq 51.0 Hz: got 806.9W (leakage error < 1.0%)
-       ok   Grid freq 60.0 Hz: got 813.2W (leakage error < 1.0%)
-     strip_power: stripCalAPerV calibration limits
-       ok   Cal 1.0 A/V with 1V RMS input -> 1.00 A (expected 1.00 A)
-       ok   Cal 15.0 A/V with 1V RMS input -> 15.00 A (expected 15.00 A)
-       ok   Cal 50.0 A/V with 1V RMS input -> 50.00 A (expected 50.00 A)
-       ok   Cal 100.0 A/V with 1V RMS input -> 100.00 A (expected 100.00 A)
-       ok   Cal 500.0 A/V with 1V RMS input -> 500.01 A (expected 500.00 A)
+=== Suite: Adversarial Boundary & Degenerate Inputs: getActiveFloorAsset ===
+  ✔ PASS Out-of-bounds floor levels (-1, 16, 999, -9999, MAX_SAFE_INTEGER) (0ms)
+  ✔ PASS Non-numeric and malformed primitive floor inputs (null, undefined, NaN, Infinity, strings) (0ms)
+  ✔ PASS Null, undefined, empty object, and empty array building inputs (0ms)
+  ✔ PASS Degenerate floor structures (missing zones, null zone elements, missing heights/elevations) (0ms)
+    [Vulnerability Detected] getActiveFloorAsset crashes with "floors.find is not a function" when floors is non-array truthy
+  ✖ FAIL Adversarial Challenge: Non-array truthy floors payload ({ floors: "loading" }) crash audit (1ms)
+    VULNERABILITY: getActiveFloorAsset crashes on non-array floors ({ floors: "loading" }): floors.find is not a function
+        at file:///Users/nguyenhoangkhoi/Documents/econ/dashboard/verify_adversarial_floor_switcher.js:366:13
+    [Vulnerability Detected] getActiveFloorAsset(bld, 0) returned Level 1 instead of Level 0 due to falsy (0 || 1) coercion
+  ✖ FAIL Adversarial Challenge: Level 0 resolution on building with ground floor level 0 (0ms)
+    VULNERABILITY: getActiveFloorAsset fails to resolve Level 0 (returned Level 1) due to "Number(activeFloor) || 1" falsy coercion
+        at file:///Users/nguyenhoangkhoi/Documents/econ/dashboard/verify_adversarial_floor_switcher.js:384:13
+  ✔ PASS 10,000 rapid randomized fuzzy calls throughput and crash resistance (2ms)
 
-     ---------------------------------------------------
-     PASSED (0 failures)
-     ```
+=== Suite: 3D Camera Framing Math Stability: towerFraming Invariants ===
+  ✔ PASS Extreme aspect ratios (0.01 to 100.0) maintain finite 3D coordinates (1ms)
+  ✔ PASS Out-of-bounds floor levels maintain valid framing geometry (0ms)
 
-   - **Python Verification Harness**:
-     Command: `python test/verify_strip_power.py`
-     Verbatim Output:
-     ```
-     =================================================================
-     ECON ACS712 TRUE-RMS POWER ALGORITHM ADVERSARIAL VERIFICATION
-     =================================================================
+=== Suite: Real App Puppeteer E2E: Rapid Transitions & DOM Sync ===
+  Challenger test server running at http://127.0.0.1:5399
+  ✔ PASS Challenge 1: Rapid floor hopping sequence (1 -> 15 -> 7 -> 2 -> 14 -> 1) (25769ms)
+  ✔ PASS Challenge 2: Stepper boundary clamping stress (10x prev at L1, 15x next past L15) (84657ms)
+  ✔ PASS Challenge 3: Commercial Tower (15 floors) <-> Domestic Home (1 floor) model switching (27278ms)
+  ✔ PASS Challenge 4: Active asset badge hit-test transparency (pointer-events: none) (3225ms)
+  ✔ PASS Challenge 5: DOM synchronization accuracy across key tower floors (L1, L2, L4, L8, L12, L15) (25864ms)
 
-     [Test 1] DC Offset Subtraction (Zero Current, Various DC Offsets)
-       DC Offset: 0.00V (mean ADC:    0.0) -> amps: 0.00A, stripW: 0.0W [PASS]
-       DC Offset: 0.50V (mean ADC:  620.0) -> amps: 0.00A, stripW: 0.0W [PASS]
-       DC Offset: 1.20V (mean ADC: 1489.0) -> amps: 0.00A, stripW: 0.0W [PASS]
-       DC Offset: 1.65V (mean ADC: 2048.0) -> amps: 0.00A, stripW: 0.0W [PASS]
-       DC Offset: 2.00V (mean ADC: 2482.0) -> amps: 0.00A, stripW: 0.0W [PASS]
-       DC Offset: 2.50V (mean ADC: 3102.0) -> amps: 0.00A, stripW: 0.0W [PASS]
-       DC Offset: 2.80V (mean ADC: 3475.0) -> amps: 0.00A, stripW: 0.0W [PASS]
-       DC Offset: 3.30V (mean ADC: 4095.0) -> amps: 0.00A, stripW: 0.0W [PASS]
+================================================================
+CHALLENGER RESULTS: 14 Total | 12 Passed | 2 Failed (175769ms)
+================================================================
+```
 
-     [Test 2] DC Offset Subtraction with 5A Peak AC Signal (3.5355A RMS)
-       DC: 1.00V -> amps: 3.5355A (err 0.002%), stripW: 813.2W (exp 813.2W) [PASS]
-       DC: 1.65V -> amps: 3.5359A (err 0.009%), stripW: 813.2W (exp 813.2W) [PASS]
-       DC: 2.00V -> amps: 3.5349A (err 0.017%), stripW: 813.0W (exp 813.2W) [PASS]
-       DC: 2.50V -> amps: 3.5356A (err 0.002%), stripW: 813.2W (exp 813.2W) [PASS]
-       DC: 2.80V -> amps: 3.5357A (err 0.006%), stripW: 813.2W (exp 813.2W) [PASS]
+### 1.3 Code Observations
+In `dashboard/src/buildingStore.js`, lines 50–54:
+```javascript
+export function getActiveFloorAsset(building, activeFloor) {
+  const floors = building?.floors || [];
+  const targetLevel = Number(activeFloor) || 1;
+  const floor = floors.find((f) => f.level === targetLevel) || floors[0];
+  if (!floor) return null;
+...
+```
 
-     [Test 3] Pure Noise & Sub-Threshold Signal Gate (< 0.10A -> 0.0W)
-       Noise sigma:  0.5 cnt (equiv ~0.006A) -> amps: 0.000A, stripW:  0.0W [PASS]
-       Noise sigma:  1.0 cnt (equiv ~0.012A) -> amps: 0.000A, stripW:  0.0W [PASS]
-       Noise sigma:  2.0 cnt (equiv ~0.024A) -> amps: 0.000A, stripW:  0.0W [PASS]
-       Noise sigma:  4.0 cnt (equiv ~0.048A) -> amps: 0.000A, stripW:  0.0W [PASS]
-       Noise sigma:  6.0 cnt (equiv ~0.073A) -> amps: 0.000A, stripW:  0.0W [PASS]
-       Noise sigma:  8.0 cnt (equiv ~0.097A) -> amps: 0.000A, stripW:  0.0W [PASS]
-       Noise sigma:  8.5 cnt (equiv ~0.103A) -> amps: 0.105A, stripW: 24.2W [PASS]
-       Noise sigma: 10.0 cnt (equiv ~0.121A) -> amps: 0.120A, stripW: 27.5W [PASS]
-       Sine 0.08A RMS (< 0.10A) -> amps: 0.00A, stripW: 0.0W [PASS]
-       Sine 0.15A RMS (> 0.10A) -> amps: 0.150A, stripW: 34.6W [PASS]
-
-     [Test 4] Known AC Current Accuracy Benchmark (1A, 3.535A, 5A, 10A, 16A)
-       Target:  0.5000A RMS -> calc amps:  0.5008A, stripW:  115.2W (exp:  115.0W, err: 0.174%) [PASS]
-       Target:  1.0000A RMS -> calc amps:  0.9999A, stripW:  230.0W (exp:  230.0W, err: 0.000%) [PASS]
-       Target:  2.0000A RMS -> calc amps:  2.0001A, stripW:  460.0W (exp:  460.0W, err: 0.000%) [PASS]
-       Target:  3.5355A RMS -> calc amps:  3.5359A, stripW:  813.2W (exp:  813.2W, err: 0.000%) [PASS]
-       Target:  5.0000A RMS -> calc amps:  4.9990A, stripW: 1149.8W (exp: 1150.0W, err: 0.017%) [PASS]
-       Target:  8.0000A RMS -> calc amps:  8.0001A, stripW: 1840.0W (exp: 1840.0W, err: 0.000%) [PASS]
-       Target: 10.0000A RMS -> calc amps:  9.9995A, stripW: 2299.9W (exp: 2300.0W, err: 0.004%) [PASS]
-       Target: 16.0000A RMS -> calc amps: 16.0003A, stripW: 3680.1W (exp: 3680.0W, err: 0.003%) [PASS]
-
-     [Test 5] Starved Sampling Guard (< 100 samples -> -1 -> stripW omitted)
-       Sample count N=  0 (< 100) -> amps: -1.0, stripW: None (OMITTED) [PASS]
-       Sample count N=  1 (< 100) -> amps: -1.0, stripW: None (OMITTED) [PASS]
-       Sample count N= 10 (< 100) -> amps: -1.0, stripW: None (OMITTED) [PASS]
-       Sample count N= 50 (< 100) -> amps: -1.0, stripW: None (OMITTED) [PASS]
-       Sample count N= 98 (< 100) -> amps: -1.0, stripW: None (OMITTED) [PASS]
-       Sample count N= 99 (< 100) -> amps: -1.0, stripW: None (OMITTED) [PASS]
-       Sample count N=100 (>=100) -> amps: 1.5399A, stripW: 354.2W (PUBLISHED) [PASS]
-       Sample count N=101 (>=100) -> amps: 1.5644A, stripW: 359.8W (PUBLISHED) [PASS]
-       Sample count N=500 (>=100) -> amps: 3.4779A, stripW: 799.9W (PUBLISHED) [PASS]
-
-     [Test 6] Adversarial Challenge: ADC Saturation / Clipping at 2.5V DC Offset
-       Peak:  5.0A ( 3.54A RMS) -> clipped:  0.0%, stripW:  813.2W (true:  813.2W, err:   0.0%) [clean]
-       Peak: 10.0A ( 7.07A RMS) -> clipped:  0.0%, stripW: 1626.4W (true: 1626.3W, err:   0.0%) [clean]
-       Peak: 12.0A ( 8.49A RMS) -> clipped:  1.5%, stripW: 1951.6W (true: 1951.6W, err:   0.0%) [CLIPPED!]
-       Peak: 15.0A (10.61A RMS) -> clipped: 20.5%, stripW: 2318.3W (true: 2439.5W, err:  -5.0%) [CLIPPED!]
-       Peak: 20.0A (14.14A RMS) -> clipped: 29.5%, stripW: 2821.6W (true: 3252.7W, err: -13.3%) [CLIPPED!]
-
-     [Test 7] Adversarial Challenge: Non-Linear Loads (3rd, 5th, 7th Harmonics)
-       Harmonic SMPS waveform: true RMS: 1.7029A -> calc: 1.7026A (err 0.021%), stripW: 391.6W (exp 391.7W) [PASS]
-
-     [Test 8] Adversarial Challenge: Mains Frequency Deviation over 100ms Window
-       Grid freq: 48.0 Hz -> calc amps: 3.5489A (leakage err: 0.379%), stripW: 816.3W
-       Grid freq: 49.0 Hz -> calc amps: 3.5620A (leakage err: 0.748%), stripW: 819.3W
-       Grid freq: 49.5 Hz -> calc amps: 3.5522A (leakage err: 0.471%), stripW: 817.0W
-       Grid freq: 50.0 Hz -> calc amps: 3.5359A (leakage err: 0.009%), stripW: 813.2W
-       Grid freq: 50.5 Hz -> calc amps: 3.5192A (leakage err: 0.463%), stripW: 809.4W
-       Grid freq: 51.0 Hz -> calc amps: 3.5084A (leakage err: 0.767%), stripW: 806.9W
-       Grid freq: 52.0 Hz -> calc amps: 3.5164A (leakage err: 0.541%), stripW: 808.8W
-       Grid freq: 60.0 Hz -> calc amps: 3.5355A (leakage err: 0.002%), stripW: 813.2W
-
-     [Test 9] Calibration Multiplier Range Verification (1.0 .. 500.0 A/V)
-       Cal:   1.0 A/V -> 1V RMS input ->   1.00 A (exp:   1.00 A, err: 0.001%) [PASS]
-       Cal:  15.0 A/V -> 1V RMS input ->  15.00 A (exp:  15.00 A, err: 0.001%) [PASS]
-       Cal:  30.0 A/V -> 1V RMS input ->  30.00 A (exp:  30.00 A, err: 0.001%) [PASS]
-       Cal:  66.6 A/V -> 1V RMS input ->  66.60 A (exp:  66.60 A, err: 0.001%) [PASS]
-       Cal: 500.0 A/V -> 1V RMS input -> 500.01 A (exp: 500.00 A, err: 0.001%) [PASS]
-
-     -----------------------------------------------------------------
-     VERDICT: ALL TESTS PASSED (APPROVE)
-     -----------------------------------------------------------------
-     ```
-
-   - **PlatformIO Compilation Verification**:
-     Command: `python -m platformio run -e esp32dev`
-     Result: `[SUCCESS] Took 21.14 seconds`. RAM: 8.2%, Flash: 41.8%.
+1. **Vulnerability 1 (`TypeError: floors.find is not a function`)**:
+   `const floors = building?.floors || [];` only falls back to `[]` when `building?.floors` is falsy (`null`, `undefined`, `""`, `0`). If an upstream API or state payload contains a truthy non-array (e.g. `{ floors: "loading" }`, `{ floors: {} }`, `{ floors: 123 }`), `floors` is not an array, and calling `floors.find(...)` throws an unhandled `TypeError`.
+2. **Vulnerability 2 (`Falsy 0 || 1 Level Coercion`)**:
+   `const targetLevel = Number(activeFloor) || 1;` coerces `Number(0)` (which is `0`) into `1` because `0` is falsy in JavaScript. In any building with a Level 0 (ground floor / basement level 0), calling `getActiveFloorAsset(bld, 0)` evaluates `targetLevel = 1` and matches Level 1 instead of Level 0.
 
 ---
 
 ## 2. Logic Chain
 
-1. **Analytical & Empirical Subtraction of DC Offset**:
-   - The algorithm computes variance $\sigma^2 = \frac{1}{N}\sum v_i^2 - \left(\frac{1}{N}\sum v_i\right)^2$.
-   - For any sample signal $v_i = V_{\text{DC}} + s_i$, where $s_i$ has zero mean over an integer number of cycles:
-     $\text{mean} = V_{\text{DC}} + \bar{s} = V_{\text{DC}}$.
-     $\frac{1}{N}\sum v_i^2 = V_{\text{DC}}^2 + 2 V_{\text{DC}}\bar{s} + \frac{1}{N}\sum s_i^2 = V_{\text{DC}}^2 + \overline{s^2}$.
-     $\sigma^2 = (V_{\text{DC}}^2 + \overline{s^2}) - (V_{\text{DC}})^2 = \overline{s^2}$.
-   - Tests 1 and 2 empirically verified that across DC biases from 0.0V to 3.2V (including 1.65V and 2.50V), the DC offset is completely eliminated. At zero current, `amps = 0.0f` and `stripW = 0.0W`. `fmax(0.0, ...)` safeguards against floating point round-off negatives.
+1. **Active Floor Hopping & Stepper Clamping Robustness (Empirically Verified)**:
+   - *Observation*: In Puppeteer E2E tests, rapid floor hopping (`1 -> 15 -> 7 -> 2 -> 14 -> 1`) and rapid clicking on `level-step-prev` (10x at L1) and `level-step-next` (15x past L15) yielded zero page errors, zero React crashes, and strictly maintained `data-testid="desktop-active-level"` within `[L1, L15]`.
+   - *Inference*: UI state management and bounding clamp logic in `App.jsx` and `GlobalMetricsPanel.jsx` are robust against rapid user actuation and boundary overflow/underflow.
 
-2. **Noise Floor Gating Threshold Verification**:
-   - The noise clamp `amps < 0.10 ? 0.0f : amps` triggers when calculated AC current is $< 0.10\text{ A}$.
-   - For an ACS712-30A calibration ($15.0\text{ A/V}$), 1 ADC count ($3.3 / 4095 \approx 0.806\text{ mV}$) represents $12.09\text{ mA}$.
-   - $0.10\text{ A}$ corresponds to $\sim 8.27$ counts RMS.
-   - Test 3 demonstrated that random Gaussian noise up to $\sigma = 8.0$ counts and low-level AC current of $0.07\text{ A RMS}$ clamp cleanly to `0.0A` / `0.0W`. Signals $\ge 0.10\text{ A}$ (e.g. $0.15\text{ A RMS}$) pass through accurately (`34.6W`).
+2. **Commercial Tower <-> Domestic Home Switching & DOM Synchronization (Empirically Verified)**:
+   - *Observation*: Toggling from commercial tower (15 floors) at Level 15 to domestic home (1 floor) clamped `activeFloor` to `1` (`L1`), rendered home asset ID `c699f27b-256e-5fd8-923a-84af1e06dadc` in `data-testid="active-asset"` and `data-testid="active-floor-asset"`, and prevented stepping past L1. Rapid back-and-forth oscillation between models produced zero page errors.
+   - *Inference*: Building model switching correctly synchronizes active floor assets and resets zone pointers without stale memory leaks.
 
-3. **Known AC Current Accuracy**:
-   - For a known 5A peak sine wave ($I_{\text{RMS}} = 5 / \sqrt{2} \approx 3.53553\text{ A}$ at $230\text{ V}$ mains):
-     $P = 3.53553 \times 230.0 = 813.17\text{ W}$, rounded to 1 decimal place = $813.2\text{ W}$.
-   - Both C++ host test and Python test confirm `amps = 3.536A` and `stripW = 813.2W` (error $< 0.01\%$).
-   - Full scale tests across 1A, 2A, 3.535A, 5A, 10A, 16A verified accuracy within $\pm 0.1\text{ W}$ of theory.
+3. **Hit-Test Transparency (Empirically Verified)**:
+   - *Observation*: The `data-testid="active-asset"` badge element was verified to have `pointer-events: none`, and mouse clicks to elements situated directly adjacent/underneath (such as `level-step-next`) executed unimpeded.
+   - *Inference*: The badge does not obstruct operator interactions.
 
-4. **Starved Sampling Omission Contract**:
-   - In `readStripAmps()`, `if (n < 100) return -1;`.
-   - In `readAndPublish()`, `if (stripAmps >= 0) { doc["stripW"] = ...; } else { Serial.println("[strip] ADC window starved -> omitted"); }`.
-   - Test 5 verified that for $N \in \{0, 1, 10, 50, 99\}$, `readStripAmps()` returns `-1.0f` and `doc.containsKey("stripW")` is `false`. The field is completely omitted from the MQTT JSON object rather than publishing fabricated zero watts.
+4. **Root Cause of Vulnerability 1 (Non-Array Floors)**:
+   - *Observation*: `getActiveFloorAsset({ floors: "loading" }, 1)` threw `TypeError: floors.find is not a function`.
+   - *Logic*: JavaScript's `||` operator only checks truthiness. When `building.floors` is an object, string, or number, `building?.floors || []` returns the truthy non-array. `Array.isArray(building?.floors)` is required to guarantee array type safety.
 
-5. **Adversarial Stress Scenarios**:
-   - **Harmonics / SMPS Loads**: In Test 7, a non-linear load with 60% 3rd harmonic and 30% 5th harmonic yielded true RMS $1.7029\text{ A}$ ($391.7\text{ W}$) vs algorithm $1.7026\text{ A}$ ($391.6\text{ W}$) — error of only **0.021%**. True-RMS correctly integrates non-sinusoidal harmonic energy.
-   - **Grid Frequency Deviation**: A 100ms window spans exactly 5 cycles at 50Hz and 6 cycles at 60Hz. Under grid fluctuations between 49.0Hz and 51.0Hz, spectral leakage error remains $< 0.8\%$.
-   - **ADC Rail Saturation / Clipping Risk**: When an unattenuated 5V ACS712 module (quiescent center 2.5V) is connected directly to a 3.3V ADC pin, the positive headroom is $3.3 - 2.5 = 0.8\text{ V}$, capping clean measurement at $12.0\text{ A}$ peak ($8.5\text{ A RMS}$, $\sim 1950\text{ W}$). Above 12A peak, positive half-cycles clip at 4095 counts, inducing up to -13.3% under-reporting at 20A peak.
+5. **Root Cause of Vulnerability 2 (Level 0 Falsy Coercion)**:
+   - *Observation*: When a building has `floors: [{ level: 0, name: 'Basement' }, { level: 1, name: 'Lobby' }]`, `getActiveFloorAsset(bld, 0)` returned Level 1.
+   - *Logic*: `Number(0)` returns `0`. `0 || 1` evaluates to `1`. Thus `targetLevel` becomes `1`, completely bypassing Level 0. Using `Number.isFinite(Number(activeFloor)) ? Number(activeFloor) : 1` properly preserves `0`.
 
 ---
 
 ## 3. Caveats
 
-1. **Hardware Voltage Attenuation Required for High Loads (> 8.5A RMS)**:
-   - If an unattenuated 5V ACS712 module is wired to GPIO 35, the 2.5V DC midpoint leaves only 0.8V positive headroom before 3.3V rail clipping. Loads exceeding 1950W (e.g. 2000W electric kettles or heaters) will saturate the ADC.
-   - **Mitigation Recommendation**: Ensure hardware deployment employs a 2/3 resistor divider (scaling 2.5V midpoint down to ~1.65V) or uses 3.3V-compatible Hall sensors, recalibrating `stripCalAPerV` accordingly.
-2. **Phase Angle / Power Factor Assumption**:
-   - `doc["stripW"]` computes Apparent/Active Power equivalent as $I_{\text{RMS}} \times V_{\text{mains}}$. Since voltage is assumed constant ($230\text{ V}$) without a concurrent AC voltage phase sensor, power factor is assumed to be 1.0 (Volt-Amperes = Watts). This matches the project specification for both `plugW` and `stripW`.
+1. **Review-Only Constraint Maintained**:
+   In strict accordance with the SWE / Teamwork Challenger constraints ("Review-only — do NOT modify implementation code", "Report any failures as findings — do NOT fix them yourself"), the implementation file `dashboard/src/buildingStore.js` was NOT modified by Challenger 1.
+2. **Current Static Building Geometry**:
+   The bundled models (`building-data.json` and `building-data-home.json`) currently define levels 1..15 and level 1. Vulnerability 2 affects any building model with basement or ground floor level 0 (e.g. BIM models exported with Level 0), while Vulnerability 1 affects transitional / malformed API responses.
 
 ---
 
 ## 4. Conclusion
 
-**Verdict**: **APPROVE**
+**Verdict**: `REQUEST_CHANGES`
 
-The ACS712 True-RMS power algorithm and `stripCalAPerV` configuration logic in `edge/esp32` are mathematically sound, robust, and fully compliant with project interface contracts:
-- The ~2.5V DC offset is completely subtracted by the variance formula $\sqrt{\frac{\sum v^2}{n} - \bar{v}^2}$.
-- Low-level noise below $0.10\text{ A}$ is cleanly gated to $0.0\text{ W}$.
-- Known AC currents calculate with $< 0.05\%$ error (e.g. 5A peak $\rightarrow$ 3.536A RMS, 813.2W).
-- Sampling starvation ($N < 100$) strictly triggers field omission in MQTT JSON telemetry.
-- Harmonic non-linear loads are measured with True-RMS fidelity.
+Worker M1 successfully implemented the core requirements of Milestone 1:
+- 3D floor switcher active asset badge is mounted with `data-testid="active-asset"` and `data-testid="active-floor-asset"`.
+- Rapid floor transitions and model switches update the DOM accurately and re-frame the 3D camera without unhandled exceptions.
+- Hit-test transparency (`pointer-events: none`) is preserved.
+
+However, two empirical edge-case vulnerabilities in `dashboard/src/buildingStore.js` must be addressed:
+1. **Uncaught TypeError on Non-Array Floors**: Guard `building?.floors` with `Array.isArray`.
+2. **Falsy Coercion Bypassing Level 0**: Replace `Number(activeFloor) || 1` with a finite-check so `activeFloor = 0` resolves correctly to Level 0.
+
+### Recommended Fix for Worker M1
+In `dashboard/src/buildingStore.js`, replace lines 50–54:
+```javascript
+export function getActiveFloorAsset(building, activeFloor) {
+  const floors = Array.isArray(building?.floors) ? building.floors : [];
+  const targetLevel = Number.isFinite(Number(activeFloor)) ? Number(activeFloor) : 1;
+  const floor = floors.find((f) => f.level === targetLevel) || floors[0];
+  if (!floor) return null;
+  const primaryZone = floor.zones?.[0];
+  return {
+    level: floor.level,
+    name: floor.name || `Level ${floor.level}`,
+    assetId: primaryZone?.bim_asset_id || `floor-asset-${floor.level}`,
+    zoneCount: floor.zones?.length || 0,
+    elevation: typeof floor.elevation === 'number' ? floor.elevation : 0,
+    height: typeof floor.height === 'number' ? floor.height : 4.0,
+  };
+}
+```
 
 ---
 
 ## 5. Verification Method
 
-To independently reproduce and verify this assessment:
+To reproduce and verify these challenge results independently:
 
-1. **Execute Host C++ Adversarial Suite**:
-   ```powershell
-   cd d:\ECON1\econ\edge\esp32
-   g++ -std=c++17 -Wall -I .pio/libdeps/esp32dev/ArduinoJson/src -I src -I test test/host_strip_power_test.cpp -o test/host_strip_power_test.exe
-   .\test\host_strip_power_test.exe
+1. **Run Adversarial Challenge Suite**:
+   ```bash
+   cd dashboard
+   node verify_adversarial_floor_switcher.js
    ```
-   *Expected Output*: Output terminates with `PASSED (0 failures)`.
+   *Expected Output*: Displays 12 passed tests and the 2 reproducible vulnerability failures on non-array floors and Level 0 coercion.
 
-2. **Execute Python Statistical Verification Harness**:
-   ```powershell
-   cd d:\ECON1\econ\edge\esp32
-   python test/verify_strip_power.py
+2. **Verify Worker M1 Baseline Test Suite**:
+   ```bash
+   cd dashboard
+   node verify_webserial_floor_switcher.js
    ```
-   *Expected Output*: All 9 test groups report `[PASS]` and terminate with `VERDICT: ALL TESTS PASSED (APPROVE)`.
+   *Expected Output*: 11 Passed, 0 Failed.
 
-3. **Verify PlatformIO Target Compilation**:
-   ```powershell
-   cd d:\ECON1\econ\edge\esp32
-   python -m platformio run -e esp32dev
-   ```
-   *Expected Output*: `[SUCCESS]`.
+3. **Invalidation Condition**:
+   Once Worker M1 updates `dashboard/src/buildingStore.js` with `Array.isArray(building?.floors)` and `Number.isFinite(Number(activeFloor)) ? Number(activeFloor) : 1`, re-running `node verify_adversarial_floor_switcher.js` will produce 14 Total | 14 Passed | 0 Failed.

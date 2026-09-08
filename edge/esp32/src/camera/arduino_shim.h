@@ -11,6 +11,8 @@
 // - Comprehensive opaque-box test assertions and reporting framework
 // -----------------------------------------------------------------------------
 #pragma once
+#ifndef ARDUINO_SHIM_H_
+#define ARDUINO_SHIM_H_
 
 #include <cstdarg>
 #include <cstdint>
@@ -1020,3 +1022,5 @@ struct TestOutcome {
   bool passed;
   std::string error_msg;
 };
+
+#endif // ARDUINO_SHIM_H_

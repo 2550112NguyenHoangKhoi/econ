@@ -37,7 +37,8 @@ static bool apply(const char* json) {
   StaticJsonDocument<512> doc;
   if (deserializeJson(doc, json)) return false;
   bool reset = false;
-  return cfgApplyJson(doc, reset);
+  bool hwChanged = false;
+  return cfgApplyJson(doc, reset, hwChanged);
 }
 
 int main() {
@@ -100,7 +101,7 @@ int main() {
   check(gCfg.cfgRev == rev,                     "replay does not bump cfgRev (broker redelivers on every reconnect)");
 
   printf("node_config: state document\n");
-  StaticJsonDocument<640> st;
+  StaticJsonDocument<1536> st;
   cfgSerializeState(st);
   std::string overrides;
   for (JsonVariant v : st["overrides"].as<JsonArray>()) overrides += std::string(v.as<const char*>()) + " ";

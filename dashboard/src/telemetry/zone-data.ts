@@ -79,8 +79,13 @@ supplyReal():boolean {
   return offset ? !!this.bb!.readInt8(this.bb_pos + offset) : false;
 }
 
+stripW():number {
+  const offset = this.bb!.__offset(this.bb_pos, 26);
+  return offset ? this.bb!.readFloat32(this.bb_pos + offset) : 0.0;
+}
+
 static startZoneData(builder:flatbuffers.Builder) {
-  builder.startObject(11);
+  builder.startObject(12);
 }
 
 static addId(builder:flatbuffers.Builder, idOffset:flatbuffers.Offset) {
@@ -127,12 +132,16 @@ static addSupplyReal(builder:flatbuffers.Builder, supplyReal:boolean) {
   builder.addFieldInt8(10, +supplyReal, +false);
 }
 
+static addStripW(builder:flatbuffers.Builder, stripW:number) {
+  builder.addFieldFloat32(11, stripW, 0.0);
+}
+
 static endZoneData(builder:flatbuffers.Builder):flatbuffers.Offset {
   const offset = builder.endObject();
   return offset;
 }
 
-static createZoneData(builder:flatbuffers.Builder, idOffset:flatbuffers.Offset, temp:number, occupants:number, load:number, lightsOn:boolean, humidity:number, co2:number, plugW:number, plugShed:boolean, supplyC:number, supplyReal:boolean):flatbuffers.Offset {
+static createZoneData(builder:flatbuffers.Builder, idOffset:flatbuffers.Offset, temp:number, occupants:number, load:number, lightsOn:boolean, humidity:number, co2:number, plugW:number, plugShed:boolean, supplyC:number, supplyReal:boolean, stripW:number = 0.0):flatbuffers.Offset {
   ZoneData.startZoneData(builder);
   ZoneData.addId(builder, idOffset);
   ZoneData.addTemp(builder, temp);
@@ -145,6 +154,7 @@ static createZoneData(builder:flatbuffers.Builder, idOffset:flatbuffers.Offset, 
   ZoneData.addPlugShed(builder, plugShed);
   ZoneData.addSupplyC(builder, supplyC);
   ZoneData.addSupplyReal(builder, supplyReal);
+  ZoneData.addStripW(builder, stripW);
   return ZoneData.endZoneData(builder);
 }
 }

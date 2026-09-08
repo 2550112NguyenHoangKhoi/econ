@@ -1,240 +1,278 @@
-# Handoff Report: Milestone M1 (Hardware Section Expansion & Manual Controls)
+# Handoff Report: Milestone M1 (UI Bug Fixes & Hardware Alignment)
 
 **Agent**: `teamwork_preview_worker_m1`  
 **Working Directory**: `/Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_worker_m1`  
 **Handoff Type**: Hard (Milestone M1 complete)  
-**Date**: 2026-09-06T15:20:00Z  
+**Date**: 2026-09-08T05:30:00Z  
+**Parent Agent**: `94b1bad7-43b4-4ef2-a84c-6c5e8cbf0b7f` (Project Orchestrator)
 
 ---
 
 ## 1. Observation
 
 ### 1.1 Requirements & Assigned Files
-As specified in `DISPATCH.md` and `PROJECT.md` (Feature 1, 2, 3, 4):
-1. Expose the IR Blaster in the Hardware Inspector dashboard (`dashboard/src/HardwareInspector.jsx`) with protocol selector, frequency/bits, hex code input, and manual send button.
-2. Add full library support and comprehensive manual controls for all edge devices (trigger IR blaster, toggle plugs/relays, override VAV dampers, simulate CPU strain).
-3. Update Go backend command validation (`server/main.go`) to accept `IR_SEND:`, `PLUG_ON`, `PLUG_OFF`, `DAMPER=`, `VAV_SET:`, `CPU_STRAIN:`, `CONFIG:`, compounds, and verbs, update the digital twin state immediately in `applyCommandToZone` (`server/simulation/engine.go`), and route to edge nodes via MQTT (`econ/commands/<topic>`).
-4. Write and verify unit tests confirming command routing and UI tests for manual controls.
+As specified in `DISPATCH.md` and `PROJECT.md` for Milestone 1 (Feature 1, Feature 2, Feature 3):
+1. **3D floor switcher active asset state & camera update**:
+   - In `dashboard/src/buildingStore.js`: Implement and export `getActiveFloorAsset(building, activeFloor)` returning `{ level, name, assetId, zoneCount, elevation, height }`.
+   - In `dashboard/src/BuildingModel.jsx`: Fix `initialOverview` dependency array to include `[activeFloor, safeArea, currentBld]`; ensure `DynamicControls` camera framing re-centers and updates smoothly when `activeFloor` changes.
+   - In `dashboard/src/App.jsx`: Derive `activeFloorAsset` using `getActiveFloorAsset(currentBuilding, activeFloor)`; expose `data-testid="active-asset"` and `data-testid="active-floor-asset"` in the DOM with `data-asset-id={activeFloorAsset?.assetId}` and visible text reflecting active level and asset name/ID; ensure clicking floor buttons (`level-btn-${lvl}`, steppers `level-step-prev`, `level-step-next`) correctly updates `activeFloor` and the active asset state.
+2. **Logs panel streaming stability & memory limit**:
+   - In `dashboard/src/TelemetryLogs.jsx`: Fix React key collision by using a monotonic sequence counter combined with high-resolution timestamps (`id: `log-${id}-${ev.key}-${Date.now()}-${++logSeq}``); add safe snapshot with null/undefined guards so missing or malformed zone data never throws `TypeError`; reset `prev.current` baseline when the building model switches.
+   - In `dashboard/src/HardwareInspector.jsx`: Add bounded sliding window buffer to the serial log (`setLog(l => { const next = l + value; return next.length > 50000 ? next.slice(-40000) : next; })`).
+3. **Single-relay hardware alignment**:
+   - In `dashboard/src/HardwareInspector.jsx`: Align with the physical single-relay hardware configuration: GPIO 26 is the Smart Plug Relay (`pinPlugRelay`), controlled by `PLUG_ON` / `PLUG_OFF`; clearly badge the legacy Lighting Relay (GPIO 23) as virtual / unpopulated (`pinLightingRelay = 255`); update default hardware library pin definitions: `smart_plug: GPIO 26`, `ir_blaster: GPIO 25`, `lighting: Unused (255)`.
+4. **Verification & Testing**:
+   - Implement automated test script `dashboard/verify_webserial_floor_switcher.js` asserting:
+     - 3D floor switcher updates active asset state (`data-testid="active-asset"` matches selected floor level and BIM asset ID).
+     - Logs panel streams high-frequency updates without React key collisions or crashes.
+   - Run `npm run build` in `dashboard/` and confirm exit code 0 without errors.
+   - Run test scripts and confirm 100% pass.
 
-### 1.2 Code Modifications
+### 1.2 Direct Code Observations & Changes
 
-#### 1.2.1 Go Backend Command Validation (`server/main.go`)
-- **Lines 343–384**: Expanded `isSupportedCommand(cmd string) bool` to validate:
-  - `IR_SEND:<protocol>:<hex>:<bits>`
-  - `PLUG_ON` and `PLUG_OFF`
-  - `DAMPER=<val>` and `VAV_SET:<val>`
-  - `CPU_STRAIN:HIGH` and `CPU_STRAIN:NORMAL`
-  - `CONFIG:<json>`
-  - `LIGHTS_ON` and `LIGHTS_OFF` (and `LIGHTS_` prefix)
-  - `SETPOINT=<val>` and `HVAC_SET:<val>`
-  - Semicolon-delimited compound commands (e.g. `LIGHTS_ON;SETPOINT=22.0`, `PLUG_OFF;CPU_STRAIN:HIGH`)
-  - Canonical verbs: `turn_off_ac`, `cool`, `purge`, `precool`, `reset`
-- **Lines 387–420**: Updated `commandHandler`:
-  - Added support for `device_id` and `deviceId` JSON fields as fallbacks for `zone` (adhering to PROJECT.md Interface Contract 1: `POST /api/command {"device_id": "esp32-zone-01", "command": "IR_SEND:..."}`).
-  - Returns HTTP 200 OK with JSON response payload:
-    ```json
-    {
-      "status": "ok",
-      "message": "command dispatched"
-    }
-    ```
-
-#### 1.2.2 Backend Simulation Engine & Digital Twin State (`server/simulation/engine.go`)
-- **Lines 140–145**: Added twin state fields to `ZoneSim`:
-  ```go
-  DamperPos float64 // manual or actuated damper position in [0.0, 1.0]
-  CpuStrain bool    // test flag: forced CPU strain offload fallback active
+#### 1.2.1 `dashboard/src/buildingStore.js`
+- **Lines 50–64**: Implemented and exported pure function `getActiveFloorAsset`:
+  ```javascript
+  export function getActiveFloorAsset(building, activeFloor) {
+    const floors = building?.floors || [];
+    const targetLevel = Number(activeFloor) || 1;
+    const floor = floors.find((f) => f.level === targetLevel) || floors[0];
+    if (!floor) return null;
+    const primaryZone = floor.zones?.[0];
+    return {
+      level: floor.level,
+      name: floor.name || `Level ${floor.level}`,
+      assetId: primaryZone?.bim_asset_id || `floor-asset-${floor.level}`,
+      zoneCount: floor.zones?.length || 0,
+      elevation: typeof floor.elevation === 'number' ? floor.elevation : 0,
+      height: typeof floor.height === 'number' ? floor.height : 4.0,
+    };
+  }
   ```
-- **Lines 3200–3245**: Updated `PublishCommand(action, zoneRef string)`:
-  - When `DAMPER=` or `VAV_SET:` is dispatched, resolves `VavSim` for the targeted zone/vav via `e.findVavForZone(zoneRef, nil)` and synchronizes `vav.DamperPos`, `vav.Position`, `vav.TargetDamperPos`, `vav.TargetPosition`, and `vav.Damper`.
-  - Dispatches normalized commands to MQTT topic `econ/commands/<topic>`.
-- **Lines 3247–3305**: Updated `applyCommandToZone(z *ZoneSim, cmd string)`:
-  - `PLUG_ON` -> sets `z.PlugShed = false`
-  - `PLUG_OFF` -> sets `z.PlugShed = true`
-  - `CPU_STRAIN:HIGH` -> sets `z.CpuStrain = true`
-  - `CPU_STRAIN:NORMAL` -> sets `z.CpuStrain = false`
-  - `DAMPER=` and `VAV_SET:` -> parses float (handles both ratio e.g. 0.75 and percentage e.g. 75%), clamps to `[0.0, 1.0]`, sets `z.DamperPos`
-  - `IR_SEND:<proto>:<hex>:<bits>` -> sets `z.DetectedProtocol` to the extracted protocol and `*z.IrState` to the command string
-- **Lines 3307–3330**: Updated `normalizeOverride` to pass `IR_SEND:`, `PLUG_`, `DAMPER=`, `VAV_SET:`, and `CPU_STRAIN:` through verbatim without mutation.
 
-#### 1.2.3 Frontend Hardware Inspector (`dashboard/src/HardwareInspector.jsx`)
-- Added `IR_PROTOCOLS` catalog: `COOLIX`, `ELECTRA_AC`, `DAIKIN`, `PANASONIC`, `MITSUBISHI`, `LG`, `SAMSUNG`, `TOSHIBA`, `GREE`, `NEC`, `SONY`, `RC5`, `RC6`.
-- Added `HARDWARE_LIBRARY` specifications table listing compiled GPIO pin assignments, bus types, build flags, and functions:
-  - HVAC IR Blaster: GPIO 19 (`USE_IR_AC`, `IRremoteESP8266`)
-  - Smart Plug Relay: GPIO 25 (`USE_PLUG`)
-  - Lighting Relay: GPIO 23 (`RELAY_PIN`)
-  - ACS712 Power Strip Meter: GPIO 33 ADC1_CH5 (`USE_STRIP`)
-  - SCT-013 Plug CT Clamp: GPIO 34 ADC1_CH6 (`USE_PLUG`)
-  - SCT-013 AC CT Clamp: GPIO 35 ADC1_CH7 (`USE_AC_CLAMP`)
-  - DS18B20 Supply Air Temp: GPIO 26 1-Wire (`USE_SUPPLY_TEMP`)
-  - SHT30 & ACD1200 CO2: GPIO 21 (SDA), GPIO 22 (SCL) I2C (`USE_SHT30, USE_CO2, USE_LUX`)
-  - PIR & mmWave Radar: GPIO 18 (`USE_PIR, USE_MMWAVE`)
-- Created `DeviceControls` component:
-  - IR Blaster panel: protocol dropdown (`data-testid="ir-protocol-select"`), hex code input (`data-testid="ir-hex-input"`), bits input (`data-testid="ir-bits-input"`), kHz frequency input (`data-testid="ir-freq-input"`), "Transmit IR Code" button (`data-testid="ir-send-btn"`), and quick HVAC buttons (`SETPOINT=...`, `HVAC_SET:OFF`, `cool`, `purge`).
-  - Relay actuation panel: Sockets ON / Sockets OFF buttons (`PLUG_ON`, `PLUG_OFF`), Lights ON / Lights OFF buttons (`LIGHTS_ON`, `LIGHTS_OFF`).
-  - VAV Damper modulation panel: Slider (`data-testid="damper-slider"`), number input (`data-testid="damper-input"`), preset buttons (15% Min Vent, 50% Nominal, 100% Full Open), and "Apply Damper" button (`data-testid="damper-send-btn"`).
-  - CPU Strain simulation panel: "Simulate High Strain" (`CPU_STRAIN:HIGH`) and "Clear Strain (Normal)" (`CPU_STRAIN:NORMAL`).
-  - Collapsible device library & pin map specs table.
-  - Interactive status feedback banner (`data-testid="command-feedback-banner"`) indicating dispatch success/error and MQTT routing.
-- Integrated `DeviceControls` directly inside each `DeviceCard` (auto-targeted to `dev.zone || dev.id`).
-- Added `'controls'` to the inspector tabs:
-  `['devices', 'controls', 'events', 'quality', 'forecast', 'sustainability', 'usb', 'config']`.
-- Created `ControlsTab` with target zone dropdown and custom zone input, allowing manual hardware control across any zone even when 0 physical devices are connected.
-- In `tab === 'devices'`, when no devices are connected, renders `ControlsTab` so manual controls are immediately available.
+#### 1.2.2 `dashboard/src/BuildingModel.jsx`
+- **Lines 615–644**: Enhanced `DynamicControls`:
+  - When `overview` or `camera` changes, if `!isZoomed`, smoothly updates `targetCameraPos` and `targetLookAt` and triggers `animating = true`.
+  - Added `activeFloor` to the target position calculation dependencies `[isZoomed, targetX, targetY, targetZ, overview, building, activeFloor]`.
+- **Lines 731–735**: Fixed `initialOverview` dependency array from `[currentBld]` to `[activeFloor, safeArea, currentBld]`:
+  ```javascript
+  const initialOverview = useMemo(() => {
+    const aspect = (typeof window !== 'undefined' ? window.innerWidth / Math.max(1, window.innerHeight) : 1.6);
+    return towerFraming(activeFloor, aspect, safeArea, currentBld);
+  }, [activeFloor, safeArea, currentBld]);
+  ```
 
-### 1.3 Test Artifacts & Execution Results
+#### 1.2.3 `dashboard/src/App.jsx`
+- **Line 6**: Imported `getActiveFloorAsset` from `./buildingStore`.
+- **Lines 336–339**: Derived `activeFloorAsset`:
+  ```javascript
+  const activeFloorAsset = useMemo(
+    () => getActiveFloorAsset(currentBuilding, activeFloor),
+    [currentBuilding, activeFloor]
+  );
+  ```
+- **Lines 1494–1522**: Exposed `data-testid="active-asset"` and `data-testid="active-floor-asset"` in DOM:
+  ```jsx
+  {/* Active Floor Asset Badge */}
+  <div
+    data-testid="active-asset"
+    data-asset-id={activeFloorAsset?.assetId || ''}
+    style={{
+      position: 'absolute',
+      bottom: '7.6rem',
+      right: rightPanelWidth + 24 + 12,
+      zIndex: 14,
+      display: 'flex',
+      alignItems: 'center',
+      gap: '4px',
+      background: 'rgba(10, 16, 28, 0.85)',
+      padding: '4px 8px',
+      borderRadius: '8px',
+      border: '1px solid var(--border-glass)',
+      backdropFilter: 'blur(12px)',
+      boxShadow: '0 4px 20px rgba(0, 0, 0, 0.4)',
+      fontSize: '11px',
+      color: 'var(--accent-blue)',
+      fontFamily: 'monospace',
+      pointerEvents: 'none',
+    }}
+  >
+    <span data-testid="active-floor-asset" data-asset-id={activeFloorAsset?.assetId || ''}>
+      {activeFloorAsset?.name || `Level ${activeFloor}`} ({activeFloorAsset?.assetId || ''})
+    </span>
+  </div>
+  ```
+  - Positioned above `desktop-level-toggle` with `pointerEvents: 'none'` so it does not overlap or block mouse click hit tests to `building-model-toggle` or floor stepper buttons.
 
-1. **Backend Unit Tests (`server/command_override_test.go`)**:
-   - `TestManualCommandOverrides_AllEdgeDevices`:
-     - `IR_SEND command routing and state update`: PASS
-     - `PLUG_OFF sheds sockets and dispatches MQTT`: PASS
-     - `PLUG_ON restores sockets and dispatches MQTT`: PASS
-     - `DAMPER=0.65 updates twin state and VAV actuator`: PASS
-     - `VAV_SET:40 handles percentage scale`: PASS
-     - `CPU_STRAIN:HIGH toggles strain fallback`: PASS
-     - `CPU_STRAIN:NORMAL clears strain fallback`: PASS
-     - `device_id payload alias`: PASS
-     - `Compound command: PLUG_OFF;CPU_STRAIN:HIGH`: PASS
-     - `Unsupported command rejected`: PASS
-     - `Manual override sets 15-minute latch`: PASS
-   - Result: `PASS ok econ 0.422s`.
+#### 1.2.4 `dashboard/src/TelemetryLogs.jsx`
+- **Line 20**: Declared monotonic sequence counter `let logSeq = 0;`.
+- **Lines 26–36**: Replaced fragile `snapshot(z)` with `safeSnapshot(z)` featuring comprehensive guards:
+  ```javascript
+  function safeSnapshot(z) {
+    if (!z || typeof z !== 'object') return null;
+    return {
+      alert: z.alert === true ? 'ALARM' : z.alert === 'REMEDIATING' ? 'REMEDIATING' : 'ok',
+      lightsOn: z.lightsOn !== false,
+      plugShed: Boolean(z.plugShed),
+      setpoint: round1(typeof z.setpoint === 'number' ? z.setpoint : 24.0),
+      occupied: Boolean(z.occupancy && Number(z.occupancy) > 0),
+    };
+  }
+  ```
+- **Lines 57–65**: Added baseline re-baselining upon building model switch:
+  ```javascript
+  const buildingId = simData?.buildingId || (simData?.zones ? Object.keys(simData.zones).length : 0);
+  const prevBuildingRef = useRef(buildingId);
 
-2. **Full Root Server Test Suite (`go test -count=1 .` in `server/`)**:
-   - Passed with exit code 0 (`ok econ 123.175s`).
+  useEffect(() => {
+    if (buildingId && prevBuildingRef.current !== buildingId) {
+      prev.current = null;
+      prevBuildingRef.current = buildingId;
+    }
+  }, [buildingId]);
+  ```
+- **Line 89**: Constructed monotonic unique event keys:
+  ```javascript
+  id: `log-${id}-${ev.key}-${Date.now()}-${++logSeq}`,
+  ```
 
-3. **Simulation Package Test Suite (`go test -count=1 ./simulation/...` in `server/`)**:
-   - Passed with exit code 0 (`ok econ/simulation 8.934s`).
+#### 1.2.5 `dashboard/src/HardwareInspector.jsx`
+- **Lines 120–126**: Updated `DEFAULT_HARDWARE_LIBRARY` default pin definitions:
+  ```javascript
+  { id: 'ir_blaster', device: 'HVAC IR Blaster', pin: 'GPIO 25', bus: 'PWM / IRremoteESP8266', flag: 'USE_IR_AC', desc: 'Commands split-unit ACs (Coolix, Electra, Daikin, etc.) via 940nm IR emitter' },
+  { id: 'smart_plug', device: 'Smart Plug Relay', pin: 'GPIO 26', bus: 'Digital Output', flag: 'USE_PLUG', desc: 'Sheds non-critical socket circuits after-hours (APLC automated plug load control)' },
+  { id: 'lighting', device: 'Lighting Relay', pin: 'Unused (255)', bus: 'Digital Output', flag: 'RELAY_PIN', desc: 'Legacy/unpopulated lighting relay (virtual, pinLightingRelay = 255)' },
+  ```
+- **Lines 420–468**: Updated Actuators panel badging and layout:
+  - Smart Plug Circuit: `Smart Plug Circuit (GPIO 26 / APLC Sockets)`, badge: `PHYSICAL RELAY (pinPlugRelay = 26)`.
+  - Lighting Relay: `Lighting Relay (GPIO 23 / Solid State)`, badge: `VIRTUAL / UNPOPULATED (pinLightingRelay = 255)`.
+- **Lines 1017–1075**: Implemented bounded sliding window buffer for serial logging in `UsbTab`:
+  ```javascript
+  const appendLog = (chunk) => {
+    setLog((l) => {
+      const next = l + chunk;
+      return next.length > 50000 ? next.slice(-40000) : next;
+    });
+  };
+  ...
+  setLog(l => { const next = l + value; return next.length > 50000 ? next.slice(-40000) : next; });
+  ```
 
-4. **Tier 1 Feature Tests (`e2e_tests/tier1_feature_test.go`)**:
-   - `TestTier1_F1_HardwareInspectorManualControls`:
-     - `1.1_IR_Blaster_Fields_And_Manual_Actuation`: PASS
-     - `1.2_Smart_Plug_Relay_Actuation`: PASS
-     - `1.3_Lighting_Relay_Actuation`: PASS
-     - `1.4_VAV_Damper_Manual_Modulation`: PASS
-     - `1.5_Edge_CPU_Strain_Simulation_Controls`: PASS
-   - Result: `PASS ok econ/e2e_tests 0.219s`.
-
-5. **Tier 4 Operational Scenario Tests (`e2e_tests/tier4_scenarios_test.go`)**:
-   - `TestTier4_FullBuildingOperationsDayInLife` (Phase 2 Hardware Inspector Manual Actuation & Phase 5 Peak Demand Mitigation):
-   - Result: `PASS ok econ/e2e_tests 3.494s`.
-
-6. **Firmware Host Tests (`edge/esp32/test/run_host_tests.sh`)**:
-   - All 6 test suites passed with exit code 0:
-     - Basic Math & Empirical Fuzzing (Denoise, Payload, CPU Strain Fallback, Strip Power): PASS
-     - Node Config Unit Tests (`host_config_test`): PASS
-     - Dual-Mode Comm Unit & Adversarial Tests: PASS
-     - Main System Integration & Strict Isolation Tests: PASS
-     - Challenger 1 & 2 Stress & Failover Tests: PASS
-     - Challenger 2 Full Adversarial Stress Suite: PASS
-     - ML Pipeline & OV7670 Camera Driver Tests: PASS
-
-7. **Frontend Build Verification (`npm run build` in `dashboard/`)**:
-   - Built Vite production bundle with 0 errors in 4.38s.
-
-8. **Headless Frontend Verification (`dashboard/verify_hardware_inspector_headless.js`)**:
-   - 12/12 checks passed with 0 failures:
-     - Page title & header rendering
-     - Tab bar including `controls`
-     - IR Blaster protocol selector catalog
-     - IR Blaster hex, bits, frequency, send button
-     - HVAC quick controls (setpoint, power, presets)
-     - Smart plug buttons (PLUG_ON, PLUG_OFF)
-     - Lighting relay buttons (LIGHTS_ON, LIGHTS_OFF)
-     - VAV damper slider and numeric inputs
-     - CPU strain offload buttons (CPU_STRAIN:HIGH, CPU_STRAIN:NORMAL)
-     - Target zone selector and custom zone input
-     - Hardware library GPIO pin specifications (GPIO 19, 25, 23, 33, 34, 35, 26, 21, 22, 18)
-     - Firmware build flags audit (`USE_IR_AC`, `USE_PLUG`, `USE_STRIP`, `USE_AC_CLAMP`, `USE_SUPPLY_TEMP`, `USE_SHT30`)
-
-9. **Frontend Unit Test (`dashboard/src/__tests__/HardwareInspector.test.jsx`)**:
-   - Created unit test suite verifying component export, command validation, and protocol catalog.
+#### 1.2.6 `dashboard/verify_webserial_floor_switcher.js`
+- Authored 360-line automated test suite verifying:
+  - `getActiveFloorAsset` resolves correct BIM assets across all 15 tower floors, domestic home, and out-of-range fallbacks.
+  - Single-relay hardware alignment (GPIO 26 smart plug, GPIO 25 IR blaster, GPIO 23 unpopulated lighting) and 50,000 char serial log sliding buffer.
+  - Telemetry logs monotonic keys and zero collisions across 500 sub-second burst events.
+  - Puppeteer DOM interaction testing: `[data-testid="active-asset"]` initial mounting, dynamic mutation on clicking `[data-testid="level-btn-2"]`, `[data-testid="level-btn-4"]`, and stepper controls (`level-step-next` / `level-step-prev`), and stable mounting of `[data-testid="tab-logs"]` EVENT LOG.
 
 ---
 
 ## 2. Logic Chain
 
-1. **Actuation Command Validation**:
-   - `server/main.go:isSupportedCommand` previously only checked for `LIGHTS_`, `SETPOINT=`, `HVAC_SET:`, and 5 high-level verbs (`turn_off_ac`, `cool`, `purge`, `precool`, `reset`).
-   - Any manual actuation command from the UI attempting to send `IR_SEND:...`, `PLUG_ON`, `PLUG_OFF`, `DAMPER=...`, `VAV_SET:...`, or `CPU_STRAIN:...` was rejected with HTTP 400 Bad Request ("unsupported command").
-   - Expanding `isSupportedCommand` to permit these commands allows the REST API layer to accept manual controls for all edge devices.
-   - Supporting semicolon-separated compounds enables multi-device macro commands (e.g. `LIGHTS_ON;SETPOINT=22.0;IR_SEND:...`).
-   - Supporting `device_id` and `deviceId` in addition to `zone` guarantees compatibility with PROJECT.md Interface Contract 1.
+1. **Active Floor Asset Derivation & State Exposure**:
+   - *Observation*: Previously, selecting a floor level in `GlobalMetricsPanel` or via `level-step-prev`/`level-step-next` mutated `activeFloor`, but no DOM attribute or component state reflected the floor's BIM asset identity. `BuildingModel.jsx` froze `initialOverview` via stale `[currentBld]` dependencies.
+   - *Inference*: By defining `getActiveFloorAsset(building, activeFloor)` returning `{ level, name, assetId, zoneCount, elevation, height }`, binding it into `App.jsx`, and exposing `data-testid="active-asset"` and `data-testid="active-floor-asset"` with `data-asset-id={activeFloorAsset?.assetId}`, tests and operators can deterministically observe active asset synchronization.
+   - *Inference*: By adding `[activeFloor, safeArea, currentBld]` to `initialOverview` and ensuring `DynamicControls` triggers smooth camera lerping when `activeFloor` changes, the 3D perspective updates smoothly whenever a floor is selected.
 
-2. **Digital Twin State Reflection**:
-   - In `server/simulation/engine.go`, `PublishCommand` resolves the zone, latches a 15-minute human-in-the-loop override (`z.OverrideUntil = time.Now().Add(15 * time.Minute)`), normalizes the command, applies it to the digital twin state via `applyCommandToZone`, and publishes to `econ/commands/<topic>`.
-   - By updating `applyCommandToZone` to mutate `z.PlugShed`, `z.DamperPos`, `z.CpuStrain`, `z.DetectedProtocol`, and `z.IrState`, the digital twin immediately mirrors the manual veto during the latch period.
-   - For VAV dampers, `PublishCommand` also updates the corresponding `VavSim` (`vav.DamperPos`, `vav.Position`, `vav.TargetDamperPos`, `vav.TargetPosition`, `vav.Damper`), maintaining mathematical consistency across the Hardy Cross airflow solver.
+2. **Telemetry Logs Panel Stabilization**:
+   - *Observation*: `TelemetryLogs.jsx` created keys using `${id}:${ev.key}:${stamp}:${now[ev.key]}` where `stamp` was formatted with `toLocaleTimeString` (1-second granularity). Under 10–30 Hz WebSocket telemetry bursts, duplicate keys were generated, crashing React's reconciliation engine. Furthermore, raw property access `snapshot(z)` threw `TypeError` if `simData.zones` had null or missing keys.
+   - *Inference*: Adding a monotonic counter `++logSeq` combined with `Date.now()` guarantees that every event ID is mathematically unique across any burst rate. Implementing `safeSnapshot(z)` with null/undefined checking prevents runtime crashes on malformed frames, and clearing `prev.current` upon building switch discards stale zone baselines.
 
-3. **Frontend Manual Controls**:
-   - In `dashboard/src/HardwareInspector.jsx`, `DeviceCard` was previously read-only.
-   - Adding `DeviceControls` exposes all edge hardware capabilities:
-     - The IR Blaster is exposed with a protocol selector (13 protocols including Coolix, Electra, Daikin, Panasonic, etc.), frequency (kHz), bits (e.g. 32), hex code input, and a manual send button.
-     - Actuators for smart plugs (`PLUG_ON`, `PLUG_OFF`), lighting relays (`LIGHTS_ON`, `LIGHTS_OFF`), VAV damper overrides (slider, numeric input, presets), and compute offload testing (`CPU_STRAIN:HIGH`, `CPU_STRAIN:NORMAL`) are fully accessible.
-     - The hardware library card documents all compiled GPIO pins and build flags from `edge/esp32/src/main.cpp`.
-   - Adding the `controls` tab enables testing and commanding any target zone/device directly from the UI even before physical hardware publishes telemetry.
+3. **Memory Leak Prevention in WebSerial Logs**:
+   - *Observation*: In `HardwareInspector.jsx:UsbTab`, `setLog(l => l + value)` appended chunks to an unbounded string at 115200 baud, causing browser memory usage to climb indefinitely.
+   - *Inference*: Enforcing `next.length > 50000 ? next.slice(-40000) : next` creates a strict sliding window ring buffer, bounding memory consumption while keeping the most recent 40,000 characters of serial logs visible.
+
+4. **Hardware Configuration Alignment**:
+   - *Observation*: Physical ESP32 firmware (`edge/esp32/platformio.ini`, `edge/esp32/src/node_config.h`) defines `PLUG_RELAY_PIN=26` as the only physical relay, `IR_PIN=25` for HVAC IR, and `pinLightingRelay=255` (unconnected). The dashboard previously displayed GPIO 23 as an active lighting relay.
+   - *Inference*: Updating `DEFAULT_HARDWARE_LIBRARY` to `smart_plug: GPIO 26`, `ir_blaster: GPIO 25`, `lighting: Unused (255)`, and badging GPIO 23 as `VIRTUAL / UNPOPULATED (pinLightingRelay = 255)` ensures operator commands and UI telemetry strictly align with physical edge hardware.
 
 ---
 
 ## 3. Caveats
 
-1. **Physical Hardware Transmitters**:
-   - Physical infrared light emission depends on the edge node having an IR LED attached to GPIO 19. If no physical hardware is connected, the backend safely validates, latches, mirrors twin state, and dispatches the MQTT command on `econ/commands/<topic>` for any listening node.
-2. **Damper Scale Convention**:
-   - Both ratio scale (`0.0` to `1.0`) and percentage scale (`0` to `100`) are supported by `applyCommandToZone` and normalized seamlessly (`v > 1.0 -> v = v / 100.0`).
-3. **Sandbox Browser Spawning**:
-   - Running Puppeteer within a strict sandbox container may encounter macOS Mach port rendezvous permission limitations; `dashboard/verify_hardware_inspector_headless.js` provides fully reproducible headless component and DOM validation without external browser dependencies.
+1. **No Hardware Loopback in CI**:
+   - Physical WebSerial USB communication (`navigator.serial`) requires a real connected USB device and user gesture in Chrome. Automated headless test verification was executed with static server and request interception to validate DOM contracts, component mounting, and state synchronizations.
+2. **WebGL Software Fallback in Headless Environments**:
+   - In environments without dedicated GPU acceleration, Three.js uses SwiftShader/Mesa software rasterization. The 3D Canvas context loss and restoration handlers (`webglcontextlost`/`webglcontextrestored`) prevent UI crashes.
 
 ---
 
 ## 4. Conclusion
 
-Milestone M1 is 100% complete and verified:
-1. The IR Blaster is fully exposed in `HardwareInspector.jsx` with protocol selector, frequency/bits, hex code input, and manual send button.
-2. Comprehensive manual controls for all edge devices (IR blaster, plug relays, lighting relays, VAV dampers, CPU strain offload) are implemented and integrated into both `DeviceCard` and a dedicated `controls` tab.
-3. The Go backend command validation in `server/main.go` accepts all commands (`IR_SEND:`, `PLUG_ON`, `PLUG_OFF`, `DAMPER=`, `VAV_SET:`, `CPU_STRAIN:`, `CONFIG:`), updates twin state in `applyCommandToZone`, and routes to edge nodes via MQTT.
-4. All unit, integration, firmware host, and E2E test suites pass with zero regressions.
+All Milestone 1 requirements assigned to Worker M1 have been implemented, tested, and verified:
+- `getActiveFloorAsset` is implemented and exported from `dashboard/src/buildingStore.js`.
+- `BuildingModel.jsx` camera overview dependencies and `DynamicControls` camera framing re-center smoothly upon floor switching.
+- `App.jsx` exposes `data-testid="active-asset"` and `data-testid="active-floor-asset"` reflecting active level and BIM asset ID without blocking UI hit tests.
+- `TelemetryLogs.jsx` key collisions, unsafe property accesses, and building model switch baselines are resolved.
+- `HardwareInspector.jsx` serial log memory leak is prevented via bounded sliding buffer, and relays are aligned to the physical single-relay configuration (GPIO 26).
+- All automated test suites (`verify_webserial_floor_switcher.js`, `verify_bim_switching.js`, `verify_level_toggle.js`, `verify_ai_actions.js`) and Vite production build (`npm run build`) pass with 0 failures.
 
 ---
 
 ## 5. Verification Method
 
-To independently verify this milestone:
+### 5.1 Verification Commands
+To independently verify all changes, run the following commands in `dashboard/`:
 
-### 5.1 Backend Verification
-1. **Run Command Override Tests**:
+1. **Production Vite Build**:
    ```bash
-   cd /Users/nguyenhoangkhoi/Documents/econ/server && go test -v -run TestManualCommandOverrides_AllEdgeDevices .
+   cd dashboard
+   npm run build
    ```
-   *Expected Result*: All 11 subtests PASS.
+   *Expected Output*: Exit code 0, all chunks built without errors.
 
-2. **Run E2E Tier 1 Feature Test**:
+2. **Milestone 1 Verification Test Suite**:
    ```bash
-   cd /Users/nguyenhoangkhoi/Documents/econ/e2e_tests && go test -v -run TestTier1_F1_HardwareInspectorManualControls .
+   cd dashboard
+   node verify_webserial_floor_switcher.js
    ```
-   *Expected Result*: All 5 subtests PASS.
+   *Expected Output*:
+   ```
+   === Suite: Pure Invariants: getActiveFloorAsset & Asset Resolution ===
+     ✔ PASS getActiveFloorAsset resolves correct BIM asset for all 15 tower floors
+     ✔ PASS getActiveFloorAsset gracefully handles domestic home single floor
+     ✔ PASS getActiveFloorAsset fallback gracefully handles out-of-range level and null building
 
-3. **Run Full Simulation Tests**:
-   ```bash
-   cd /Users/nguyenhoangkhoi/Documents/econ/server && go test -count=1 ./simulation/...
-   ```
-   *Expected Result*: `ok econ/simulation` passes.
+   === Suite: Single-Relay Hardware Alignment & Sliding Buffer Invariants ===
+     ✔ PASS HardwareInspector.jsx defines single-relay (GPIO 26) and unpopulated lighting (255)
+     ✔ PASS UsbTab serial log enforces bounded sliding window buffer <= 50000 chars
 
-### 5.2 Frontend Verification
-1. **Compile Production Bundle**:
-   ```bash
-   cd /Users/nguyenhoangkhoi/Documents/econ/dashboard && npm run build
-   ```
-   *Expected Result*: Vite build succeeds with 0 errors.
+   === Suite: Telemetry Logs Panel: Monotonic Keys & Safe Snapshot ===
+     ✔ PASS TelemetryLogs.jsx uses monotonic sequence counter and safe snapshot
+     ✔ PASS Log key generation ensures 100% collision-free keys under sub-second bursts
 
-2. **Run Headless Inspector Test Suite**:
-   ```bash
-   cd /Users/nguyenhoangkhoi/Documents/econ/dashboard && node verify_hardware_inspector_headless.js
-   ```
-   *Expected Result*: 12/12 checks PASS with 0 failures.
+   === Suite: Real Built App Puppeteer DOM: 3D Floor Switcher & Active Asset ===
+     ✔ PASS Initial mount exposes data-testid="active-asset" matching Level 1 and BIM asset ID
+     ✔ PASS Clicking floor buttons (level-btn-2, level-btn-4) dynamically updates active asset state
+     ✔ PASS Level steppers (level-step-next, level-step-prev) update active asset state synchronously
+     ✔ PASS Telemetry logs panel mounts stably and renders event log without crashes
 
-### 5.3 Firmware Verification
-1. **Run ESP32 Host Tests**:
-   ```bash
-   cd /Users/nguyenhoangkhoi/Documents/econ/edge/esp32 && ./test/run_host_tests.sh
+   Test Summary: 11 Total | 11 Passed | 0 Failed
    ```
-   *Expected Result*: All 6 test suites complete with exit code 0.
+
+3. **Full Regression Test Suite**:
+   ```bash
+   cd dashboard
+   npm test
+   ```
+   *Expected Output*:
+   - `verify_bim_switching.js`: 11 Passed, 0 Failed
+   - `verify_level_toggle.js`: 13 Passed, 0 Failed
+   - `verify_ai_actions.js`: 23 Passed, 0 Failed
+   Total: 47 Passed, 0 Failed, Exit code 0.
+
+### 5.2 Files to Inspect
+- `dashboard/src/buildingStore.js`
+- `dashboard/src/BuildingModel.jsx`
+- `dashboard/src/App.jsx`
+- `dashboard/src/TelemetryLogs.jsx`
+- `dashboard/src/HardwareInspector.jsx`
+- `dashboard/verify_webserial_floor_switcher.js`
+- `.agents/teamwork_preview_worker_m1/handoff.md`
+
+### 5.3 Invalidation Conditions
+- Any removal of `getActiveFloorAsset` from `buildingStore.js`.
+- Omission of `activeFloor` from `initialOverview` dependency array in `BuildingModel.jsx`.
+- Removing `data-testid="active-asset"` from `App.jsx`.
+- Removing monotonic key generation or safe snapshot from `TelemetryLogs.jsx`.
+- Reintroducing unbounded string concatenation in `HardwareInspector.jsx:UsbTab`.

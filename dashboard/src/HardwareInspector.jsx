@@ -14,7 +14,7 @@
 // as well as the automatic one. Without it a stale Vite dep cache surfaces as
 // "ReferenceError: React is not defined" from this file rather than from the cache.
 import React, { useState, useEffect, useCallback } from 'react';
-import { API_BASE } from './api';
+import { API_BASE, getAdminToken } from './api';
 import { powerMw } from './units';
 
 const POLL_MS = 2000;
@@ -39,29 +39,45 @@ const FIELDS = {
 };
 
 const fmt = (v, unit) =>
-  v === null || v === undefined || Number.isNaN(v) ? '—' : `${(+v).toFixed(2)}${unit ? ' ' + unit : ''}`;
-const ago = (s) => (s < 1 ? 'now' : s < 60 ? `${s.toFixed(0)}s` : `${(s / 60).toFixed(1)}m`);
+  v === null || v === undefined || Number.isNaN(+v) ? '—' : `${(+v).toFixed(2)}${unit ? ' ' + unit : ''}`;
+const ago = (s) => {
+  if (s == null || Number.isNaN(+s) || s < 0) return '—';
+  const num = +s;
+  return num < 1 ? 'now' : num < 60 ? `${num.toFixed(0)}s` : `${(num / 60).toFixed(1)}m`;
+};
+const safeTime = (d) => {
+  if (!d) return '—';
+  const date = new Date(d);
+  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleTimeString();
+};
+const safeDateTime = (d) => {
+  if (!d) return '—';
+  const date = new Date(d);
+  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString();
+};
 
 /** Inline sparkline. No chart library: one <path>, and this module is meant to be deleted. */
 function Spark({ points, width = 520, height = 90 }) {
-  if (!points || points.length < 2) {
+  if (!points || !Array.isArray(points) || points.length < 2) {
     return <div style={S.empty}>no history yet — needs a few samples</div>;
   }
-  const vs = points.map((p) => p.v);
+  const vs = points.map((p) => (p && Number.isFinite(p.v) ? Number(p.v) : 0));
   const lo = Math.min(...vs), hi = Math.max(...vs);
   const span = hi - lo || 1;
-  const t0 = new Date(points[0].t).getTime();
-  const t1 = new Date(points[points.length - 1].t).getTime();
+  const t0 = points[0]?.t ? new Date(points[0].t).getTime() : 0;
+  const t1 = points[points.length - 1]?.t ? new Date(points[points.length - 1].t).getTime() : 1;
   const tspan = t1 - t0 || 1;
   const d = points
     .map((p, i) => {
-      const x = ((new Date(p.t).getTime() - t0) / tspan) * width;
-      const y = height - ((p.v - lo) / span) * (height - 8) - 4;
-      return `${i ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`;
+      const pt = p?.t ? new Date(p.t).getTime() : t0;
+      const pv = p && Number.isFinite(p.v) ? Number(p.v) : lo;
+      const x = ((pt - t0) / tspan) * width;
+      const y = height - ((pv - lo) / span) * (height - 8) - 4;
+      return `${i ? 'L' : 'M'}${Number.isFinite(x) ? x.toFixed(1) : '0'},${Number.isFinite(y) ? y.toFixed(1) : '0'}`;
     })
     .join(' ');
   // Colour by provenance: measured rows are evidence, modelled rows are the simulation.
-  const measured = points.filter((p) => p.q === 'measured').length;
+  const measured = points.filter((p) => p?.q === 'measured').length;
   const stroke = measured === points.length ? '#4ade80' : measured === 0 ? '#f59e0b' : '#60a5fa';
   return (
     <div>
@@ -101,16 +117,17 @@ const IR_PROTOCOLS = [
 ];
 
 const DEFAULT_HARDWARE_LIBRARY = [
-  { id: 'ir_blaster', device: 'HVAC IR Blaster', pin: 'GPIO 19', bus: 'PWM / IRremoteESP8266', flag: 'USE_IR_AC', desc: 'Commands split-unit ACs (Coolix, Electra, Daikin, etc.) via 940nm IR emitter' },
-  { id: 'smart_plug', device: 'Smart Plug Relay', pin: 'GPIO 25', bus: 'Digital Output', flag: 'USE_PLUG', desc: 'Sheds non-critical socket circuits after-hours (APLC automated plug load control)' },
-  { id: 'lighting', device: 'Lighting Relay', pin: 'GPIO 23', bus: 'Digital Output', flag: 'RELAY_PIN', desc: 'Controls room lighting circuit based on occupancy & manual override' },
-  { id: 'strip_meter', device: 'ACS712 Power Strip Meter', pin: 'GPIO 33 (ADC1_CH5)', bus: 'Analog ADC (True-RMS)', flag: 'USE_STRIP', desc: 'True-RMS strip current sensing with compute offload fallback streaming' },
-  { id: 'plug_clamp', device: 'SCT-013 Plug CT Clamp', pin: 'GPIO 34 (ADC1_CH6)', bus: 'Analog ADC (33Ω burden)', flag: 'USE_PLUG', desc: 'Monitors wall plug circuit current draw (plugW)' },
+  { id: 'ir_blaster', device: 'HVAC IR Blaster', pin: 'GPIO 25', bus: 'PWM / IRremoteESP8266', flag: 'USE_IR_AC', desc: 'Commands split-unit ACs (Coolix, Electra, Daikin, etc.) via 940nm IR emitter' },
+  { id: 'smart_plug', device: 'Smart Plug Relay', pin: 'GPIO 26', bus: 'Digital Output', flag: 'USE_PLUG', desc: 'Sheds non-critical socket circuits after-hours (APLC automated plug load control)' },
+  { id: 'lighting', device: 'Lighting Relay', pin: 'Unused (255)', bus: 'Digital Output', flag: 'RELAY_PIN', desc: 'Legacy/unpopulated lighting relay (virtual, pinLightingRelay = 255)' },
+  { id: 'strip_meter', device: 'ACS712 Power Strip Meter', pin: 'GPIO 32 (ADC1_CH4)', bus: 'Analog ADC (True-RMS)', flag: 'USE_STRIP', desc: 'True-RMS strip current sensing with compute offload fallback streaming' },
+  { id: 'plug_clamp', device: 'SCT-013 Plug CT Clamp', pin: 'GPIO 33 (ADC1_CH5)', bus: 'Analog ADC (33Ω burden)', flag: 'USE_PLUG', desc: 'Monitors wall plug circuit current draw (plugW)' },
   { id: 'ac_clamp', device: 'SCT-013 AC CT Clamp', pin: 'GPIO 35 (ADC1_CH7)', bus: 'Analog ADC (33Ω burden)', flag: 'USE_AC_CLAMP', desc: 'Measures compressor active power (acW) for thermodynamic model tracking' },
-  { id: 'supply_temp', device: 'DS18B20 Supply Air Temp', pin: 'GPIO 26', bus: '1-Wire Digital', flag: 'USE_SUPPLY_TEMP', desc: 'High-precision temperature sensor in AC discharge louvre' },
+  { id: 'supply_temp', device: 'DS18B20 Supply Air Temp', pin: 'Unused (255)', bus: '1-Wire Digital', flag: 'USE_SUPPLY_TEMP', desc: 'High-precision temperature sensor in AC discharge louvre' },
   { id: 'env_sensors', device: 'SHT30 / ACD1200 / BH1750', pin: 'GPIO 21 (SDA), GPIO 22 (SCL)', bus: 'I2C Bus (400 kHz)', flag: 'USE_SHT30, USE_CO2, USE_LUX', desc: 'Environmental telemetry: air temperature, relative humidity, CO2 ppm, lux' },
   { id: 'pir_radar', device: 'PIR & mmWave Radar', pin: 'GPIO 18', bus: 'Digital Pulse / UART', flag: 'USE_PIR, USE_MMWAVE', desc: 'Passive infrared & 24GHz FMCW presence radar for occupancy verification' },
 ];
+
 
 function DeviceControls({ targetZone = 'zone-office-a', targetDevice = '' }) {
   const [pinOverrides, setPinOverrides] = useState(() => {
@@ -129,9 +146,12 @@ function DeviceControls({ targetZone = 'zone-office-a', targetDevice = '' }) {
     localStorage.setItem('econ_gpio_overrides', JSON.stringify(next));
     setEditingPin(null);
     // Push the pin remap to the edge node via the command API
+    const token = typeof getAdminToken === 'function' ? getAdminToken() : '';
+    const headers = { 'Content-Type': 'application/json' };
+    if (token) headers['X-Admin-Token'] = token;
     fetch(`${API_BASE}/api/command`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({ zone: targetZone || 'all', command: `CONFIG:PIN_REMAP:${id}=${newPin}` }),
     }).catch(() => {});
   };
@@ -150,6 +170,8 @@ function DeviceControls({ targetZone = 'zone-office-a', targetDevice = '' }) {
   const [sending, setSending] = useState(false);
   const [status, setStatus] = useState(null);
   const [showLib, setShowLib] = useState(false);
+  const [cameraError, setCameraError] = useState(false);
+  const [cameraKey, setCameraKey] = useState(0);
 
   const effectiveZone = targetZone || targetDevice || 'zone-office-a';
 
@@ -157,9 +179,12 @@ function DeviceControls({ targetZone = 'zone-office-a', targetDevice = '' }) {
     setSending(true);
     setStatus(null);
     try {
+      const token = typeof getAdminToken === 'function' ? getAdminToken() : '';
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) headers['X-Admin-Token'] = token;
       const res = await fetch(`${API_BASE}/api/command`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           zone: effectiveZone,
           device_id: targetDevice || effectiveZone,
@@ -174,14 +199,14 @@ function DeviceControls({ targetZone = 'zone-office-a', targetDevice = '' }) {
         ok: true,
         cmd,
         msg: `Dispatched: "${cmd}" to ${effectiveZone}`,
-        time: new Date().toLocaleTimeString(),
+        time: safeTime(new Date()),
       });
     } catch (err) {
       setStatus({
         ok: false,
         cmd,
         msg: `Failed: ${err.message}`,
-        time: new Date().toLocaleTimeString(),
+        time: safeTime(new Date()),
       });
     } finally {
       setSending(false);
@@ -394,8 +419,9 @@ function DeviceControls({ targetZone = 'zone-office-a', targetDevice = '' }) {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             {/* Smart Plug Relay */}
             <div>
-              <div style={{ fontSize: 11, fontWeight: 600, color: '#9ca3af', marginBottom: 4 }}>
-                Smart Plug Circuit (GPIO 25 / APLC Sockets)
+              <div style={{ fontSize: 11, fontWeight: 600, color: '#9ca3af', marginBottom: 4, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span>Smart Plug Circuit (GPIO 26 / APLC Sockets)</span>
+                <span style={S.badge('#10b981')}>PHYSICAL RELAY (pinPlugRelay = 26)</span>
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
                 <button
@@ -419,28 +445,32 @@ function DeviceControls({ targetZone = 'zone-office-a', targetDevice = '' }) {
 
             {/* Lighting Relay */}
             <div style={{ paddingTop: 8, borderTop: '1px dashed #374151' }}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: '#9ca3af', marginBottom: 4 }}>
-                Lighting Relay (GPIO 23 / Solid State)
+              <div style={{ fontSize: 11, fontWeight: 600, color: '#9ca3af', marginBottom: 4, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span>Lighting Relay (GPIO 23 / Solid State)</span>
+                <span style={S.badge('#6b7280')}>VIRTUAL / UNPOPULATED (pinLightingRelay = 255)</span>
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
                 <button
                   data-testid="lights-on-btn"
-                  style={{ ...btnStyle('success'), flex: 1 }}
+                  style={{ ...btnStyle('secondary'), flex: 1, opacity: 0.7 }}
                   onClick={() => sendCommand('LIGHTS_ON')}
                   disabled={sending}
+                  title="Virtual / Unpopulated relay (GPIO 23 / pinLightingRelay = 255)"
                 >
                   Lights ON (LIGHTS_ON)
                 </button>
                 <button
                   data-testid="lights-off-btn"
-                  style={{ ...btnStyle('danger'), flex: 1 }}
+                  style={{ ...btnStyle('secondary'), flex: 1, opacity: 0.7 }}
                   onClick={() => sendCommand('LIGHTS_OFF')}
                   disabled={sending}
+                  title="Virtual / Unpopulated relay (GPIO 23 / pinLightingRelay = 255)"
                 >
                   Lights OFF (LIGHTS_OFF)
                 </button>
               </div>
             </div>
+
 
             {/* CPU Strain Fallback Testing */}
             <div style={{ paddingTop: 8, borderTop: '1px dashed #374151' }}>
@@ -554,16 +584,27 @@ function DeviceControls({ targetZone = 'zone-office-a', targetDevice = '' }) {
 
           
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <div style={{ border: '1px solid #374151', borderRadius: 4, padding: 8, background: '#000', textAlign: 'center' }}>
-              <img 
-                src={`http://192.168.50.28:8080/?t=${Date.now()}`} 
-                alt="Live Camera Feed" 
-                style={{ width: '100%', maxWidth: '320px', height: 'auto', imageRendering: 'pixelated' }} 
-                onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'block'; }}
-              />
-              <div style={{ color: '#9ca3af', fontSize: 12, padding: 20, display: 'none' }}>
-                Camera feed offline or unreachable at esp32-41c3f0.local:8080
-              </div>
+            <div style={{ border: '1px solid #374151', borderRadius: 4, padding: 8, background: '#000', textAlign: 'center', minHeight: '120px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+              {!cameraError ? (
+                <img 
+                  key={cameraKey}
+                  src={`http://192.168.50.28:8080/?t=${Date.now()}`} 
+                  alt="Live Camera Feed" 
+                  style={{ width: '100%', maxWidth: '320px', height: 'auto', imageRendering: 'pixelated' }} 
+                  onError={() => setCameraError(true)}
+                />
+              ) : (
+                <div style={{ color: '#9ca3af', fontSize: 12, padding: 20 }}>
+                  <div style={{ color: '#f87171', fontWeight: 600, marginBottom: 4 }}>Camera feed offline or unreachable</div>
+                  <div>esp32-41c3f0.local:8080 (fallback to simulation/edge inference)</div>
+                  <button
+                    onClick={() => { setCameraError(false); setCameraKey(k => k + 1); }}
+                    style={{ ...btnStyle('default'), marginTop: 8, padding: '3px 8px', fontSize: 10 }}
+                  >
+                    Retry Connection
+                  </button>
+                </div>
+              )}
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
               <button
@@ -665,6 +706,7 @@ function ControlsTab({ devices = [] }) {
 }
 
 function DeviceCard({ dev, staleAfter }) {
+  if (!dev) return null;
   const [metric, setMetric] = useState(null);
   const [series, setSeries] = useState(null);
   const [minutes, setMinutes] = useState(60);
@@ -673,17 +715,18 @@ function DeviceCard({ dev, staleAfter }) {
   const loadSeries = useCallback(async (m, mins) => {
     setSeries(null);
     try {
-      const r = await fetch(`${API_BASE}/api/devices/series?device=${encodeURIComponent(dev.id)}&metric=${m}&minutes=${mins}`);
+      const devId = dev?.id || '';
+      const r = await fetch(`${API_BASE}/api/devices/series?device=${encodeURIComponent(devId)}&metric=${m}&minutes=${mins}`);
       const j = await r.json();
       setSeries(j.points || []);
     } catch { setSeries([]); }
-  }, [dev.id]);
+  }, [dev?.id]);
 
   useEffect(() => { if (metric) loadSeries(metric, minutes); }, [metric, minutes, loadSeries]);
 
-  const live = dev.online;
-  const reporting = Object.entries(dev.fields || {}).filter(([, f]) => f.count > 0);
-  const silent = Object.entries(dev.fields || {}).filter(([, f]) => f.count === 0 && f.omitted > 0);
+  const live = !!dev?.online;
+  const reporting = Object.entries(dev?.fields || {}).filter(([, f]) => f && f.count > 0);
+  const silent = Object.entries(dev?.fields || {}).filter(([, f]) => f && f.count === 0 && f.omitted > 0);
 
   return (
     <div style={{ ...S.card, borderLeft: `3px solid ${live ? '#4ade80' : '#ef4444'}` }}>
@@ -696,8 +739,8 @@ function DeviceCard({ dev, staleAfter }) {
           {dev.acKnown && !dev.acReal && <span style={S.badge('#f59e0b')}>acReal:false</span>}
         </div>
         <div style={S.dim}>
-          {dev.source || '?'} · {dev.zone || 'no label'} · last {ago(dev.ageSec)} · {dev.rateHz.toFixed(2)} Hz · {dev.messages} msgs
-          {dev.malformed > 0 && <span style={{ color: '#ef4444' }}> · {dev.malformed} malformed</span>}
+          {dev.source || '?'} · {dev.zone || 'no label'} · last {ago(dev.ageSec)} · {typeof dev.rateHz === 'number' ? dev.rateHz.toFixed(2) : (Number(dev.rateHz) || 0).toFixed(2)} Hz · {dev.messages ?? 0} msgs
+          {(dev.malformed ?? 0) > 0 && <span style={{ color: '#ef4444' }}> · {dev.malformed} malformed</span>}
         </div>
       </div>
 
@@ -722,16 +765,16 @@ function DeviceCard({ dev, staleAfter }) {
         <tbody>
           {reporting.map(([name, f]) => {
             const meta = FIELDS[name] || {};
-            const fage = (Date.now() - new Date(f.at).getTime()) / 1000;
-            const stale = fage > staleAfter;
+            const fage = f.at ? (Date.now() - new Date(f.at).getTime()) / 1000 : null;
+            const stale = fage != null && fage > staleAfter;
             return (
               <tr key={name}>
                 <td style={S.td}>{name}</td>
                 <td style={{ ...S.td, color: stale ? '#f59e0b' : '#e5e7eb', fontWeight: 600 }}>{fmt(f.last, meta.unit)}</td>
                 <td style={{ ...S.td, color: stale ? '#f59e0b' : '#9ca3af' }}>{ago(fage)}</td>
-                <td style={S.td}>{f.count}</td>
-                <td style={{ ...S.td, color: f.omitted > 0 ? '#f59e0b' : '#4b5563' }}>{f.omitted}</td>
-                <td style={S.td}>{f.min.toFixed(1)} … {f.max.toFixed(1)}</td>
+                <td style={S.td}>{f.count ?? 0}</td>
+                <td style={{ ...S.td, color: (f.omitted ?? 0) > 0 ? '#f59e0b' : '#4b5563' }}>{f.omitted ?? 0}</td>
+                <td style={S.td}>{f.min != null ? Number(f.min).toFixed(1) : '—'} … {f.max != null ? Number(f.max).toFixed(1) : '—'}</td>
                 <td style={S.td}>
                   <button style={S.btn(metric === name)} onClick={() => setMetric(metric === name ? null : name)}>
                     {metric === name ? 'hide' : 'history'}
@@ -744,7 +787,7 @@ function DeviceCard({ dev, staleAfter }) {
             <tr key={name}>
               <td style={{ ...S.td, color: '#6b7280' }}>{name}</td>
               <td colSpan={5} style={{ ...S.td, color: '#6b7280' }}>
-                never reported — {f.omitted} messages without it
+                never reported — {f?.omitted ?? 0} messages without it
                 {FIELDS[name]?.flag && <> · needs <code>{FIELDS[name].flag}</code></>}
               </td>
               <td style={S.td}></td>
@@ -786,23 +829,36 @@ function SustainabilityTab() {
   const [err, setErr] = useState(null);
 
   useEffect(() => {
+    let alive = true;
     const fetchSus = async () => {
       try {
         const res = await fetch(`${API_BASE}/api/sustainability`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        setData(await res.json());
-        setErr(null);
+        const j = await res.json();
+        if (alive) {
+          setData(j);
+          setErr(null);
+        }
       } catch (e) {
-        setErr(e.message);
+        if (alive) setErr(e.message);
       }
     };
     fetchSus();
     const interval = setInterval(fetchSus, 5000);
-    return () => clearInterval(interval);
+    return () => { alive = false; clearInterval(interval); };
   }, []);
 
   if (err) return <div style={S.error}>Error fetching sustainability data: {err}</div>;
   if (!data) return <div style={S.dim}>Loading sustainability data...</div>;
+
+  const accounting = data?.carbonAccounting || {};
+  const recs = data?.carbonCreditRecommendations || {};
+  const quote = recs?.marketQuote || {};
+  const altQuotes = recs?.alternativeQuotes || [];
+  const maint = data?.predictiveMaintenance || {};
+  const warnings = maint?.warnings || [];
+  const util = data?.spaceUtilization || {};
+  const zones = util?.zones || [];
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
@@ -811,19 +867,19 @@ function SustainabilityTab() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
           <div>
             <div style={S.dim}>Instantaneous Power</div>
-            <div style={{fontSize: 24, fontWeight: 'bold'}}>{data.carbonAccounting.instantaneousPowerW.toFixed(1)} W</div>
+            <div style={{fontSize: 24, fontWeight: 'bold'}}>{(Number(accounting.instantaneousPowerW) || 0).toFixed(1)} W</div>
           </div>
           <div>
             <div style={S.dim}>Emission Rate</div>
-            <div style={{fontSize: 24, fontWeight: 'bold'}}>{data.carbonAccounting.instantaneousEmissionRateKgPerHour.toFixed(3)} kgCO2e/h</div>
+            <div style={{fontSize: 24, fontWeight: 'bold'}}>{(Number(accounting.instantaneousEmissionRateKgPerHour) || 0).toFixed(3)} kgCO2e/h</div>
           </div>
           <div>
             <div style={S.dim}>Grid Factor</div>
-            <div style={{fontSize: 24, fontWeight: 'bold'}}>{data.carbonAccounting.gridEmissionFactorKgPerKwh.toFixed(2)} kg/kWh</div>
+            <div style={{fontSize: 24, fontWeight: 'bold'}}>{(Number(accounting.gridEmissionFactorKgPerKwh) || 0).toFixed(2)} kg/kWh</div>
           </div>
           <div>
             <div style={S.dim}>Cumulative Emissions</div>
-            <div style={{fontSize: 24, fontWeight: 'bold'}}>{data.carbonAccounting.cumulativeEmissionsKgCO2e.toFixed(3)} kgCO2e</div>
+            <div style={{fontSize: 24, fontWeight: 'bold'}}>{(Number(accounting.cumulativeEmissionsKgCO2e) || 0).toFixed(3)} kgCO2e</div>
           </div>
         </div>
       </div>
@@ -832,12 +888,12 @@ function SustainabilityTab() {
         <h2 style={{marginTop: 0, color: '#60a5fa'}}>Carbon Credit Recommendations (Live Market)</h2>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px' }}>
           <div style={{ flex: 1, minWidth: '300px' }}>
-            <div style={{marginBottom: 8}}><strong>Status:</strong> {data.carbonCreditRecommendations.recommendation}</div>
-            {data.carbonCreditRecommendations.overBudget && (
+            <div style={{marginBottom: 8}}><strong>Status:</strong> {recs.recommendation || 'Balanced'}</div>
+            {recs.overBudget && (
               <>
-                <div style={{color: '#f87171', marginBottom: 4}}>Deficit: {data.carbonCreditRecommendations.deficitKgCO2e.toFixed(2)} kgCO2e</div>
-                <div style={{marginBottom: 4}}>Credits Needed: {data.carbonCreditRecommendations.wholeCertificatesNeeded} (approx {data.carbonCreditRecommendations.creditsNeededMetricTons?.toFixed(3)} MT)</div>
-                <div style={{color: '#fbbf24', fontSize: 18, fontWeight: 'bold', marginTop: 8}}>Estimated Cost: ${data.carbonCreditRecommendations.estimatedCostUSD.toFixed(2)}</div>
+                <div style={{color: '#f87171', marginBottom: 4}}>Deficit: {(Number(recs.deficitKgCO2e) || 0).toFixed(2)} kgCO2e</div>
+                <div style={{marginBottom: 4}}>Credits Needed: {recs.wholeCertificatesNeeded ?? 0} (approx {(Number(recs.creditsNeededMetricTons) || 0).toFixed(3)} MT)</div>
+                <div style={{color: '#fbbf24', fontSize: 18, fontWeight: 'bold', marginTop: 8}}>Estimated Cost: ${(Number(recs.estimatedCostUSD) || 0).toFixed(2)}</div>
               </>
             )}
           </div>
@@ -846,22 +902,22 @@ function SustainabilityTab() {
               <div style={{fontSize: 10, color: '#9ca3af', textTransform: 'uppercase'}}>Live Quote Source</div>
               <div style={{fontWeight: 'bold'}}>
                 <a href="https://www.coingecko.com/en/coins/toucan-protocol-base-carbon-tonne" target="_blank" rel="noreferrer" style={{color: '#60a5fa', textDecoration: 'none'}}>
-                  {data.carbonCreditRecommendations.marketQuote.source}
+                  {quote.source || 'Toucan Protocol Base Carbon Tonne'}
                 </a>
               </div>
-              <div style={{color: '#4ade80', fontSize: 18}}>${data.carbonCreditRecommendations.marketQuote.spotPricePerMetricTonUSD.toFixed(6)} / MT</div>
-              <div style={{fontSize: 10, color: '#9ca3af', marginTop: 4}}>Updated: {new Date(data.carbonCreditRecommendations.marketQuote.fetchedAt).toLocaleTimeString()}</div>
+              <div style={{color: '#4ade80', fontSize: 18}}>${(Number(quote.spotPricePerMetricTonUSD) || 0).toFixed(6)} / MT</div>
+              <div style={{fontSize: 10, color: '#9ca3af', marginTop: 4}}>Updated: {safeTime(quote.fetchedAt)}</div>
             </div>
             
-            {data.carbonCreditRecommendations.alternativeQuotes && data.carbonCreditRecommendations.alternativeQuotes.length > 0 && (
+            {altQuotes.length > 0 && (
               <div style={{background: '#111827', padding: '12px', borderRadius: '4px', border: '1px solid #374151'}}>
                 <div style={{fontSize: 10, color: '#9ca3af', textTransform: 'uppercase', marginBottom: '8px'}}>Alternative Market Quotes</div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  {data.carbonCreditRecommendations.alternativeQuotes.map((alt, idx) => (
+                  {altQuotes.map((alt, idx) => (
                     <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', background: 'rgba(255,255,255,0.03)', padding: '6px 10px', borderRadius: '4px' }}>
                       <span style={{ color: '#60a5fa', fontWeight: '600' }}>{alt.source}</span>
                       <div style={{ fontWeight: 'bold', color: '#34d399', fontFamily: 'monospace', fontSize: '12px' }}>
-                        ${alt.spotPricePerMetricTonUSD.toFixed(2)} <span style={{ fontSize: '9px', color: '#9ca3af', fontWeight: 'normal' }}>{alt.currency} / tCO2e</span>
+                        ${(Number(alt.spotPricePerMetricTonUSD) || 0).toFixed(2)} <span style={{ fontSize: '9px', color: '#9ca3af', fontWeight: 'normal' }}>{alt.currency || 'USD'} / tCO2e</span>
                       </div>
                     </div>
                   ))}
@@ -875,14 +931,14 @@ function SustainabilityTab() {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
         <div style={S.card}>
           <h2 style={{marginTop: 0, color: '#fbbf24'}}>Predictive Maintenance</h2>
-          {data.predictiveMaintenance.activeAlertsCount === 0 ? (
+          {(maint.activeAlertsCount ?? 0) === 0 ? (
             <div style={{color: '#4ade80'}}>All systems operating within normal parameters.</div>
           ) : (
             <div style={{display: 'flex', flexDirection: 'column', gap: '8px'}}>
-              {data.predictiveMaintenance.warnings.map((w, i) => (
+              {warnings.map((w, i) => (
                 <div key={i} style={{background: '#7f1d1d30', border: '1px solid #ef444450', padding: '8px', borderRadius: '4px'}}>
                   <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start'}}>
-                    <div style={{color: '#f87171', fontWeight: 'bold', fontSize: 11, marginBottom: 4}}>[{w.type.toUpperCase()}] {w.equipmentId}</div>
+                    <div style={{color: '#f87171', fontWeight: 'bold', fontSize: 11, marginBottom: 4}}>[{(w.type || '').toUpperCase()}] {w.equipmentId}</div>
                     <div style={{fontSize: 10, color: '#9ca3af'}}>Health: <b style={{color: '#e5e7eb'}}>{w.healthScore !== undefined ? `${w.healthScore}%` : 'N/A'}</b></div>
                   </div>
                   <div style={{fontSize: 12}}>{w.message}</div>
@@ -905,7 +961,7 @@ function SustainabilityTab() {
         <div style={S.card}>
           <h2 style={{marginTop: 0, color: '#a78bfa'}}>Space Utilization</h2>
           <div style={{marginBottom: 12}}>
-            <span style={{fontSize: 24, fontWeight: 'bold'}}>{data.spaceUtilization.overallEfficiencyPercent.toFixed(1)}%</span>
+            <span style={{fontSize: 24, fontWeight: 'bold'}}>{(Number(util.overallEfficiencyPercent) || 0).toFixed(1)}%</span>
             <span style={S.dim}> Overall Efficiency</span>
           </div>
           <table style={{width: '100%', borderCollapse: 'collapse'}}>
@@ -918,18 +974,21 @@ function SustainabilityTab() {
               </tr>
             </thead>
             <tbody>
-              {data.spaceUtilization.zones.map((z, i) => (
-                <tr key={i}>
-                  <td style={S.td}>{z.zoneId}</td>
-                  <td style={S.td}>{z.liveOccupants}</td>
-                  <td style={S.td}>{z.designCapacity}</td>
-                  <td style={S.td}>
-                    <span style={{color: z.efficiencyPercent > 100 ? '#f87171' : z.efficiencyPercent > 50 ? '#4ade80' : '#fbbf24'}}>
-                      {z.efficiencyPercent.toFixed(0)}%
-                    </span>
-                  </td>
-                </tr>
-              ))}
+              {zones.map((z, i) => {
+                const eff = Number(z.efficiencyPercent) || 0;
+                return (
+                  <tr key={i}>
+                    <td style={S.td}>{z.zoneId}</td>
+                    <td style={S.td}>{z.liveOccupants ?? 0}</td>
+                    <td style={S.td}>{z.designCapacity ?? 0}</td>
+                    <td style={S.td}>
+                      <span style={{color: eff > 100 ? '#f87171' : eff > 50 ? '#4ade80' : '#fbbf24'}}>
+                        {eff.toFixed(0)}%
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -955,9 +1014,16 @@ function UsbTab() {
     }
   });
 
+  const appendLog = (chunk) => {
+    setLog((l) => {
+      const next = l + chunk;
+      return next.length > 50000 ? next.slice(-40000) : next;
+    });
+  };
+
   const connect = async () => {
     if (!('serial' in navigator)) {
-      setLog(l => l + 'WebSerial API not supported in this browser.\n');
+      appendLog('WebSerial API not supported in this browser.\n');
       return;
     }
     try {
@@ -966,20 +1032,20 @@ function UsbTab() {
       setPort(p);
       readLoop(p);
     } catch (e) {
-      setLog(l => l + `Error: ${e.message}\n`);
+      appendLog(`Error: ${e.message}\n`);
     }
   };
 
   const readLoop = async (p) => {
     const textDecoder = new TextDecoderStream();
-    p.readable.pipeTo(textDecoder.writable).catch(e => setLog(l => l + `Pipe Error: ${e.message}\n`));
+    p.readable.pipeTo(textDecoder.writable).catch(e => appendLog(`Pipe Error: ${e.message}\n`));
     const reader = textDecoder.readable.getReader();
     let buffer = '';
     try {
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
-        setLog(l => l + value);
+        setLog(l => { const next = l + value; return next.length > 50000 ? next.slice(-40000) : next; });
         
         buffer += value;
         const lines = buffer.split('\n');
@@ -994,7 +1060,7 @@ function UsbTab() {
         }
       }
     } catch (e) {
-      setLog(l => l + `Read Error: ${e.message}\n`);
+      appendLog(`Read Error: ${e.message}\n`);
     } finally {
       reader.releaseLock();
       setPort(null);
@@ -1008,11 +1074,12 @@ function UsbTab() {
       const writer = port.writable.getWriter();
       await writer.write(encoder.encode(text + '\r\n'));
       writer.releaseLock();
-      setLog(l => l + `> ${text}\n`);
+      appendLog(`> ${text}\n`);
     } catch (e) {
-      setLog(l => l + `Write Error: ${e.message}\n`);
+      appendLog(`Write Error: ${e.message}\n`);
     }
   };
+
 
   const handleSendWifi = () => {
     if (!ssid.trim()) return;
@@ -1135,9 +1202,12 @@ function ConfigTab() {
     if (!cmd.trim()) return;
     setStatus({ msg: 'Sending...', ok: true });
     try {
+      const token = typeof getAdminToken === 'function' ? getAdminToken() : '';
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) headers['X-Admin-Token'] = token;
       const res = await fetch(`${API_BASE}/api/command`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ command: `CONFIG:${cmd}`, zone: 'all' })
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -1175,6 +1245,117 @@ function ConfigTab() {
           {status.msg}
         </div>
       )}
+    </div>
+  );
+}
+
+function EventsTab({ events }) {
+  return (
+    <div style={S.card}>
+      {events == null && <div style={S.empty}>loading…</div>}
+      <table style={S.table}>
+        <thead>
+          <tr>
+            <th style={S.th}>time</th>
+            <th style={S.th}>device</th>
+            <th style={S.th}>event</th>
+            <th style={S.th}>detail</th>
+          </tr>
+        </thead>
+        <tbody>
+          {events != null && events.length === 0 && (
+            <tr>
+              <td colSpan={4} style={S.td}>no events recorded</td>
+            </tr>
+          )}
+          {(events || []).map((e, i) => (
+            <tr key={i}>
+              <td style={S.td}>{safeDateTime(e?.t)}</td>
+              <td style={S.td}>{e?.device ?? '—'}</td>
+              <td style={{ ...S.td, color: e?.event === 'offline' ? '#ef4444' : '#4ade80' }}>
+                {e?.event ?? '—'}
+              </td>
+              <td style={S.td}>{e?.detail ?? '—'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function QualityTab({ quality, setQMinutes, qMinutes }) {
+  return (
+    <div style={S.card}>
+      <div style={S.chartHead}>
+        <p style={{ ...S.dim, margin: 0, maxWidth: 620, lineHeight: 1.6 }}>
+          How much of stored history is evidence rather than simulation. A chart drawn over
+          mostly <strong>modelled</strong> rows describes the twin, not the building.
+        </p>
+        <span>
+          {[15, 60, 360, 1440].map((m) => (
+            <button key={m} style={S.btn(qMinutes === m)} onClick={() => setQMinutes?.(m)}>
+              {m < 60 ? `${m}m` : `${(m / 60).toFixed(0)}h`}
+            </button>
+          ))}
+        </span>
+      </div>
+      {quality == null && (
+        <div style={S.empty}>
+          counting rows over the last {qMinutes < 60 ? `${qMinutes}m` : `${(qMinutes / 60).toFixed(0)}h`}…
+          <br /><span style={{ fontSize: 11 }}>the engine writes ~1500 rows/s, so a wide window takes a while</span>
+        </div>
+      )}
+      {quality?.error && <div style={S.warn}>query failed — is the database up?</div>}
+      {quality?.totals && (
+        <div style={S.totals}>
+          {Object.entries(quality.totals).map(([k, v]) => (
+            <div key={k} style={S.total}>
+              <div
+                style={{
+                  fontSize: 22,
+                  fontWeight: 700,
+                  color: k === 'measured' ? '#4ade80' : k === 'modelled' ? '#f59e0b' : '#60a5fa',
+                }}
+              >
+                {(v ?? 0).toLocaleString()}
+              </div>
+              <div style={S.dim}>{k} rows</div>
+            </div>
+          ))}
+        </div>
+      )}
+      <table style={S.table}>
+        <thead>
+          <tr>
+            <th style={S.th}>quality</th>
+            <th style={S.th}>device</th>
+            <th style={S.th}>metric</th>
+            <th style={S.th}>rows</th>
+            <th style={S.th}>span</th>
+          </tr>
+        </thead>
+        <tbody>
+          {(quality?.breakdown || []).map((r, i) => (
+            <tr key={i}>
+              <td
+                style={{
+                  ...S.td,
+                  color: r?.quality === 'measured' ? '#4ade80' : r?.quality === 'modelled' ? '#f59e0b' : '#9ca3af',
+                }}
+              >
+                {r?.quality ?? '—'}
+              </td>
+              <td style={S.td}>{r?.device ?? '—'}</td>
+              <td style={S.td}>{r?.metric ?? '—'}</td>
+              <td style={S.td}>{(r?.rows ?? 0).toLocaleString()}</td>
+              <td style={S.td}>
+                {safeTime(r?.from)} → {safeTime(r?.to)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -1306,20 +1487,23 @@ export default function HardwareInspector() {
       {tab === 'quality' && <QualityTab quality={quality} setQMinutes={setQMinutes} qMinutes={qMinutes} />}
       {tab === 'config' && <ConfigTab />}
       {tab === 'forecast' && <ForecastTab />}
+      {tab === 'sustainability' && <SustainabilityTab />}
+      {tab === 'usb' && <UsbTab />}
     </div>
   );
 }
 
 
 function ForecastSpark({ values, width = 200, height = 40, colour = '#60a5fa' }) {
-  if (!values || values.length < 2) return null;
-  const lo = Math.min(...values), hi = Math.max(...values);
+  if (!values || !Array.isArray(values) || values.length < 2) return null;
+  const nums = values.map((v) => Number(v) || 0);
+  const lo = Math.min(...nums), hi = Math.max(...nums);
   const span = hi - lo || 1;
-  const d = values
+  const d = nums
     .map((v, i) => {
-      const x = (i / (values.length - 1)) * width;
+      const x = (i / (nums.length - 1)) * width;
       const y = height - ((v - lo) / span) * (height - 8) - 4;
-      return `${i ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`;
+      return `${i ? 'L' : 'M'}${Number.isFinite(x) ? x.toFixed(1) : '0'},${Number.isFinite(y) ? y.toFixed(1) : '0'}`;
     })
     .join(' ');
   return (
@@ -1405,11 +1589,11 @@ function ForecastTab() {
               {e.available ? (
                 <>
                   <div style={{ fontSize: 30, fontWeight: 700, margin: '10px 0 2px' }}>
-                    {(+e.peakMw).toFixed(3)} <span style={{ fontSize: 14, color: '#9ca3af' }}>MW</span>
+                    {(Number(e.peakMw) || 0).toFixed(3)} <span style={{ fontSize: 14, color: '#9ca3af' }}>MW</span>
                   </div>
                   <div style={{ ...S.dim, fontSize: 11 }}>
                     backed by <strong style={{ color: thin ? '#f59e0b' : '#4ade80' }}>
-                      {e.realSamples}{e.windowLen ? ` / ${e.windowLen}` : ''}
+                      {e.realSamples ?? 0}{e.windowLen ? ` / ${e.windowLen}` : ''}
                     </strong> real sample{e.realSamples === 1 ? '' : 's'}
                     {thin && ' — the rest of the window is padding'}
                   </div>
@@ -1417,8 +1601,8 @@ function ForecastTab() {
                     <div style={{ marginTop: 10 }}>
                       <ForecastSpark values={e.series} colour={colour} />
                       <div style={S.sparkMeta}>
-                        <span>horizon {data.horizonMinutes} min</span>
-                        <span>step {data.stepMinutes} min</span>
+                        <span>horizon {data?.horizonMinutes ?? 12} min</span>
+                        <span>step {data?.stepMinutes ?? 5} min</span>
                         <span>dashed = forecast, not history</span>
                       </div>
                     </div>
@@ -1434,8 +1618,8 @@ function ForecastTab() {
 
       {agree.comparable ? (
         <div style={agree.relativeDiff > 0.2 ? S.warn : { ...S.dim, lineHeight: 1.6 }}>
-          The two disagree by <strong>{(agree.relativeDiff * 100).toFixed(1)}%</strong>
-          {' '}({powerMw(Math.abs(+agree.deltaMw), { digits: 3 })}), {agree.higher.toUpperCase()} higher.
+          The two disagree by <strong>{agree.relativeDiff != null ? (agree.relativeDiff * 100).toFixed(1) : '0.0'}%</strong>
+          {' '}({powerMw(Math.abs(+(agree.deltaMw || 0)), { digits: 3 })}), {(agree.higher || '').toUpperCase()} higher.
           {agree.relativeDiff > 0.2 &&
             ' A gap this wide usually means one of them is forecasting from far less real history than the other — compare the sample counts above before believing either.'}
         </div>

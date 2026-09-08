@@ -101,37 +101,37 @@ const mimeTypes = {
 
 // Dispatched commands history collected by mock API
 const dispatchedCommands = [];
+const distDir = path.join(__dirname, 'dist');
+
+const mockDevices = {
+  devices: [
+    {
+      id: 'esp32-zone-01',
+      zone: 'zone-office-a',
+      source: 'esp32',
+      online: true,
+      bound: true,
+      tempReal: true,
+      acReal: true,
+      acKnown: true,
+      ageSec: 1.2,
+      rateHz: 1.0,
+      messages: 450,
+      malformed: 0,
+      fields: {
+        temperature: { count: 450, last: 23.8, min: 21.0, max: 25.0, at: new Date().toISOString() },
+        humidity: { count: 450, last: 52.1, min: 45.0, max: 60.0, at: new Date().toISOString() },
+        plugW: { count: 450, last: 180.5, min: 0.0, max: 350.0, at: new Date().toISOString() },
+        stripW: { count: 450, last: 45.2, min: 0.0, max: 120.0, at: new Date().toISOString() },
+        acW: { count: 450, last: 850.0, min: 0.0, max: 1200.0, at: new Date().toISOString() },
+      },
+      lastJson: '{"zone":"zone-office-a","temperature":23.8,"humidity":52.1,"plugW":180.5,"stripW":45.2,"acW":850.0}',
+    },
+  ],
+  staleAfter: 20,
+};
 
 function createStaticAndMockServer(port = 5210) {
-  const distDir = path.join(__dirname, 'dist');
-
-  const mockDevices = {
-    devices: [
-      {
-        id: 'esp32-zone-01',
-        zone: 'zone-office-a',
-        source: 'esp32',
-        online: true,
-        bound: true,
-        tempReal: true,
-        acReal: true,
-        acKnown: true,
-        ageSec: 1.2,
-        rateHz: 1.0,
-        messages: 450,
-        malformed: 0,
-        fields: {
-          temperature: { count: 450, last: 23.8, min: 21.0, max: 25.0, at: new Date().toISOString() },
-          humidity: { count: 450, last: 52.1, min: 45.0, max: 60.0, at: new Date().toISOString() },
-          plugW: { count: 450, last: 180.5, min: 0.0, max: 350.0, at: new Date().toISOString() },
-          stripW: { count: 450, last: 45.2, min: 0.0, max: 120.0, at: new Date().toISOString() },
-          acW: { count: 450, last: 850.0, min: 0.0, max: 1200.0, at: new Date().toISOString() },
-        },
-        lastJson: '{"zone":"zone-office-a","temperature":23.8,"humidity":52.1,"plugW":180.5,"stripW":45.2,"acW":850.0}',
-      },
-    ],
-    staleAfter: 20,
-  };
 
   const server = http.createServer((req, res) => {
     // CORS headers
@@ -212,18 +212,132 @@ function createStaticAndMockServer(port = 5210) {
   });
 }
 
+function setupRequestInterception(page) {
+  return page.setRequestInterception(true).then(() => {
+    page.on('request', req => {
+      try {
+        const url = new URL(req.url());
+        const pathname = url.pathname;
+
+        const corsHeaders = {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+          'Access-Control-Allow-Headers': '*',
+          'Content-Type': 'application/json',
+        };
+
+        if (req.method() === 'OPTIONS') {
+          req.respond({
+            status: 200,
+            headers: {
+              'Access-Control-Allow-Origin': '*',
+              'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+              'Access-Control-Allow-Headers': '*',
+            },
+            body: '',
+          });
+          return;
+        }
+
+        if (pathname === '/api/devices') {
+          req.respond({
+            status: 200,
+            headers: corsHeaders,
+            body: JSON.stringify(mockDevices),
+          });
+          return;
+        }
+
+        if (pathname === '/api/hardware') {
+          req.respond({
+            status: 200,
+            headers: corsHeaders,
+            body: JSON.stringify({ status: 'ok', zones: {} }),
+          });
+          return;
+        }
+
+        if (pathname === '/api/devices/events') {
+          req.respond({
+            status: 200,
+            headers: corsHeaders,
+            body: JSON.stringify({ events: [] }),
+          });
+          return;
+        }
+
+        if (pathname === '/api/command' && req.method() === 'POST') {
+          const postData = req.postData();
+          try {
+            const parsed = JSON.parse(postData || '{}');
+            dispatchedCommands.push(parsed);
+            req.respond({
+              status: 200,
+              headers: corsHeaders,
+              body: JSON.stringify({ status: 'ok', message: 'command dispatched' }),
+            });
+          } catch (e) {
+            req.respond({
+              status: 400,
+              headers: corsHeaders,
+              body: JSON.stringify({ error: e.message }),
+            });
+          }
+          return;
+        }
+
+        if (pathname.startsWith('/api/')) {
+          req.respond({
+            status: 200,
+            headers: corsHeaders,
+            body: JSON.stringify({ ok: true }),
+          });
+          return;
+        }
+
+        let reqPath = pathname;
+        if (reqPath === '/' || reqPath === '') reqPath = '/index.html';
+        const filePath = path.join(distDir, reqPath.replace(/^\//, ''));
+        const ext = path.extname(filePath);
+
+        if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+          req.respond({
+            status: 200,
+            contentType: mimeTypes[ext] || 'application/octet-stream',
+            body: fs.readFileSync(filePath),
+          });
+        } else {
+          const indexPath = path.join(distDir, 'index.html');
+          req.respond({
+            status: 200,
+            contentType: 'text/html',
+            body: fs.readFileSync(indexPath),
+          });
+        }
+      } catch {
+        req.continue();
+      }
+    });
+  });
+}
+
 async function run() {
   console.log(`${colors.bright}Starting Milestone 1 Hardware Inspector Verification...${colors.reset}`);
-
-  const serverInstance = await createStaticAndMockServer(5218);
-  const baseUrl = `${serverInstance.url}/?inspector`;
-  console.log(`Server listening at ${baseUrl}`);
 
   let browser;
   try {
     browser = await puppeteer.launch({
       headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+      pipe: true,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--single-process',
+        '--no-zygote',
+        '--disable-gpu',
+        '--disable-dev-shm-usage',
+        '--disable-features=Crashpad'
+      ],
     });
 
     const page = await browser.newPage();
@@ -233,7 +347,9 @@ async function run() {
       }
     });
 
-    await page.goto(baseUrl, { waitUntil: 'networkidle0' });
+    await setupRequestInterception(page);
+    await page.goto('http://dashboard.local/?inspector', { waitUntil: 'domcontentloaded' });
+    await new Promise(r => setTimeout(r, 1500));
 
     // Suite 1: Layout & Core Elements
     harness.suite('Page Layout & Tab Navigation');
@@ -276,6 +392,15 @@ async function run() {
       harness.assert(options.includes('RC5'), 'Expected RC5 protocol');
     });
 
+    const clearAndType = async (el, text) => {
+      await el.evaluate((node, val) => {
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+        setter.call(node, val);
+        node.dispatchEvent(new Event('input', { bubbles: true }));
+        node.dispatchEvent(new Event('change', { bubbles: true }));
+      }, text);
+    };
+
     await harness.test('Transmitting IR Code dispatches IR_SEND:<proto>:<hex>:<bits> to backend', async () => {
       dispatchedCommands.length = 0;
 
@@ -284,13 +409,11 @@ async function run() {
 
       // Set hex code
       const hexInput = await page.$('[data-testid="ir-hex-input"]');
-      await hexInput.click({ clickCount: 3 });
-      await hexInput.type('0x11223344');
+      await clearAndType(hexInput, '0x11223344');
 
       // Set bits to 32
       const bitsInput = await page.$('[data-testid="ir-bits-input"]');
-      await bitsInput.click({ clickCount: 3 });
-      await bitsInput.type('32');
+      await clearAndType(bitsInput, '32');
 
       // Click Send
       await page.click('[data-testid="ir-send-btn"]');
@@ -313,8 +436,7 @@ async function run() {
 
       // Set HVAC temp
       const tempInput = await page.$('[data-testid="hvac-setpoint-input"]');
-      await tempInput.click({ clickCount: 3 });
-      await tempInput.type('21.5');
+      await clearAndType(tempInput, '21.5');
       await page.click('[data-testid="hvac-set-btn"]');
 
       await new Promise(r => setTimeout(r, 200));
@@ -367,8 +489,7 @@ async function run() {
       dispatchedCommands.length = 0;
 
       const damperInput = await page.$('[data-testid="damper-input"]');
-      await damperInput.click({ clickCount: 3 });
-      await damperInput.type('65');
+      await clearAndType(damperInput, '65');
 
       await page.click('[data-testid="damper-send-btn"]');
       await new Promise(r => setTimeout(r, 200));
@@ -465,7 +586,6 @@ async function run() {
 
   } finally {
     if (browser) await browser.close();
-    await serverInstance.close();
   }
 
   const success = harness.summary();

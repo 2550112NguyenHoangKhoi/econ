@@ -62,23 +62,26 @@ export default function AiInsightsPanel({ simData, activeScenario, faultTarget, 
 
   // Unified active forecast combining live zero-shot horizon, decile bands, and LSTM peak reference.
   const activeForecast = useMemo(() => {
-    const rawSeries = (Array.isArray(tfmSeries) && tfmSeries.length > 0)
+    const isValidNumericArray = (arr) => Array.isArray(arr) && arr.length > 0 &&
+      arr.every(v => v != null && (typeof v === 'number' || (typeof v === 'string' && !Number.isNaN(Number(v)))) && Number.isFinite(Number(v)));
+
+    const rawSeries = isValidNumericArray(tfmSeries)
       ? tfmSeries
-      : (Array.isArray(recForecast?.series) && recForecast.series.length > 0)
+      : isValidNumericArray(recForecast?.series)
         ? recForecast.series
         : null;
 
     const stepMin = compareStepMinutes || recForecast?.stepMinutes || 5;
-    const upper = (Array.isArray(compareUpperBand) && compareUpperBand.length > 0)
+    const upper = isValidNumericArray(compareUpperBand)
       ? compareUpperBand
-      : (Array.isArray(recForecast?.upperBand) && recForecast.upperBand.length > 0)
+      : isValidNumericArray(recForecast?.upperBand)
         ? recForecast.upperBand
         : null;
 
     const uq = compareUpperQuantile || recForecast?.upperQuantile || 'q9';
     const peakUp = comparePeakUpperMw ?? recForecast?.peakUpperMw ?? null;
     const lstmPeak = lstmCompare?.peakMw ?? recForecast?.lstmPeakMw ?? aiForecast?.predicted_peak_load ?? null;
-    const engineName = (timesfm?.available && tfmSeries?.length > 0)
+    const engineName = (timesfm?.available && rawSeries && rawSeries.length > 0)
       ? 'timesfm'
       : (recForecast?.engine || (aiForecast ? 'lstm' : 'fallback'));
 
@@ -86,7 +89,7 @@ export default function AiInsightsPanel({ simData, activeScenario, faultTarget, 
       ? rawSeries.map((mw, i) => ({
           t: `+${(i + 1) * stepMin}m`,
           mw: +Number(mw).toFixed(4),
-          hi: upper && upper[i] != null ? +Number(upper[i]).toFixed(4) : undefined,
+          hi: upper && upper[i] != null && Number.isFinite(Number(upper[i])) ? +Number(upper[i]).toFixed(4) : undefined,
         }))
       : [];
 
@@ -390,6 +393,23 @@ export default function AiInsightsPanel({ simData, activeScenario, faultTarget, 
     // 5. (Thermal-drift hotspots are now handled by the learned-baseline recommendations
     // above: a zone many σ hotter than its own hourly normal, scored server-side, instead
     // of a fixed temp > setpoint + deadband rule that fires on every warm afternoon.)
+
+    // 5b. Carbon footprint / offset recommendation
+    const offset = simData.carbonCreditRecommendations;
+    if (offset && offset.overBudget) {
+      generated.push({
+        id: 'carbon-offset',
+        type: 'warning',
+        icon: <TrendingDown size={18} color="var(--accent-yellow)" />,
+        title: 'Carbon Budget Exceeded',
+        message: offset.recommendation || `Emissions exceed target budget by ${offset.deficitKgCO2e} kgCO2e. It is recommended to purchase carbon credits to offset this deficit.`,
+        action: 'VIEW QUOTES & ALTERNATIVES',
+        once: true,
+        onAction: () => {
+          window.open('https://carboncredits.com/', '_blank');
+        },
+      });
+    }
 
     // 6. Autonomous operations status (always present) — real engine state.
     const apOn = simData.autoPilot !== false;

@@ -1,22 +1,17 @@
 # Progress - teamwork_preview_challenger_m1_2
 
-Last visited: 2026-09-04T06:43:00Z
+Last visited: 2026-09-08T05:43:00Z
 
 ## Status
-- [x] Initialized DISPATCH.md and BRIEFING.md
-- [x] Read ORIGINAL_REQUEST.md, PROJECT.md, and worker handoff.md
-- [x] Inspect edge/esp32 source code and existing test setup
-- [x] Test JSON payload size in readAndPublish() under extreme values (`empirical_payload_test.cpp`)
-  - Nominal payload: 242 bytes (142 bytes buffer headroom)
-  - Max realistic payload: 282 bytes (102 bytes buffer headroom)
-  - Extreme float payload: 253 to 286 bytes (98 to 131 bytes buffer headroom)
-  - Theoretical worst-case payload: 311 bytes (73 bytes buffer headroom)
-  - Result: Guaranteed no truncation and no buffer overflow in `char buf[384]`
-  - Verified `StaticJsonDocument<384>` on ESP32 32-bit Xtensa (17 slots + root = 272B + 32B zone = 304B <= 384B)
-- [x] Fuzz stripCalAPerV with edge cases and invalid types (`empirical_fuzz_test.cpp`)
-  - -100, 0, 0.99, 500.01, NaN, Inf, long strings all cleanly rejected without state/NVS corruption
-  - Multi-field atomic rejection verified (no partial configuration applied)
-  - Uncovered type-coercion behavior: boolean `true` coerces to 1.0f due to implicit ArduinoJson variant cast without explicit `.is<float>()` check, and is accepted because 1.0f is the exact lower bound [1.0f, 500.0f]
-- [x] PlatformIO firmware build verified (`[SUCCESS] Took 23.61 seconds`)
-- [x] Compiled handoff.md with findings and verdict APPROVE
+- [x] Initialized DISPATCH.md and BRIEFING.md with Milestone 1 Challenger 2 mission
+- [x] Read ORIGINAL_REQUEST.md, PROJECT.md, and Worker M1 handoff.md
+- [x] Inspected `dashboard/src/TelemetryLogs.jsx` and `dashboard/src/HardwareInspector.jsx`
+- [x] Implemented adversarial test script `dashboard/verify_adversarial_logs_hardware.js`
+- [x] Executed test suite (12 tests, 100% PASS):
+  - 5,520 high-frequency events across 10 zones with zero duplicate keys (5,520 unique keys) and zero crashes
+  - Corrupted/malformed zone payloads (null, undefined, missing props, non-numeric, NaN, Infinity, extra props)
+  - Serial log sliding buffer <= 50,000 chars under 100k+ character stream and 1,000,000 char stress test
+  - Single-relay alignment invariants (GPIO 26 smart plug, pin 255 unpopulated lighting)
+- [x] Ran existing test suites (`verify_webserial_floor_switcher.js`, `verify_ai_actions.js`, `npm run build`)
+- [x] Compiled comprehensive handoff report `handoff.md` with verdict APPROVE
 - [x] Send message to parent orchestrator

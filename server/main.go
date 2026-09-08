@@ -9,6 +9,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
@@ -57,6 +58,12 @@ func main() {
 	engine.Persist = persistReading
 	http.HandleFunc("/api/history", historyHandler)
 	// [GEMINI IMPLEMENTATION END]
+
+	// State Persistence Store & Cold-Boot Engine Restoration (Milestone 2)
+	stateStore := NewStateStore("./data/dashboard-state.json", DB)
+	applyPersistentStateToEngine(engine, stateStore)
+	http.HandleFunc("/api/state", stateHandler(engine, stateStore))
+	go statePersistLoop(stateStore)
 
 
 	// Generic per-zone, per-metric time series (TimescaleDB). The read path for
@@ -195,7 +202,7 @@ func main() {
 
 	// 2. WebSocket endpoint for telemetry streaming
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		handleWebSocket(w, r, engine)
+		handleWebSocket(w, r, engine, stateStore)
 	})
 
 	// Start server. PORT is overridable so a second engine can be run alongside a live
@@ -212,13 +219,31 @@ func main() {
 	}
 }
 
-func handleWebSocket(w http.ResponseWriter, r *http.Request, engine *simulation.Engine) {
+func handleWebSocket(w http.ResponseWriter, r *http.Request, engine *simulation.Engine, stores ...*StateStore) {
+	var stateStore *StateStore
+	if len(stores) > 0 {
+		stateStore = stores[0]
+	}
+
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("WebSocket upgrade error: %v", err)
 		return
 	}
 	defer conn.Close()
+
+	// Register with state broadcast hub & send initial state_sync frame before telemetry broadcast attaches
+	if stateStore != nil {
+		syncFrame := map[string]interface{}{
+			"type":    "state_sync",
+			"toggles": stateStore.GetAll(),
+		}
+		if syncBytes, err := json.Marshal(syncFrame); err == nil {
+			_ = conn.WriteMessage(websocket.TextMessage, syncBytes)
+		}
+		RegisterStateWsClient(conn)
+		defer UnregisterStateWsClient(conn)
+	}
 
 	engine.AddClient(conn)
 	defer engine.RemoveClient(conn)
@@ -273,6 +298,33 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request, engine *simulation.
 			// while leaving legacy string scenarios intact.
 			strMsg := string(msg)
 			if len(strMsg) > 0 && strMsg[0] == '{' {
+				// State persistence toggle action: {"action": "set_state", "key": "...", "value": ...}
+				// or {"action": "set_state", "toggles": { ... }}
+				var st struct {
+					Action  string                 `json:"action"`
+					Key     string                 `json:"key"`
+					Value   interface{}            `json:"value"`
+					Toggles map[string]interface{} `json:"toggles"`
+				}
+				if json.Unmarshal(msg, &st) == nil && st.Action == "set_state" {
+					updates := make(map[string]interface{})
+					if st.Toggles != nil {
+						for k, v := range st.Toggles {
+							updates[k] = v
+						}
+					}
+					if st.Key != "" {
+						updates[st.Key] = st.Value
+					}
+					if len(updates) > 0 && stateStore != nil {
+						stateStore.SetAll(updates)
+						applyPersistentStateToEngine(engine, stateStore)
+						_ = stateStore.Save()
+						BroadcastStateBatch(updates, conn)
+					}
+					return
+				}
+
 				// Auto-Pilot toggle carries a bool value, so it is parsed first with its
 				// own shape (the override map below is map[string]string and would reject
 				// it). This is what makes the dashboard's AI switch a real engine control.
@@ -282,6 +334,11 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request, engine *simulation.
 				}
 				if json.Unmarshal(msg, &ap) == nil && ap.Action == "autopilot" && ap.Value != nil {
 					engine.SetAutoPilot(*ap.Value)
+					if stateStore != nil {
+						stateStore.Set("autoPilot", *ap.Value)
+						_ = stateStore.Save()
+						BroadcastStateUpdate("autoPilot", *ap.Value, conn)
+					}
 					return
 				}
 				// Model switch command: {"action": "switch_model", "model": "..."} or {"action": "switch_building", "model": "..."}
@@ -306,6 +363,11 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request, engine *simulation.
 						log.Printf("[ws] failed to reload building: %v", err)
 						_ = conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"error","error":"failed to reload building"}`))
 						return
+					}
+					if stateStore != nil {
+						stateStore.Set("buildingModel", sm.Model)
+						_ = stateStore.Save()
+						BroadcastStateUpdate("buildingModel", sm.Model, conn)
 					}
 					log.Printf("[ws] successfully switched model to %q (%s, %d zones, %d vavs)",
 						sm.Model, engine.BuildingId(), len(engine.Zones), len(engine.Vavs))
@@ -338,7 +400,7 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request, engine *simulation.
 	}
 }
 
-var validZoneRegex = regexp.MustCompile(".*")
+var validZoneRegex = regexp.MustCompile(`^[a-zA-Z0-9_\- ]{1,64}$`)
 
 func isSupportedCommand(cmd string) bool {
 	trimmed := strings.TrimSpace(cmd)
@@ -456,4 +518,16 @@ func commandHandler(engine *simulation.Engine) http.HandlerFunc {
 // CommandHandler is an exported alias for commandHandler.
 func CommandHandler(engine *simulation.Engine) http.HandlerFunc {
 	return commandHandler(engine)
+}
+
+// statePersistLoop periodically persists the state store to ensure durability.
+func statePersistLoop(store *StateStore) {
+	if store == nil {
+		return
+	}
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	for range ticker.C {
+		_ = store.Save()
+	}
 }

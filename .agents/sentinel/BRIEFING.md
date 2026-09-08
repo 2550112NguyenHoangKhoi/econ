@@ -1,7 +1,7 @@
-# BRIEFING — 2026-09-06T20:28:00Z
+# BRIEFING — 2026-09-08T04:43:00Z
 
 ## Mission
-Expand the dashboard's Hardware Inspector and UI capabilities to provide full manual controls, add sustainability recommendations, expose the engine's Simulation vs. Real Mode toggle, and fully integrate the offline Local AI Models for live inference.
+Fix React rendering crashes in HardwareInspector.jsx, resolve plugW/stripW reading 0 telemetry issues, ensure sustainability tracking is active, harden camera integration against hardware wiring faults, and wire/verify Manual Controls and Actuation panel in Hardware Inspector to the backend.
 
 ## 🔒 My Identity
 - Archetype: sentinel
@@ -41,6 +41,13 @@ Expand the dashboard's Hardware Inspector and UI capabilities to provide full ma
 - Active Orchestrator Workspace: /Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_orchestrator_11
 - Victory Auditor (Current): e6cb22d3-a743-4802-94cc-cb0395409cc1
 - Victory Auditor Workspace: /Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_victory_auditor_11
+- Active Orchestrator (Current): 8cd1243a-7b9a-4b15-a16c-8d92a5af0610
+- Active Orchestrator Workspace: /Users/nguyenhoangkhoi/Documents/econ/.agents/swe_4
+- Victory Auditor (Current): b644be0e-3532-4119-ab96-67850ca2259b
+- Victory Auditor Workspace: /Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_victory_auditor_swe4
+- Active Orchestrator (Current): 94b1bad7-43b4-4ef2-a84c-6c5e8cbf0b7f
+- Active Orchestrator Workspace: /Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_orchestrator_13
+- Victory Auditor: to be spawned on victory claim
 
 ## 🔒 Key Constraints
 - No technical decisions — relay only
@@ -48,36 +55,27 @@ Expand the dashboard's Hardware Inspector and UI capabilities to provide full ma
 - Must not write code, analyze problems, or make technical decisions
 
 ## User Context
-- **Last user request**: Expand the dashboard's Hardware Inspector and UI capabilities to provide full manual controls, add sustainability recommendations, expose the engine's Simulation vs. Real Mode toggle, and fully integrate the offline Local AI Models for live inference.
+- **Last user request**: Comprehensive overhaul of ECON IoT dashboard and backend (persistent state, 3D floor switcher & logs fixes, WebSerial ESP32 connection & WiFi provisioning, global pipeline integrity) + Follow-up R5 (Compute Offload: dynamic pass-through fallback on strained ESP32 edge node and backend server-side DSP/denoising).
 - **Pending clarifications**: none
-- **Delivered results**: Full implementation, verification, and confirmed victory audit of R1 (Hardware Controls & IR Blaster), R2 (Simulation vs. Real Mode UI Toggle), R3 (Sustainability Recommendations Panel), and R4 (Local Offline AI Models Live Inference).
+- **Delivered results**: none for current phase (dispatched to teamwork_preview_orchestrator_13; R5 relayed)
 
 ## Project Status
-- **Phase**: complete
+- **Phase**: in progress
 - **Routing Decision**: General (`teamwork_preview_orchestrator`)
-- **Active Orchestrator**: 338e1187-ed26-44bb-9a9b-415fdd67363a (`/Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_orchestrator_11`)
-- **Victory Auditor**: e6cb22d3-a743-4802-94cc-cb0395409cc1 (`/Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_victory_auditor_11`)
-- **Monitoring Crons**: Cancelled (task-36, task-38 killed).
-- **Subagents**: Cleaned up (kill_all).
+- **Active Orchestrator**: 94b1bad7-43b4-4ef2-a84c-6c5e8cbf0b7f (`/Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_orchestrator_13`)
+- **Victory Auditor**: to be spawned on victory claim
+- **Monitoring Crons**:
+  - Progress cron: `3b4914c7-c26f-447b-9c88-73fe557e3fcb/task-38` (`*/8 * * * *`)
+  - Liveness cron: `3b4914c7-c26f-447b-9c88-73fe557e3fcb/task-40` (`*/10 * * * *`)
 
 ## Victory Audit Status
-- **Triggered**: yes
-- **Verdict**: VICTORY CONFIRMED
-- **Auditor**: e6cb22d3-a743-4802-94cc-cb0395409cc1
-- **Audit Findings**:
-  - Phase A (Timeline): PASS — verified full chronological artifact and commit history without anomalies.
-  - Phase B (Integrity): PASS — CLEAN. No bypasses, fake fixtures, or cheating. Authentic binary PyTorch weights (model_weights.pth, 209 KB) and fitted StandardScaler (scaler.pkl, 679 B).
-  - Phase C (Independent Tests): PASS — 100% test pass rate across Go 4-Tier E2E Suite (50/50), Go Server Suite (100%), Frontend E2E Controls (41/41), Operation Mode Toggle (23/23), Vite production build (0 errors), Firmware Offload Host Test (21/21), Standalone LSTM inference (2.2441 MW), and TimesFM MPS autoregression (12 steps, 9 quantiles).
+- **Triggered**: no
+- **Verdict**: pending
 - **Retry count**: 0
 
 ## Artifact Index
 - `/Users/nguyenhoangkhoi/Documents/econ/.agents/ORIGINAL_REQUEST.md` — Authoritative record of user requests
-- `/Users/nguyenhoangkhoi/Documents/econ/ORIGINAL_REQUEST.md` — Root copy of original user requests
-- `/Users/nguyenhoangkhoi/Documents/econ/TEST_READY.md` — E2E Test Suite verification manifest
-- `/Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_orchestrator_11/DISPATCH.md` — Orchestrator dispatch task
-- `/Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_orchestrator_11/handoff.md` — Orchestrator completion handoff
-- `/Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_orchestrator_11/GATE_STATUS.md` — Verification gate status
-- `/Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_victory_auditor_11/DISPATCH.md` — Victory Auditor dispatch task
-- `/Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_victory_auditor_11/handoff.md` — Victory Auditor handoff report
+- `/Users/nguyenhoangkhoi/Documents/econ/ORIGINAL_REQUEST.md` — Workspace root copy of user requests
+- `/Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_orchestrator_13/DISPATCH.md` — Orchestrator dispatch instructions
 - `/Users/nguyenhoangkhoi/Documents/econ/.agents/sentinel/BRIEFING.md` — Sentinel persistent working memory
-- `/Users/nguyenhoangkhoi/Documents/econ/.agents/sentinel/handoff.md` — Sentinel handoff report
+

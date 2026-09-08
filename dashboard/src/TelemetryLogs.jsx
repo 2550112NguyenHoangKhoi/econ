@@ -17,6 +17,7 @@ import { Terminal } from 'lucide-react';
 // like "when did that room go into alarm?".
 
 const MAX_LINES = 300;
+let logSeq = 0;
 
 // Rounded so ordinary sensor noise cannot register as a change. The stream carries ±0.08 °C
 // of noise, so a setpoint watched to two decimals would "change" continuously.
@@ -24,13 +25,14 @@ const round1 = (v) => (typeof v === 'number' ? Math.round(v * 10) / 10 : v);
 
 // The facts worth remembering about a zone. Anything not in here is live state, and the
 // live panels already show it better than a log can.
-function snapshot(z) {
+function safeSnapshot(z) {
+  if (!z || typeof z !== 'object') return null;
   return {
     alert: z.alert === true ? 'ALARM' : z.alert === 'REMEDIATING' ? 'REMEDIATING' : 'ok',
     lightsOn: z.lightsOn !== false,
-    plugShed: !!z.plugShed,
-    setpoint: round1(z.setpoint),
-    occupied: (z.occupancy || 0) > 0,
+    plugShed: Boolean(z.plugShed),
+    setpoint: round1(Number.isFinite(z.setpoint) ? z.setpoint : 24.0),
+    occupied: Boolean(z.occupancy && Number(z.occupancy) > 0),
   };
 }
 
@@ -52,16 +54,29 @@ const COLOUR = {
 export default function TelemetryLogs({ simData }) {
   const [lines, setLines] = useState([]);
   const prev = useRef(null);
+  const buildingId = simData?.buildingId || (simData?.zones ? Object.keys(simData.zones).length : 0);
+  const prevBuildingRef = useRef(buildingId);
+
+  // Reset baseline when building model switches so stale zone baselines are discarded
+  useEffect(() => {
+    if (buildingId && prevBuildingRef.current !== buildingId) {
+      prev.current = null;
+      prevBuildingRef.current = buildingId;
+    }
+  }, [buildingId]);
 
   useEffect(() => {
     const zones = simData?.zones;
-    if (!zones) return;
+    if (!zones || typeof zones !== 'object') return;
 
     // First frame establishes the baseline. Emitting an "event" for every zone's initial
     // state would fill the log with things that did not happen.
     if (prev.current === null) {
       const base = {};
-      for (const [id, z] of Object.entries(zones)) base[id] = snapshot(z);
+      for (const [id, z] of Object.entries(zones)) {
+        const s = safeSnapshot(z);
+        if (s) base[id] = s;
+      }
       prev.current = base;
       return;
     }
@@ -69,15 +84,16 @@ export default function TelemetryLogs({ simData }) {
     const stamp = new Date().toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
     const fresh = [];
     for (const [id, z] of Object.entries(zones)) {
-      const now = snapshot(z);
+      const now = safeSnapshot(z);
+      if (!now) continue;
       const was = prev.current[id];
       if (!was) { prev.current[id] = now; continue; }
       for (const ev of EVENTS) {
         if (was[ev.key] !== now[ev.key]) {
           fresh.push({
-            id: `${id}:${ev.key}:${stamp}:${now[ev.key]}`,
+            id: `log-${id}-${ev.key}-${Date.now()}-${++logSeq}`,
             t: stamp,
-            zone: z.label || id,
+            zone: z?.label || id,
             msg: ev.text(was[ev.key], now[ev.key]),
             level: ev.level(was[ev.key], now[ev.key]),
           });
@@ -87,6 +103,7 @@ export default function TelemetryLogs({ simData }) {
     }
     if (fresh.length) setLines((cur) => [...fresh.reverse(), ...cur].slice(0, MAX_LINES));
   }, [simData]);
+
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: '1rem' }}>

@@ -47,6 +47,23 @@ export function getBuilding() {
   return isMultiLevelBuilding(towerData) ? towerData : bundledTower;
 }
 
+export function getActiveFloorAsset(building, activeFloor) {
+  const floors = Array.isArray(building?.floors) ? building.floors : [];
+  const targetLevel = Number.isFinite(Number(activeFloor)) ? Number(activeFloor) : 1;
+  const floor = floors.find((f) => f.level === targetLevel) || floors[0];
+  if (!floor) return null;
+  const primaryZone = floor.zones?.[0];
+  return {
+    level: floor.level,
+    name: floor.name || `Level ${floor.level}`,
+    assetId: primaryZone?.bim_asset_id || `floor-asset-${floor.level}`,
+    zoneCount: floor.zones?.length || 0,
+    elevation: typeof floor.elevation === 'number' ? floor.elevation : 0,
+    height: typeof floor.height === 'number' ? floor.height : 4.0,
+  };
+}
+
+
 export function getAllKnownBuildings() {
   const t = isMultiLevelBuilding(towerData) ? towerData : bundledTower;
   const h = isHomeBuilding(homeData) ? homeData : bundledHome;

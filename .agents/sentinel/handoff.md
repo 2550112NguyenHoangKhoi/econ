@@ -1,37 +1,57 @@
 # Sentinel Handoff Report
 
 ## Observation
-The user requested the full implementation and integration of 4 core capabilities for the ECON Digital Twin platform:
-1. **R1**: Hardware Inspector expansion with IR Blaster fields across firmware device libraries, and manual control overrides (IR send, plugs/relays, dampers).
-2. **R2**: Global React UI toggle for Simulation Mode vs. Real Mode with backend engine mode switching and strict real-mode mock rejection.
-3. **R3**: Dedicated Sustainability Recommendations UI section aggregating Scope 2 operational carbon, space utilization, predictive maintenance alerts, and live carbon credit recommendations.
-4. **R4**: Offline Local AI Models (LSTM & TimesFM) integrated via inter-process subprocess streaming in the Go backend for real-time live inference.
+The user requested a single self-contained, focused fix addressing four critical areas in the ECON Digital Twin platform:
+1. **R1 (UI Crash Resolution)**: Fix React unhandled exceptions and component stack crashes originating in `HardwareInspector.jsx`.
+2. **R2 (Telemetry and Sustainability Fixes)**: Resolve why `plugW` and `stripW` read as 0, and ensure sustainability tracking is active and accumulating data across all modes.
+3. **R3 (Camera Fault Tolerance)**: Add C++ guards in ESP32 firmware against missing I2C devices or wiring faults (preventing boot-loops), and add React fallbacks for corrupted or missing image data.
+4. **User Follow-up (Manual Controls & Actuation)**: Make the Manual Controls and Actuation panel in the Hardware Inspector fully wired to the backend and verified functional.
 
-Per the Sentinel Routing Decision Table, the task was classified as **General** and routed to `teamwork_preview_orchestrator`. Two monitoring crons were scheduled. Following initial milestone completions, a temporary resource quota disruption was resolved through orchestrator succession (`orchestrator_11`). Iteration 1 of the milestone verification gate caught a legacy test concurrency isolation issue, which was resolved in Iteration 2. Upon completion reporting, an independent `teamwork_preview_victory_auditor` was spawned.
+Per the Sentinel Routing Decision Table, the task was routed to **SWE Light** (`teamwork_preview_swe`) in `.agents/swe_4`. Two monitoring crons were scheduled. The SWE Light orchestrator drove an implementation pass and three sequential adversarial reviewer rounds. Upon orchestrator completion reporting, Project Sentinel spawned an independent, blocking Victory Auditor (`teamwork_preview_victory_auditor`, Conv ID: `b644be0e-3532-4119-ab96-67850ca2259b`).
 
 ## Logic Chain
-- **Requirement 1**: `HardwareInspector.jsx` exposed protocol selector (13 protocols), hex codes, frequency, bits, transmit button, plug/relay switches, VAV damper slider ($[0.0, 1.0]$), and strain buttons. The Go backend (`server/main.go`, `server/simulation/engine.go`) receives overrides via `/api/command`, latches a 15-minute operator override window, and dispatches to edge nodes over MQTT topic `econ/commands/<topic>`. The ESP32 firmware (`edge/esp32/src/main.cpp`) handles `IR_SEND:`, GPIO 25, and GPIO 23.
-- **Requirement 2**: `server/modeapi.go` provides `GET /api/mode` and `POST /api/mode` with permissive parsing. In `ModeReal`, mock telemetry is rejected (`isMock()` check) with zero digital twin state corruption, while real power strip data is mapped to `z.HwStripW` and zone Circuit Breaker power to `z.HwPlugW`. `App.jsx` mounts a global segmented toggle switch.
-- **Requirement 3**: `server/carbon.go` provides numerical integration of Scope 2 carbon ($P_{\text{watts}} \times \Delta t / 3.6\times 10^6 \times \text{gridFactor}$), tracks space utilization against design capacity, flags equipment power surges for predictive maintenance, and computes whole-certificate carbon credit purchase offsets ($\lceil \text{deficit}/1000 \rceil$) with live Toucan Base Carbon Tonne market pricing. `SustainabilityRecommendationsPanel.jsx` is mounted under a dedicated `SUSTAINABILITY` tab.
-- **Requirement 4**: `backend/forecasting/infer.py` loads binary PyTorch weights (`model_weights.pth`) and fitted StandardScaler (`scaler.pkl`) for supervised `PeakLoadLSTM` regression (2.2441 MW), and runs Google `TimesFM 2.0-500m` autoregressive foundation model inference on Apple Silicon `mps` accelerator with 9 uncertainty quantiles. `server/forecast_ipc.go` provides an automated `os/exec` subprocess bridge fallbacking to local Python models when HTTP services are unavailable.
+- **Requirement 1 (UI Stability)**:
+  - Fixed crashes around line 2868 and unhandled exceptions in `HardwareInspector.jsx`.
+  - Defined missing `EventsTab` and `QualityTab` components.
+  - Implemented safe property access guards, defensive date parsing (`safeTime`, `safeDateTime`), and numeric formatting guards (`.toFixed()`, `.toLocaleString()`, `Number.isFinite()`) across `DeviceCard`, `SustainabilityTab`, `ForecastTab`, and `Spark`.
+  - Guarded `SustainabilityRecommendationsPanel.jsx` against missing or partial telemetry sub-objects.
+- **Requirement 2 (Telemetry & Sustainability)**:
+  - Added `stripW` FlatBuffers schema getter at offset 26 (slot 11) in `dashboard/src/telemetry/zone-data.ts`.
+  - Deserialized `stripW` in `useDigitalTwin.js` alongside `plugW` and mapped both to digital twin topology nodes in `App.jsx`.
+  - Removed Real Mode tab ejection hooks in `App.jsx`, ensuring sustainability tracking and carbon accounting accumulate across both Real and Simulation modes.
+- **Requirement 3 (Camera Fault Tolerance)**:
+  - Configured `Wire.setTimeOut(100)` and SCCB probe verification before `esp_camera_init` in `edge/esp32/src/camera/ov7670_driver.cpp`, preventing bus hangs and watchdog bootloops on missing/shorted camera wiring while gracefully falling back to simulation mode.
+  - Added React error boundaries and offline recovery cards with interactive retry capability in `HardwareInspector.jsx`.
+- **User Follow-up (Manual Controls & Actuation)**:
+  - Wired all manual control actuations (`PLUG_ON/OFF`, `LIGHTS_ON/OFF`, `SETPOINT`, `DAMPER`, `CPU_STRAIN`, `IR_SEND`, `CAMERA_TRIGGER`, and pin configuration saves) to `POST /api/command`.
+  - Attached `X-Admin-Token` authentication headers from `getAdminToken()`.
+  - Validated interactive UI behavior end-to-end via Puppeteer headless Chromium (`dashboard/verify_hardware_inspector.js`).
 
 ## Caveats
-- Production deployment of TimesFM on non-Apple-Silicon hardware will automatically fall back to CPU device mapping without loss of precision.
-- Carbon market live pricing requires outbound internet access to CoinGecko; if offline, it gracefully falls back to the static $12.50/ton baseline.
-- Operator manual overrides latch for 15 minutes by design before autonomous control resumes.
+- Direct flashing onto physical silicon requires a connected USB device; in-browser flashing utilizes the WebSerial API (supported in Chromium browsers like Chrome and Edge).
+- Camera hardware simulation engages automatically when physical I2C SCCB devices do not acknowledge within 100ms.
 
 ## Conclusion
-The Independent Victory Auditor completed all 3 phases (Timeline, Integrity, and Independent Test Execution) with a verdict of **VICTORY CONFIRMED**.
-- Phase A (Timeline): PASS — authentic artifact provenance.
-- Phase B (Integrity): PASS — zero bypasses, zero mock facades, authentic binary neural net weights.
-- Phase C (Independent Tests): PASS — 100% pass across Go E2E test suites (50/50), Go server test suite (100%), frontend E2E automated controls (41/41), mode toggle tests (23/23), clean Vite production build (0 errors), firmware offload host test (21/21), standalone LSTM regression (2.2441 MW), and TimesFM zero-shot forecast (12 steps, 9 quantiles).
-All background tasks and subagents have been terminated and cleaned up.
+The Independent Victory Auditor completed all 3 phases (Timeline, Integrity, and Independent Test Execution) with a definitive verdict of **VICTORY CONFIRMED**.
+- **Phase A (Timeline)**: PASS — authentic commit history and artifact provenance.
+- **Phase B (Integrity)**: PASS — authentic implementations, zero hardcoded facades, genuine admin token dispatch, verified 100ms I2C timeout guards.
+- **Phase C (Independent Tests)**: PASS — 100% pass rate across all 16 test suites with zero discrepancies.
+All background cron tasks (task-34, task-36) and subagents have been terminated and cleaned up.
 
 ## Verification Method
-1. `cd /Users/nguyenhoangkhoi/Documents/econ/e2e_tests && go test -v -count=1 .` -> 50/50 PASS (100%).
-2. `cd /Users/nguyenhoangkhoi/Documents/econ/server && go test -v -count=1 ./...` -> 100% PASS across `econ` and `econ/simulation`.
-3. `cd /Users/nguyenhoangkhoi/Documents/econ/dashboard && node verify_e2e_controls.js` -> 41/41 PASS.
-4. `cd /Users/nguyenhoangkhoi/Documents/econ/dashboard && node verify_mode_toggle.js` -> 23/23 PASS.
-5. `cd /Users/nguyenhoangkhoi/Documents/econ/dashboard && npm run build` -> Clean compilation with 0 errors in 3.31s.
-6. `python3 backend/forecasting/infer.py --model lstm --input '...'` -> Status "ok", peak load 2.2441 MW.
-7. `python3 backend/forecasting/infer.py --model timesfm --input '...'` -> Status "ok", 12 steps, 9 quantiles.
+1. `bash edge/esp32/test/run_host_tests.sh` -> 6/6 suites passed (89/89 checks, exit code 0).
+2. `go test ./...` (in `server`) -> Passed (100% pass across all server packages).
+3. `go test -count=1 ./...` (in `e2e_tests`) -> Passed (100% pass across E2E test suite).
+4. `npm run build` (in `dashboard`) -> Clean Vite production build (2,744 modules, 0 errors).
+5. `npm test` (in `dashboard`) -> 47/47 unit tests passed.
+6. `node dashboard/verify_hardware_inspector.js` -> 11/11 tests passed.
+7. `node dashboard/verify_reviewer_adversarial.js` -> 19/19 tests passed.
+8. `node dashboard/verify_hardware_inspector_headless.js` -> 12/12 tests passed.
+9. `node dashboard/verify_sustainability_panel.js` -> 54/54 tests passed.
+10. `node dashboard/verify_mode_toggle.js` -> 23/23 tests passed.
+11. `node dashboard/verify_e2e_controls.js` -> 41/41 tests passed.
+12. `node dashboard/verify_adversarial_forecast.js` -> 7/7 tests passed.
+13. `node dashboard/verify_adversarial_ui.js` -> 7/7 tests passed.
+14. `node dashboard/verify_adversarial_bim.js` -> 7/7 tests passed.
+15. `node dashboard/verify_adversarial_physics_engine.js` -> 11/11 tests passed.
+16. `node dashboard/verify_3d_asset_resolution.js` -> 11/11 tests passed.

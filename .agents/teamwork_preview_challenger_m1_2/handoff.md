@@ -1,305 +1,267 @@
-# Adversarial Verification & Challenge Report: JSON Serialization Limits & Config Fuzzing
+# Handoff Report: Milestone M1 Adversarial Challenge (Logs Streaming & Hardware Alignment)
 
-**Agent**: `teamwork_preview_challenger_m1_2`  
-**Working Directory**: `d:\ECON1\econ\.agents\teamwork_preview_challenger_m1_2`  
-**Handoff Type**: Hard (Empirical challenge complete)  
-**Verdict**: **APPROVE** (with architectural type-coercion finding documented)
+**Agent**: `teamwork_preview_challenger_m1_2` (Challenger 2)  
+**Role**: `Logs Streaming & Hardware Alignment Adversarial Challenger`  
+**Working Directory**: `/Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_challenger_m1_2`  
+**Handoff Type**: Hard  
+**Verdict**: **`APPROVE`**  
+**Timestamp**: 2026-09-08T05:44:00Z  
+**Recipient**: `94b1bad7-43b4-4ef2-a84c-6c5e8cbf0b7f` (Project Orchestrator)  
 
 ---
 
 ## 1. Observation
 
-### Target Under Review
-1. **JSON Serialization in Telemetry**:
-   - `edge/esp32/src/main.cpp` line 725: `StaticJsonDocument<384> doc;`
-   - `edge/esp32/src/main.cpp` lines 809–816:
-     ```cpp
-     #if USE_STRIP
-       float stripAmps = readStripAmps();
-       if (stripAmps >= 0) {
-         doc["stripW"] = round(stripAmps * gCfg.plugMainsV * 10) / 10.0;
-       } else {
-         Serial.println("[strip] ADC window starved -> omitted (engine keeps modelling)");
-       }
-     #endif
-     ```
-   - `edge/esp32/src/main.cpp` line 848: `char buf[384];`
-   - `edge/esp32/src/main.cpp` lines 849–851:
-     ```cpp
-     size_t n = serializeJson(doc, buf);
-     client.publish(TELEMETRY_TOPIC, buf, n);
-     Serial.printf("[mqtt] pub %s -> %s\n", TELEMETRY_TOPIC, buf);
-     ```
+### 1.1 Scope & Assignment
+As directed in `DISPATCH.md`, Challenger 2 empirically audited and stress-tested Worker M1's logs panel and hardware alignment fixes:
+1. Adversarially stress-test `dashboard/src/TelemetryLogs.jsx`:
+   - Simulate high-frequency WebSocket bursts (5,000+ events in rapid succession across 10 zones).
+   - Inject corrupted / malformed zone objects (null, missing properties, non-numeric values, extra unexpected properties).
+   - Assert zero duplicate React keys generated and zero unhandled exceptions.
+2. Stress-test `dashboard/src/HardwareInspector.jsx` serial log buffer:
+   - Simulate an aggressive serial stream (100,000+ characters of high-baud data).
+   - Assert buffer strictly remains bounded (`<= 50,000` characters) and retains the most recent 40,000 characters without memory leakage.
+3. Validate single-relay alignment invariants:
+   - Assert GPIO 26 is defined as the Smart Plug Relay (`pinPlugRelay = 26`).
+   - Assert legacy Lighting Relay is marked virtual / unpopulated (pin 255).
 
-2. **Configuration Validation & Deserialization**:
-   - `edge/esp32/src/node_config.h` lines 163–164:
-     ```cpp
-     if (!(c.stripCalAPerV >= 1.0f && c.stripCalAPerV <= 500.0f))
-       return cfgFail("stripCalAPerV %.3f outside 1..500 A/V", (double)c.stripCalAPerV);
-     ```
-   - `edge/esp32/src/node_config.h` line 257:
-     ```cpp
-     if (doc.containsKey("stripCalAPerV")) next.stripCalAPerV = doc["stripCalAPerV"];
-     ```
+### 1.2 Direct Code Observations
 
-### Empirical Test Harnesses Created & Executed
-Two empirical test suites were authored in `edge/esp32/test/`:
-1. `edge/esp32/test/empirical_payload_test.cpp`:
-   - Harness with memory guard canary bytes (`0x5A` before, `0xA5` after `char buf[384]`).
-   - Evaluates all 17 telemetry features active simultaneously under nominal, maximum realistic, extreme float (`1e6`, `1e-4`, negative, `.1` recurring, `NaN`, `+Infinity`, `-Infinity`), and theoretical worst-case string representations.
-   - Evaluates boundary truncation and overflow behavior in ArduinoJson.
+#### 1.2.1 `dashboard/src/TelemetryLogs.jsx`
+- **Line 19**: Buffer ceiling `const MAX_LINES = 300;`.
+- **Line 20**: Global monotonic sequence counter `let logSeq = 0;`.
+- **Lines 24–37**: `round1` and `safeSnapshot` implementation:
+  ```javascript
+  const round1 = (v) => (typeof v === 'number' ? Math.round(v * 10) / 10 : v);
 
-2. `edge/esp32/test/empirical_fuzz_test.cpp`:
-   - Fuzzer exercising `stripCalAPerV` over extreme negative values (`-100`, `-100.0`, `-0.001`, `-1e20`), zero (`0`, `0.0`, `-0.0`), sub-threshold boundary (`0.99`, `0.99999`), valid boundaries (`1.0`, `500.0`), super-threshold values (`500.01`, `501.0`, `1000.0`, `1e10`, `1e38`), IEEE-754 special floats (`NaN`, `Inf`, `-Inf` both via JSON string and direct programmatic injection), invalid types (`false`, `null`, `[]`, `{}`, `[15.0]`, non-numeric strings, long strings up to 1000 chars), and multi-field atomic rejection.
+  function safeSnapshot(z) {
+    if (!z || typeof z !== 'object') return null;
+    return {
+      alert: z.alert === true ? 'ALARM' : z.alert === 'REMEDIATING' ? 'REMEDIATING' : 'ok',
+      lightsOn: z.lightsOn !== false,
+      plugShed: Boolean(z.plugShed),
+      setpoint: round1(typeof z.setpoint === 'number' ? z.setpoint : 24.0),
+      occupied: Boolean(z.occupancy && Number(z.occupancy) > 0),
+    };
+  }
+  ```
+- **Lines 60–66**: Baseline reset when building model changes:
+  ```javascript
+  useEffect(() => {
+    if (buildingId && prevBuildingRef.current !== buildingId) {
+      prev.current = null;
+      prevBuildingRef.current = buildingId;
+    }
+  }, [buildingId]);
+  ```
+- **Line 94**: Monotonic unique event key construction:
+  ```javascript
+  id: `log-${id}-${ev.key}-${Date.now()}-${++logSeq}`,
+  ```
+- **Line 104**: Bounded sliding array:
+  ```javascript
+  if (fresh.length) setLines((cur) => [...fresh.reverse(), ...cur].slice(0, MAX_LINES));
+  ```
 
-### Verbatim Tool Execution Outputs
-1. **Payload Test Output (`empirical_payload_test.exe`)**:
-   ```
-   === EMPIRICAL CHALLENGE: JSON SERIALIZATION BUFFER LIMITS ===
+#### 1.2.2 `dashboard/src/HardwareInspector.jsx`
+- **Lines 120–122**: `DEFAULT_HARDWARE_LIBRARY` default pin definitions:
+  ```javascript
+  { id: 'smart_plug', device: 'Smart Plug Relay', pin: 'GPIO 26', bus: 'Digital Output', flag: 'USE_PLUG', desc: 'Sheds non-critical socket circuits after-hours (APLC automated plug load control)' },
+  { id: 'lighting', device: 'Lighting Relay', pin: 'Unused (255)', bus: 'Digital Output', flag: 'RELAY_PIN', desc: 'Legacy/unpopulated lighting relay (virtual, pinLightingRelay = 255)' },
+  ```
+- **Lines 420–451**: Actuators panel physical vs virtual badging:
+  - Smart Plug Circuit: `Smart Plug Circuit (GPIO 26 / APLC Sockets)` badged as `PHYSICAL RELAY (pinPlugRelay = 26)`.
+  - Lighting Relay: `Lighting Relay (GPIO 23 / Solid State)` badged as `VIRTUAL / UNPOPULATED (pinLightingRelay = 255)`.
+- **Lines 1017–1022 & Line 1048**: Sliding window serial buffer implementation:
+  ```javascript
+  const appendLog = (chunk) => {
+    setLog((l) => {
+      const next = l + chunk;
+      return next.length > 50000 ? next.slice(-40000) : next;
+    });
+  };
+  ...
+  setLog(l => { const next = l + value; return next.length > 50000 ? next.slice(-40000) : next; });
+  ```
 
-   --- Test Scenario 1: Nominal Telemetry (All 17 Features) ---
-     [PASS] Nominal document contains all 17 fields
-     Serialized: {"zone":"Level 4","source":"esp32","cfgRev":1,"temperature":24.5,"humidity":60.2,"tempReal":true,"occupancy":3,"co2":850,"plugW":185.4,"plug":"ON","stripW":230.5,"supplyC":14.5,"acW":1199.9,"lux":450,"lights":"ON","setpoint":24,"acReal":true}
-     Length: 242 bytes (measured: 242 bytes, buf capacity: 384)
-     [PASS] No memory corruption before/after char buf[384]
-     [PASS] serializeJson return matches measureJson
-     [PASS] Nominal payload length is well below 384 bytes
-     [PASS] Headroom in buf[384] is at least 50 bytes
+#### 1.2.3 Edge Firmware (`edge/esp32/src/node_config.h` & `main.cpp`)
+- `edge/esp32/src/node_config.h` (Line 157, 163):
+  ```cpp
+  c.pinPlugRelay = 26;
+  c.pinLightingRelay = 255;
+  ```
+- `edge/esp32/src/main.cpp` (Lines 513–515, 1061–1063):
+  ```cpp
+  if (gCfg.pinLightingRelay != 255) {
+    digitalWrite(gCfg.pinLightingRelay, on ? HIGH : LOW);
+  }
+  ```
 
-   --- Test Scenario 2: Maximum Realistic Limits ---
-     [PASS] Max-realistic document contains all 17 fields
-     Serialized: {"zone":"ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ","source":"esp32","cfgRev":4294967295,"temperature":99.9,"humidity":100,"tempReal":false,"occupancy":50,"co2":40000,"plugW":26000,"plug":"OFF","stripW":26000,"supplyC":99.9,"acW":26000,"lux":65535,"lights":"OFF","setpoint":35,"acReal":false}
-     Length: 282 bytes (measured: 282 bytes, buf capacity: 384)
-     [PASS] No memory corruption under max realistic values
-     [PASS] serializeJson return matches measureJson
-     [PASS] Max-realistic payload strictly fits in buf[384]
-     Headroom remaining in char buf[384]: 102 bytes
-     [PASS] Headroom remaining is >= 20 bytes
+### 1.3 Test Execution Logs
 
-   --- Test Scenario 3: Extreme Float Values ---
-     [PASS] [All Zero] guard intact & payload fits (248 bytes)
-     [PASS] serializeJson matches measureJson without truncation
-     [PASS] Extreme float payload strictly fits within 384 bytes
-     [PASS] [Negative floats] guard intact & payload fits (265 bytes)
-     [PASS] serializeJson matches measureJson without truncation
-     [PASS] Extreme float payload strictly fits within 384 bytes
-     [PASS] [Fractional precision (.1 recurring)] guard intact & payload fits (275 bytes)
-     [PASS] serializeJson matches measureJson without truncation
-     [PASS] Extreme float payload strictly fits within 384 bytes
-     [PASS] [Large floats (1e6)] guard intact & payload fits (286 bytes)
-     [PASS] serializeJson matches measureJson without truncation
-     [PASS] Extreme float payload strictly fits within 384 bytes
-     [PASS] [Very small floats (1e-4)] guard intact & payload fits (253 bytes)
-     [PASS] serializeJson matches measureJson without truncation
-     [PASS] Extreme float payload strictly fits within 384 bytes
-     [PASS] [NaN values] guard intact & payload fits (272 bytes)
-     [PASS] serializeJson matches measureJson without truncation
-     [PASS] Extreme float payload strictly fits within 384 bytes
-     [PASS] [Infinity values] guard intact & payload fits (272 bytes)
-     [PASS] serializeJson matches measureJson without truncation
-     [PASS] Extreme float payload strictly fits within 384 bytes
-     [PASS] [-Infinity values] guard intact & payload fits (272 bytes)
-     [PASS] serializeJson matches measureJson without truncation
-     [PASS] Extreme float payload strictly fits within 384 bytes
+#### Command 1: `node verify_adversarial_logs_hardware.js`
+Executed our newly authored adversarial test suite `dashboard/verify_adversarial_logs_hardware.js`:
+```
+╔══════════════════════════════════════════════════════════════════════╗
+║      ECON Challenger 2: Adversarial Streaming & Hardware Alignment   ║
+╚══════════════════════════════════════════════════════════════════════╝
 
-   --- Test Scenario 4: Worst-Case Theoretical String Length ---
-     Worst-Case Serialized: {"zone":"WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW","source":"esp32","cfgRev":4294967295,"temperature":-99999.9,"humidity":100,"tempReal":false,"occupancy":65535,"co2":65535,"plugW":-999999.9,"plug":"OFF","stripW":-999999.9,"supplyC":-99999.9,"acW":-999999.9,"lux":65535,"lights":"OFF","setpoint":-99999.9,"acReal":false}
-     Worst-Case Length: 311 bytes (buf size: 384 bytes)
-     [PASS] Theoretical worst-case length strictly < 384 bytes
-     [PASS] Guard bytes untouched
-     Guaranteed buffer margin: 73 bytes remaining
-     [PASS] Guaranteed safety margin >= 15 bytes
+=== Suite: TelemetryLogs: 5,000+ High-Frequency Burst & Zero Duplicate Keys ===
+    Total frames: 123, Total events pushed: 5520
+  ✔ PASS Streams 5,000+ events across 10 zones with zero key collisions and bounded buffer (23ms)
 
-   --- Test Scenario 5: Buffer Boundary Safety Verification ---
-     [PASS] Guard bytes intact before/after buf[384]
-     [PASS] Payload is safely null-terminated in buf[384]
-     [PASS] Null terminator exists at buffer position n
-     [PASS] Payload plus null-terminator fits within 384 bytes
-     [PASS] ArduinoJson write strictly bounded by buffer capacity
+=== Suite: TelemetryLogs: Corrupted & Malformed Payload Fuzzing ===
+  ✔ PASS Resilient to null, undefined, primitive, and empty simData payloads (0ms)
+  ✔ PASS Resilient to severely malformed and adversarial zone objects (1ms)
+  ✔ PASS Building model switch resets baseline cleanly (0ms)
 
-   Payload Limit Tests Completed: PASSED (0 failures)
-   ```
+=== Suite: HardwareInspector: Serial Log Buffer <= 50,000 Chars Under 100k+ Stream ===
+  ✔ PASS Stream 100,000 characters in small 50-character chunks (1ms)
+  ✔ PASS Stream 100,000 characters in realistic 64-character UART chunks (3ms)
+  ✔ PASS Single massive burst of 100,000 characters trims directly to 40,000 characters (0ms)
+  ✔ PASS High-throughput 1,000,000 character stream maintains bounded memory (2ms)
 
-2. **Fuzz Test Output (`empirical_fuzz_test.exe`)**:
-   ```
-   === EMPIRICAL CHALLENGE: stripCalAPerV CONFIGURATION FUZZING ===
+=== Suite: Single-Relay Hardware Alignment Invariants ===
+  ✔ PASS HardwareInspector.jsx defines GPIO 26 as Smart Plug Relay & pin 255 as Lighting Relay (0ms)
+  ✔ PASS Edge firmware node_config.h aligns with single-relay hardware configuration (1ms)
+  ✔ PASS Edge firmware main.cpp protects unpopulated lighting relay (pin 255) (1ms)
 
-   Baseline configuration:
-     gCfg.stripCalAPerV: 15.000
-     gCfg.cfgRev: 0
+=== Suite: Real Built App Puppeteer DOM: TelemetryLogs Live High-Frequency Burst ===
+  ✔ PASS TelemetryLogs renders in browser, handles 500+ live burst updates with 0 console errors (3007ms)
 
-   --- Fuzz Test 1: Extreme and Negative Values ---
-   [config] REJECTED: stripCalAPerV -100.000 outside 1..500 A/V
-     [PASS] Refused: {"stripCalAPerV": -100} (err: stripCalAPerV -100.000 outside 1..500 A/V)
-     [PASS]   stripCalAPerV strictly unmodified
-     [PASS]   cfgRev strictly unchanged
-     [PASS]   Rejection error recorded
-   ...
-   [config] REJECTED: stripCalAPerV 0.000 outside 1..500 A/V
-     [PASS] Refused: {"stripCalAPerV": 0} (err: stripCalAPerV 0.000 outside 1..500 A/V)
-   ...
-   [config] REJECTED: stripCalAPerV 0.990 outside 1..500 A/V
-     [PASS] Refused: {"stripCalAPerV": 0.99} (err: stripCalAPerV 0.990 outside 1..500 A/V)
-   ...
-   [config] REJECTED: stripCalAPerV 500.010 outside 1..500 A/V
-     [PASS] Refused: {"stripCalAPerV": 500.01} (err: stripCalAPerV 500.010 outside 1..500 A/V)
-   ...
+====================================================
+Adversarial Verification Summary: 12 Total | 12 Passed | 0 Failed (3040ms)
+====================================================
+Exit code: 0
+```
 
-   --- Fuzz Test 2: Valid Boundaries Acceptance ---
-   [config] applied -> rev 1 (interval 5000ms, plug 60.60 A/V @ 230 V, ac 60.60 A/V @ 220 V, strip 1.00 A/V, touch 62/82%, setpoint 16.0..30.0 C)
-     [PASS] Boundary min 1.0f accepted
-     [PASS] stripCalAPerV updated to 1.0f
-     [PASS] cfgRev incremented to 1
-   [config] applied -> rev 2 (interval 5000ms, plug 60.60 A/V @ 230 V, ac 60.60 A/V @ 220 V, strip 500.00 A/V, touch 62/82%, setpoint 16.0..30.0 C)
-     [PASS] Boundary max 500.0f accepted
-     [PASS] stripCalAPerV updated to 500.0f
-     [PASS] cfgRev incremented to 2
-   [config] applied -> rev 3 (interval 5000ms, plug 60.60 A/V @ 230 V, ac 60.60 A/V @ 220 V, strip 15.00 A/V, touch 62/82%, setpoint 16.0..30.0 C)
-     [PASS] Reset to nominal 15.0f
-     [PASS] cfgRev incremented to 3
+#### Command 2: `node verify_webserial_floor_switcher.js`
+Executed Worker M1's verification harness:
+```
+=== Suite: Pure Invariants: getActiveFloorAsset & Asset Resolution ===
+  ✔ PASS getActiveFloorAsset resolves correct BIM asset for all 15 tower floors (22ms)
+  ✔ PASS getActiveFloorAsset gracefully handles domestic home single floor (0ms)
+  ✔ PASS getActiveFloorAsset fallback gracefully handles out-of-range level and null building (1ms)
 
-   --- Fuzz Test 3: NaN and Infinity Injection ---
-     [PASS] Refused NaN/Inf string: {"stripCalAPerV": NaN}
-     [PASS] Refused NaN/Inf string: {"stripCalAPerV": "NaN"}
-     [PASS] Refused NaN/Inf string: {"stripCalAPerV": Infinity}
-     [PASS] Refused NaN/Inf string: {"stripCalAPerV": "Infinity"}
-     [PASS] Refused NaN/Inf string: {"stripCalAPerV": -Infinity}
-     [PASS] Refused NaN/Inf string: {"stripCalAPerV": "-Infinity"}
-   [config] REJECTED: stripCalAPerV nan outside 1..500 A/V
-     [PASS] Programmatic quiet_NaN refused in cfgApplyJson
-   [config] REJECTED: stripCalAPerV inf outside 1..500 A/V
-     [PASS] Programmatic +Infinity refused in cfgApplyJson
-   [config] REJECTED: stripCalAPerV -inf outside 1..500 A/V
-     [PASS] Programmatic -Infinity refused in cfgApplyJson
+=== Suite: Single-Relay Hardware Alignment & Sliding Buffer Invariants ===
+  ✔ PASS HardwareInspector.jsx defines single-relay (GPIO 26) and unpopulated lighting (255) (0ms)
+  ✔ PASS UsbTab serial log enforces bounded sliding window buffer <= 50000 chars (1ms)
 
-   --- Fuzz Test 4: Type Confusion and String Injection ---
-   [config] REJECTED: stripCalAPerV 0.000 outside 1..500 A/V
-     [PASS] Cleanly rejected invalid type: {"stripCalAPerV": "invalid_string"}
-   [config] REJECTED: stripCalAPerV 0.000 outside 1..500 A/V
-     [PASS] Cleanly rejected invalid type: {"stripCalAPerV": ""}
-   [config] REJECTED: stripCalAPerV 0.000 outside 1..500 A/V
-     [PASS] Cleanly rejected invalid type: {"stripCalAPerV": false}
-   [config] REJECTED: stripCalAPerV 0.000 outside 1..500 A/V
-     [PASS] Cleanly rejected invalid type: {"stripCalAPerV": null}
-   [config] REJECTED: stripCalAPerV 0.000 outside 1..500 A/V
-     [PASS] Cleanly rejected invalid type: {"stripCalAPerV": []}
-   [config] REJECTED: stripCalAPerV 0.000 outside 1..500 A/V
-     [PASS] Cleanly rejected invalid type: {"stripCalAPerV": {}}
-   [config] REJECTED: stripCalAPerV 0.000 outside 1..500 A/V
-     [PASS] Cleanly rejected invalid type: {"stripCalAPerV": "AAAA..."}
-     [PASS] Cleanly rejected invalid type: {"stripCalAPerV": "CCCC..."}
-   [config] applied -> rev 4 (interval 5000ms, plug 60.60 A/V @ 230 V, ac 60.60 A/V @ 220 V, strip 1.00 A/V, touch 62/82%, setpoint 16.0..30.0 C)
-     [PASS] Boolean true coerces to 1.0f in ArduinoJson and passes validation
-     [PASS] stripCalAPerV set to 1.0f from boolean true
-     [PASS] cfgRev bumped on boolean true conversion
-     [NOTE] Finding documented: boolean true coerces to 1.0f without explicit .is<float>() check
+=== Suite: Telemetry Logs Panel: Monotonic Keys & Safe Snapshot ===
+  ✔ PASS TelemetryLogs.jsx uses monotonic sequence counter and safe snapshot (0ms)
+  ✔ PASS Log key generation ensures 100% collision-free keys under sub-second bursts (1ms)
 
-   --- Fuzz Test 5: String Numeric Values ---
-   [config] REJECTED: stripCalAPerV 0.500 outside 1..500 A/V
-     [PASS] String "0.5" outside 1..500 rejected
-   [config] REJECTED: stripCalAPerV 9999.000 outside 1..500 A/V
-     [PASS] String "9999.0" outside 1..500 rejected
+=== Suite: Real Built App Puppeteer DOM: 3D Floor Switcher & Active Asset ===
+  Static test server running at http://127.0.0.1:5299
+  ✔ PASS Initial mount exposes data-testid="active-asset" matching Level 1 and BIM asset ID (7329ms)
+  ✔ PASS Clicking floor buttons (level-btn-2, level-btn-4) dynamically updates active asset state (23987ms)
+  ✔ PASS Level steppers (level-step-next, level-step-prev) update active asset state synchronously (23992ms)
+  ✔ PASS Telemetry logs panel mounts stably and renders event log without crashes (17531ms)
 
-   --- Fuzz Test 6: Multi-Field Atomic Rejection ---
-   [config] REJECTED: stripCalAPerV -100.000 outside 1..500 A/V
-     [PASS] Multi-field payload with bad stripCalAPerV rejected as whole
-     [PASS] publishIntervalMs kept previous value
-     [PASS] plugCalAPerV kept previous value
-     [PASS] stripCalAPerV kept previous value
-     [PASS] cfgRev unchanged
+Test Summary: 11 Total | 11 Passed | 0 Failed (78075ms)
+Exit code: 0
+```
 
-   --- Fuzz Test 7: Post-Fuzz Health and Recovery ---
-   [config] applied -> rev 6 (interval 5000ms, plug 60.60 A/V @ 230 V, ac 60.60 A/V @ 220 V, strip 22.50 A/V, touch 62/82%, setpoint 16.0..30.0 C)
-     [PASS] Valid configuration accepted after extreme fuzzing
-     [PASS] stripCalAPerV cleanly set to 22.5f
-     [PASS] cfgRev properly incremented on valid config
-   [config] factory reset -> rev 7
-     [PASS] Factory reset restores default 15.0f
-     [PASS] cfgRev bumped on factory reset
-
-   === Fuzz Test Summary: PASSED (0 failures) ===
-   ```
+#### Command 3: `npm run build`
+```
+vite v5.4.21 building for production...
+transforming...
+✓ 2744 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                     0.76 kB │ gzip:   0.43 kB
+dist/assets/index-7dkmU45m.css      7.20 kB │ gzip:   2.05 kB
+dist/assets/Root-C5ap-Sga.css      15.87 kB │ gzip:   2.67 kB
+dist/assets/index-BYQHcWFe.js     792.13 kB │ gzip: 187.99 kB
+dist/assets/Root-teHb30Sy.js    2,018.43 kB │ gzip: 565.93 kB
+✓ built in 5.16s
+Exit code: 0
+```
 
 ---
 
 ## 2. Logic Chain
 
-1. **JSON Buffer Sizing in `readAndPublish()`**:
-   - Worker M1 expanded `StaticJsonDocument<256>` to `StaticJsonDocument<384>` and `char buf[288]` to `char buf[384]`.
-   - On the 32-bit ESP32 architecture (`sizeof(void*) == 4`), `sizeof(VariantSlot)` is exactly 16 bytes.
-   - An object containing 17 fields requires 17 `VariantSlot`s (272 bytes).
-   - The only non-literal string copied into the document pool is `gCfg.zoneLabel`, which is bounded to 31 chars + 1 null terminator = 32 bytes (`char zoneLabel[32]`).
-   - Total maximum memory pool consumed on ESP32 is $272 + 32 = 304\text{ bytes}$, leaving $384 - 304 = 80\text{ bytes}$ of margin. `doc.overflowed()` is guaranteed false.
-   - Empirical serialized string length under nominal telemetry is 242 bytes.
-   - Empirical serialized string length under maximum realistic operating parameters is 282 bytes.
-   - Under extreme combinatorial limits (negative numbers, maximum integer widths, 6-digit wattages, and 31-char zone labels), the maximum theoretical serialized length is 311 bytes.
-   - Because $311 < 384$, the serialized string fits with an absolute guaranteed headroom of at least 73 bytes. Buffer overflow and truncation are physically impossible in `char buf[384]`.
-   - In contrast, under the previous `char buf[288]`, the 311-byte worst-case payload would have truncated at byte 287, resulting in invalid JSON output and stack over-read during `Serial.printf("%s", buf)`. The worker's expansion to 384 bytes was therefore strictly necessary and mathematically sufficient.
+1. **Monotonic Key Generation & High-Frequency Streaming Invariant**:
+   - *Observation*: `TelemetryLogs.jsx` creates event keys via `id: log-${id}-${ev.key}-${Date.now()}-${++logSeq}`.
+   - *Logic*: Because `logSeq` is declared at the module level and incremented via pre-increment `++logSeq` on each event push, every generated key has a strictly increasing integer suffix. Even if `id`, `ev.key`, and `Date.now()` are identical during a sub-millisecond burst across multiple zones, `++logSeq` guarantees mathematical uniqueness.
+   - *Empirical Verification*: We simulated 123 rapid WebSocket burst frames generating 5,520 transition events across 10 active zones. All 5,520 keys were placed into a `Set()`; `uniqueKeys.size === 5520`, confirming exactly **0 key collisions**. Furthermore, the rendering buffer was capped at `MAX_LINES` (300 items), preventing DOM bloat.
 
-2. **Configuration Fuzzing & Validation Safety**:
-   - Negative values (`-100`, `-0.001`), zero (`0.0`), sub-threshold (`0.99`), super-threshold (`500.01`), and out-of-range (`1000.0`) are immediately caught by `!(c.stripCalAPerV >= 1.0f && c.stripCalAPerV <= 500.0f)`.
-   - In IEEE-754 arithmetic, all comparisons with `NaN` evaluate to `false`. Hence `(NaN >= 1.0f && NaN <= 500.0f)` is `false`, and the negation `!(...)` is `true`, guaranteeing rejection.
-   - `+Infinity <= 500.0f` is `false`; `-Infinity >= 1.0f` is `false`. Both evaluate to `true` under `!(...)` and are rejected.
-   - Malformed JSON strings (such as unquoted `NaN` or `Infinity` or oversized strings > 512 bytes) fail in `deserializeJson()`, recording a `malformed JSON: InvalidInput` or `NoMemory` error without touching `gCfg`.
-   - In multi-field payloads, a single invalid field prevents application of the entire message, preserving complete atomic integrity.
+2. **Null-Safety & Corrupted Payload Fuzzing**:
+   - *Observation*: `safeSnapshot(z)` guards against non-objects (`if (!z || typeof z !== 'object') return null`), sanitizes `alert` to `'ALARM'|'REMEDIATING'|'ok'`, forces `lightsOn` and `plugShed` to booleans, defaults `setpoint` to `24.0` if not a number, and converts `occupancy` via `Boolean(z.occupancy && Number(z.occupancy) > 0)`.
+   - *Logic*: When corrupted inputs (null, undefined, string, number, array, empty object, NaN, Infinity, or rogue properties) arrive, `safeSnapshot` either returns `null` or a completely sanitized object. In `TelemetryLogs`, `if (!now) continue;` skips invalid zones, and `z?.label || id` safely falls back to the zone string ID.
+   - *Empirical Verification*: We fuzzed `TelemetryLogs` with 11 corrupted `simData` structures and 7 severely malformed zone object frames (including SQL injection/XSS mock strings, NaN setpoints, and nested objects). Zero unhandled exceptions were thrown, and valid transitions were extracted without runtime errors.
 
-3. **Adversarial Finding — Boolean Type Coercion**:
-   - In `cfgApplyJson()`, line 257 executes:
-     `if (doc.containsKey("stripCalAPerV")) next.stripCalAPerV = doc["stripCalAPerV"];`
-   - ArduinoJson's `VariantData::asFloat()` converts a boolean `true` variant to `1.0f` (and `false` to `0.0f`).
-   - Because `1.0f` is the valid lower bound of the calibration range (`[1.0f, 500.0f]`), sending `{"stripCalAPerV": true}` is accepted and updates `stripCalAPerV` to `1.00 A/V`, incrementing `cfgRev`.
-   - While `1.0 A/V` is within physical boundaries and does not cause a crash or memory corruption, a boolean is semantically not an analog calibration constant.
-   - This same behavior exists across `plugCalAPerV`, `acCalAPerV`, and `touchOccupants`.
-   - Mitigation: Guard float deserialization with `doc["stripCalAPerV"].is<float>()` or `doc["stripCalAPerV"].is<JsonNumber>()`.
+3. **Serial Log Sliding Buffer Invariant**:
+   - *Observation*: `HardwareInspector.jsx` maintains serial output using:
+     `const next = l + chunk; return next.length > 50000 ? next.slice(-40000) : next;`
+   - *Logic*: For any input string of length $L > 50000$, `next.slice(-40000)` yields a string of exactly 40,000 characters. Since $40000 \le 50000$, the returned string is guaranteed to be $\le 50,000$ characters after every update. Slicing with a negative index `(-40000)` strictly preserves the most recent characters (tail) of the stream.
+   - *Empirical Verification*: We streamed 100,000 characters in 50-character chunks (2,000 updates), 102,400 characters in 64-character UART chunks (1,600 updates), a single 100,000 character burst, and 1,000,000 characters with randomized chunk sizes. At every single iteration, `log.length <= 50000`. In all cases, the buffer retained the exact suffix of the stream with zero runaway memory leakage.
+
+4. **Single-Relay Hardware Alignment**:
+   - *Observation*: Physical edge nodes have one physical relay on GPIO 26 (`PLUG_RELAY_PIN=26`), while lighting on GPIO 23 is unpopulated (`RELAY_PIN=255`).
+   - *Logic*: Both the UI and edge firmware must align on this topology. If the UI displays GPIO 23 as an active relay or edge firmware toggles pin 255, undefined hardware behavior could occur.
+   - *Empirical Verification*: In `HardwareInspector.jsx`, `DEFAULT_HARDWARE_LIBRARY` assigns `smart_plug` to `GPIO 26` and `lighting` to `Unused (255)`. In the Actuators panel, Smart Plug is badged `PHYSICAL RELAY (pinPlugRelay = 26)` and Lighting Relay is badged `VIRTUAL / UNPOPULATED (pinLightingRelay = 255)`. In `edge/esp32/src/node_config.h`, `c.pinPlugRelay = 26;` and `c.pinLightingRelay = 255;`. In `main.cpp`, `digitalWrite` and `pinMode` are guarded by `if (gCfg.pinLightingRelay != 255)`.
+
+5. **DOM Integration in Real Browser (Puppeteer)**:
+   - *Observation*: Headless Chrome mounted the production Vite build (`http://127.0.0.1:<port>/?testing=1`).
+   - *Logic*: Verifies that in a true V8 browser environment with full CSS, Three.js, and React 18 reconciliation, navigating to the Logs tab renders `<TelemetryLogs>` without throwing `Encountered two children with the same key` or fatal errors.
+   - *Empirical Verification*: Clicking `[data-testid="tab-logs"]` mounted the `EVENT LOG` panel, with zero console duplicate key warnings and zero uncaught exceptions.
 
 ---
 
 ## 3. Caveats
 
-1. **Host Pointer Size Divergence**: On 64-bit host machines (`sizeof(void*) == 8`), `VariantSlot` is 32 bytes (double that of 32-bit ESP32). A document with 17 fields on 64-bit host consumes > 544 bytes, so host-side testing requires sizing `StaticJsonDocument` appropriately for 64-bit pointers when validating string serialization off-target. On target ESP32 hardware, 384 bytes provides 80 bytes of free headroom.
-2. **Boolean True Acceptance**: Documented above as an empirical finding. Does not compromise memory safety or crash the node, but permits `1.0 A/V` calibration via boolean `true`.
+1. **JavaScript `NaN !== NaN` Edge Behavior**:
+   - *Observation*: If an upstream sensor continuously streams `setpoint: NaN`, `round1(NaN)` returns `NaN`. In JavaScript, `NaN !== NaN` evaluates to `true`.
+   - *Impact*: In this scenario, `TelemetryLogs` emits a transition `setpoint NaN°C -> NaN°C` on each frame. Because `++logSeq` is unique and the buffer is capped at 300 entries, this does not crash React or corrupt keys, but it produces redundant log entries.
+   - *Recommendation*: As a defense-in-depth refinement in a future milestone, `round1` could sanitize `NaN` to the fallback setpoint (`24.0`) or use `Number.isFinite(v) ? Math.round(v * 10) / 10 : 24.0`.
+2. **Physical USB Loopback**:
+   - WebSerial USB hardware testing was validated using synthetic high-baud serial streams and DOM inspection, as physical ESP32 USB hardware is not connected to the CI/agent environment.
 
 ---
 
 ## 4. Conclusion
 
-**Verdict**: **APPROVE**
+Worker M1's implementations for Milestone 1 (Feature 1: Single-Relay Telemetry Alignment, Feature 2: 3D Floor Switcher Active Asset State, Feature 3: Logs Panel Streaming Stability) satisfy all requirements and invariants:
+- `TelemetryLogs.jsx` generates 100% collision-free React keys across 5,520+ high-frequency events.
+- `TelemetryLogs.jsx` cleanly handles null, undefined, primitive, and corrupted zone objects without unhandled exceptions.
+- `HardwareInspector.jsx` enforces a strict $\le 50,000$ character sliding window serial buffer that retains the most recent 40,000 characters without memory leaks.
+- Single-relay alignment is verified across `HardwareInspector.jsx`, `node_config.h`, and `main.cpp`.
+- All test suites (`verify_adversarial_logs_hardware.js`, `verify_webserial_floor_switcher.js`, `verify_ai_actions.js`, and `npm run build`) pass with 0 failures.
 
-- **JSON Sizing & Truncation**: `StaticJsonDocument<384>` and `char buf[384]` provide complete protection against buffer truncation, memory exhaustion, and stack buffer overflow. Nominal size is 242 bytes; maximum realistic is 282 bytes; theoretical combinatorial worst-case is 311 bytes. Headroom in `char buf[384]` is at least 73 bytes.
-- **Config Fuzzing**: All extreme values (`-100`, `0`, `0.99`, `500.01`, `NaN`, `Inf`, and long strings) are cleanly rejected without state corruption or NVS persistence. Multi-field atomicity is strictly preserved.
-- **Finding Reported**: Type coercion of boolean `true` to `1.0f` documented with mitigation recommendation.
+**Final Verdict**: **`APPROVE`**.
 
 ---
 
 ## 5. Verification Method
 
-To independently reproduce and verify these empirical results:
+To independently verify these findings, run the following commands in `/Users/nguyenhoangkhoi/Documents/econ/dashboard`:
 
-1. **Run Payload Limits & Buffer Overflow Test**:
-   ```powershell
-   cd d:\ECON1\econ\edge\esp32
-   g++ -std=c++17 -Wall -I .pio/libdeps/esp32dev/ArduinoJson/src -I src -I test test/empirical_payload_test.cpp -o test/empirical_payload_test.exe
-   .\test\empirical_payload_test.exe
+1. **Adversarial Stress Suite** (12 tests covering 5k+ bursts, corrupted payloads, 100k serial buffer, and Puppeteer):
+   ```bash
+   cd /Users/nguyenhoangkhoi/Documents/econ/dashboard
+   node verify_adversarial_logs_hardware.js
    ```
-   *Expected Output*: Output terminates with `Payload Limit Tests Completed: PASSED (0 failures)`.
+   *Expected result*: `Adversarial Verification Summary: 12 Total | 12 Passed | 0 Failed (exit code 0)`.
 
-2. **Run Comprehensive Configuration Fuzzing Suite**:
-   ```powershell
-   cd d:\ECON1\econ\edge\esp32
-   g++ -std=c++17 -Wall -I .pio/libdeps/esp32dev/ArduinoJson/src -I src -I test test/empirical_fuzz_test.cpp -o test/empirical_fuzz_test.exe
-   .\test\empirical_fuzz_test.exe
+2. **Milestone 1 Verification Suite** (11 tests covering BIM resolution, hardware alignment, and Puppeteer floor switcher):
+   ```bash
+   cd /Users/nguyenhoangkhoi/Documents/econ/dashboard
+   node verify_webserial_floor_switcher.js
    ```
-   *Expected Output*: Output terminates with `Fuzz Test Summary: PASSED (0 failures)`.
+   *Expected result*: `Test Summary: 11 Total | 11 Passed | 0 Failed (exit code 0)`.
 
-3. **Run Regression Host Tests**:
-   ```powershell
-   cd d:\ECON1\econ\edge\esp32
-   g++ -std=c++17 -Wall -I .pio/libdeps/esp32dev/ArduinoJson/src -I src -I test test/host_config_test.cpp -o test/host_config_test.exe
-   .\test\host_config_test.exe
+3. **Vite Production Build**:
+   ```bash
+   cd /Users/nguyenhoangkhoi/Documents/econ/dashboard
+   npm run build
    ```
-   *Expected Output*: Output terminates with `PASSED (0 failures)`.
+   *Expected result*: `✓ built in ~5s (exit code 0)`.
 
-4. **Invalidation Conditions**:
-   - Any serialized payload in `readAndPublish()` exceeds 383 characters.
-   - Any canary guard byte around `buf[384]` is corrupted.
-   - Any of `-100`, `0`, `0.99`, `500.01`, `NaN`, `Inf`, or oversized string is accepted by `cfgApplyJson()`.
+4. **Files to Inspect**:
+   - `dashboard/verify_adversarial_logs_hardware.js`
+   - `dashboard/src/TelemetryLogs.jsx`
+   - `dashboard/src/HardwareInspector.jsx`
+   - `edge/esp32/src/node_config.h`
+   - `edge/esp32/src/main.cpp`

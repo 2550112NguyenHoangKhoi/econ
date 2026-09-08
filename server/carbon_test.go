@@ -414,7 +414,7 @@ func TestCarbonCreditRecommendationsMath(t *testing.T) {
 	if recOver.EstimatedCostUSD != 0.105 {
 		t.Fatalf("expected estimated cost 0.105 USD, got %f", recOver.EstimatedCostUSD)
 	}
-	expectedRecStr := "Purchase 1 carbon credit certificate (~0.0084 tCO2e deficit) at $12.50/tCO2e to offset emissions."
+	expectedRecStr := "Purchase 1 carbon credit certificate (~0.0084 tCO2e deficit) at $12.50/tCO2e to offset emissions. You can purchase these credits via our integrated Toucan Protocol exchange, or explore verified alternative registries like Gold Standard and Verra below. Click the external links on each quote to open the corresponding marketplace and complete your purchase."
 	if recOver.Recommendation != expectedRecStr {
 		t.Fatalf("expected recommendation %q, got %q", expectedRecStr, recOver.Recommendation)
 	}

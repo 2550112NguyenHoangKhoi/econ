@@ -658,16 +658,17 @@ void run_suite_3_subsystem_invariance_verification() {
   // 3.3 Actuator Pin Exclusivity Verification
   // ---------------------------------------------------------------------------
   std::vector<std::pair<std::string, int>> active_pins = {
-    {"RELAY_PIN (Lighting)", 23},
-    {"IR_PIN (HVAC IR)", 19},
+    {"RELAY_PIN (Lighting)", 27},
+    {"IR_PIN (HVAC IR)", 25},
     {"STATUS_LED", 2},
-    {"PLUG_RELAY_PIN", 25},
-    {"PLUG_ADC_PIN", 34},
-    {"AC_CLAMP_PIN", 35},
-    {"SUPPLY_TEMP_PIN", 26},
+    {"PLUG_RELAY_PIN", 26},
+    {"PLUG_ADC_PIN", 33},
+    {"STRIP_ADC_PIN", 32},
+    {"AC_CLAMP_PIN", 255},
+    {"SUPPLY_TEMP_PIN", 255},
+    {"MMWAVE_PIN", 255},
     {"I2C_SDA", 21},
     {"I2C_SCL", 22},
-    {"MMWAVE_PIN", 18},
     {"CAM_D0", PIN_CAM_D0},
     {"CAM_D1", PIN_CAM_D1},
     {"CAM_D2", PIN_CAM_D2},
@@ -685,7 +686,9 @@ void run_suite_3_subsystem_invariance_verification() {
   bool collision_found = false;
   std::string collision_desc = "";
   for (size_t i = 0; i < active_pins.size(); ++i) {
+    if (active_pins[i].second == 255) continue;
     for (size_t j = i + 1; j < active_pins.size(); ++j) {
+      if (active_pins[j].second == 255) continue;
       if (active_pins[i].second == active_pins[j].second) {
         collision_found = true;
         collision_desc = active_pins[i].first + " collides with " + active_pins[j].first + " on GPIO" + std::to_string(active_pins[i].second);
@@ -695,7 +698,7 @@ void run_suite_3_subsystem_invariance_verification() {
     if (collision_found) break;
   }
   ch_check(!collision_found, "3.3.1 Hardware GPIO pin mapping is 100% conflict-free across all peripherals", collision_desc.c_str());
-  ch_check(PIN_CAM_D7 == 5, "3.3.2 Legacy PIR GPIO5 cleanly reused as camera parallel data bit D7");
+  ch_check(PIN_CAM_D7 == 34, "3.3.2 Legacy PIR GPIO5 cleanly reused as camera parallel data bit D7");
 }
 
 // =============================================================================

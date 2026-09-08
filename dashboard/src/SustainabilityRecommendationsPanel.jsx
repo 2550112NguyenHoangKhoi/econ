@@ -142,49 +142,49 @@ export default function SustainabilityRecommendationsPanel({
     }
   };
 
-  const carbon = data?.carbonAccounting || {
-    instantaneousPowerW: 0,
-    instantaneousEmissionRateKgPerHour: 0,
-    gridEmissionFactorKgPerKwh: 0.5,
-    cumulativeEmissionsKgCO2e: 0,
-    breakdown: { plugW: 0, stripW: 0, acW: 0 },
-  };
+  const carbon = data?.carbonAccounting || {};
+  const breakdown = carbon?.breakdown || {};
+  const plugW = Number(breakdown?.plugW) || 0;
+  const stripW = Number(breakdown?.stripW) || 0;
+  const acW = Number(breakdown?.acW) || 0;
+  const instantaneousPowerW = Number(carbon?.instantaneousPowerW) || 0;
+  const instantaneousEmissionRateKgPerHour = Number(carbon?.instantaneousEmissionRateKgPerHour) || 0;
+  const gridEmissionFactorKgPerKwh = Number(carbon?.gridEmissionFactorKgPerKwh) || 0.5;
+  const cumulativeEmissionsKgCO2e = Number(carbon?.cumulativeEmissionsKgCO2e) || 0;
 
-  const offset = data?.carbonCreditRecommendations || {
-    carbonBudgetKgCO2e: 50.0,
-    currentEmissionsKgCO2e: 0,
-    overBudget: false,
-    deficitKgCO2e: 0,
-    creditsNeededMetricTons: 0,
-    wholeCertificatesNeeded: 0,
-    marketQuote: {
-      source: 'Toucan Protocol BCT (CoinGecko)',
-      spotPricePerMetricTonUSD: 12.5,
-      currency: 'USD',
-      isLive: true,
-      fetchedAt: new Date().toISOString(),
-    },
-    alternativeQuotes: [],
-    estimatedCostUSD: 0,
-    recommendation: 'Emissions are within target budget.',
+  const offset = data?.carbonCreditRecommendations || {};
+  const carbonBudgetKgCO2e = Number(offset?.carbonBudgetKgCO2e) || 50.0;
+  const currentEmissionsKgCO2e = Number(offset?.currentEmissionsKgCO2e) || cumulativeEmissionsKgCO2e;
+  const overBudget = Boolean(offset?.overBudget);
+  const deficitKgCO2e = Number(offset?.deficitKgCO2e) || 0;
+  const creditsNeededMetricTons = Number(offset?.creditsNeededMetricTons) || 0;
+  const wholeCertificatesNeeded = Number(offset?.wholeCertificatesNeeded) || 0;
+  const estimatedCostUSD = Number(offset?.estimatedCostUSD) || 0;
+  const defaultMarketQuote = {
+    source: 'Toucan Protocol BCT (CoinGecko)',
+    spotPricePerMetricTonUSD: 12.5,
+    currency: 'USD',
+    isLive: true,
+    fetchedAt: new Date().toISOString(),
   };
+  const marketQuote = offset?.marketQuote || defaultMarketQuote;
+  const alternativeQuotes = Array.isArray(offset?.alternativeQuotes) ? offset.alternativeQuotes : [];
+  const recommendation = offset?.recommendation || (overBudget ? 'Emissions exceed target budget.' : 'Emissions are within target budget.');
 
-  const maintenance = data?.predictiveMaintenance || {
-    activeAlertsCount: 0,
-    warnings: [],
-  };
+  const maintenance = data?.predictiveMaintenance || {};
+  const activeAlertsCount = Number(maintenance?.activeAlertsCount) || 0;
+  const warnings = Array.isArray(maintenance?.warnings) ? maintenance.warnings : [];
 
-  const space = data?.spaceUtilization || {
-    totalLiveOccupants: 0,
-    totalBuildingCapacity: 1,
-    overallEfficiencyPercent: 0,
-    zones: [],
-  };
+  const space = data?.spaceUtilization || {};
+  const totalLiveOccupants = Number(space?.totalLiveOccupants) || 0;
+  const totalBuildingCapacity = Number(space?.totalBuildingCapacity) || 1;
+  const overallEfficiencyPercent = Number(space?.overallEfficiencyPercent) || 0;
+  const zones = Array.isArray(space?.zones) ? space.zones : [];
 
   // Environmental equivalent metrics
-  const annualKgCO2e = (carbon.instantaneousPowerW / 1000.0) * 8760 * carbon.gridEmissionFactorKgPerKwh;
+  const annualKgCO2e = (instantaneousPowerW / 1000.0) * 8760 * gridEmissionFactorKgPerKwh;
   const treesEquivalent = Math.max(0, Math.round(annualKgCO2e / 21.77)); // ~21.77 kgCO2/year per tree
-  const carKmEquivalent = Math.max(0, Math.round(carbon.cumulativeEmissionsKgCO2e * 5.88)); // ~170 g/km for average vehicle
+  const carKmEquivalent = Math.max(0, Math.round(cumulativeEmissionsKgCO2e * 5.88)); // ~170 g/km for average vehicle
 
   return (
     <div data-testid="sustainability-panel" style={S.container}>
@@ -258,28 +258,28 @@ export default function SustainabilityRecommendationsPanel({
           <div>
             <div style={S.dimLabel}>Total Power Draw</div>
             <div data-testid="metric-power-w" style={S.metricValue}>
-              {carbon.instantaneousPowerW.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}{' '}
+              {instantaneousPowerW.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}{' '}
               <span style={{ fontSize: '12px', fontWeight: 'normal', color: 'var(--text-secondary)' }}>W</span>
             </div>
           </div>
           <div>
             <div style={S.dimLabel}>Emission Rate</div>
             <div data-testid="metric-emission-rate" style={{ ...S.metricValue, color: '#38bdf8' }}>
-              {carbon.instantaneousEmissionRateKgPerHour.toFixed(3)}{' '}
+              {instantaneousEmissionRateKgPerHour.toFixed(3)}{' '}
               <span style={{ fontSize: '12px', fontWeight: 'normal', color: 'var(--text-secondary)' }}>kgCO2e/h</span>
             </div>
           </div>
           <div>
             <div style={S.dimLabel}>Grid Emission Factor</div>
             <div data-testid="metric-grid-factor" style={S.metricValue}>
-              {carbon.gridEmissionFactorKgPerKwh.toFixed(2)}{' '}
+              {gridEmissionFactorKgPerKwh.toFixed(2)}{' '}
               <span style={{ fontSize: '12px', fontWeight: 'normal', color: 'var(--text-secondary)' }}>kg/kWh</span>
             </div>
           </div>
           <div>
             <div style={S.dimLabel}>Cumulative Operational</div>
             <div data-testid="metric-cumulative-emissions" style={{ ...S.metricValue, color: '#f59e0b' }}>
-              {carbon.cumulativeEmissionsKgCO2e.toFixed(3)}{' '}
+              {cumulativeEmissionsKgCO2e.toFixed(3)}{' '}
               <span style={{ fontSize: '12px', fontWeight: 'normal', color: 'var(--text-secondary)' }}>kgCO2e</span>
             </div>
           </div>
@@ -290,7 +290,7 @@ export default function SustainabilityRecommendationsPanel({
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
             <span style={S.dimLabel}>End-Use Power Disaggregation</span>
             <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>
-              Total: {carbon.instantaneousPowerW.toFixed(0)}W
+              Total: {instantaneousPowerW.toFixed(0)}W
             </span>
           </div>
           <div
@@ -305,40 +305,40 @@ export default function SustainabilityRecommendationsPanel({
             <div
               data-testid="breakdown-plug-bar"
               style={{
-                width: `${carbon.instantaneousPowerW > 0 ? (carbon.breakdown.plugW / carbon.instantaneousPowerW) * 100 : 0}%`,
+                width: `${instantaneousPowerW > 0 ? (plugW / instantaneousPowerW) * 100 : 0}%`,
                 background: '#38bdf8',
                 transition: 'width 0.3s ease',
               }}
-              title={`Plug Load: ${carbon.breakdown.plugW}W`}
+              title={`Plug Load: ${plugW}W`}
             />
             <div
               data-testid="breakdown-strip-bar"
               style={{
-                width: `${carbon.instantaneousPowerW > 0 ? (carbon.breakdown.stripW / carbon.instantaneousPowerW) * 100 : 0}%`,
+                width: `${instantaneousPowerW > 0 ? (stripW / instantaneousPowerW) * 100 : 0}%`,
                 background: '#fbbf24',
                 transition: 'width 0.3s ease',
               }}
-              title={`Power Strip: ${carbon.breakdown.stripW}W`}
+              title={`Power Strip: ${stripW}W`}
             />
             <div
               data-testid="breakdown-ac-bar"
               style={{
-                width: `${carbon.instantaneousPowerW > 0 ? (carbon.breakdown.acW / carbon.instantaneousPowerW) * 100 : 0}%`,
+                width: `${instantaneousPowerW > 0 ? (acW / instantaneousPowerW) * 100 : 0}%`,
                 background: '#f43f5e',
                 transition: 'width 0.3s ease',
               }}
-              title={`HVAC Compressor: ${carbon.breakdown.acW}W`}
+              title={`HVAC Compressor: ${acW}W`}
             />
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '6px', fontSize: '10px' }}>
             <span data-testid="breakdown-plug-w" style={{ color: '#38bdf8' }}>
-              ● Plugs: {carbon.breakdown.plugW.toFixed(0)}W
+              ● Plugs: {plugW.toFixed(0)}W
             </span>
             <span data-testid="breakdown-strip-w" style={{ color: '#fbbf24' }}>
-              ● Strips: {carbon.breakdown.stripW.toFixed(0)}W
+              ● Strips: {stripW.toFixed(0)}W
             </span>
             <span data-testid="breakdown-ac-w" style={{ color: '#f43f5e' }}>
-              ● HVAC: {carbon.breakdown.acW.toFixed(0)}W
+              ● HVAC: {acW.toFixed(0)}W
             </span>
           </div>
         </div>
@@ -371,12 +371,12 @@ export default function SustainabilityRecommendationsPanel({
             data-testid="badge-budget-status"
             style={{
               ...S.badge,
-              background: offset.overBudget ? 'rgba(239, 68, 68, 0.2)' : 'rgba(16, 185, 129, 0.2)',
-              color: offset.overBudget ? '#ef4444' : '#10b981',
-              border: `1px solid ${offset.overBudget ? 'rgba(239, 68, 68, 0.4)' : 'rgba(16, 185, 129, 0.4)'}`,
+              background: overBudget ? 'rgba(239, 68, 68, 0.2)' : 'rgba(16, 185, 129, 0.2)',
+              color: overBudget ? '#ef4444' : '#10b981',
+              border: `1px solid ${overBudget ? 'rgba(239, 68, 68, 0.4)' : 'rgba(16, 185, 129, 0.4)'}`,
             }}
           >
-            {offset.overBudget ? 'OVER BUDGET' : 'ON TRACK'}
+            {overBudget ? 'OVER BUDGET' : 'ON TRACK'}
           </span>
         </div>
 
@@ -385,7 +385,7 @@ export default function SustainabilityRecommendationsPanel({
           <div>
             <div style={S.dimLabel}>Target Carbon Budget</div>
             <div data-testid="metric-carbon-budget" style={S.metricValue}>
-              {offset.carbonBudgetKgCO2e.toFixed(1)}{' '}
+              {carbonBudgetKgCO2e.toFixed(1)}{' '}
               <span style={{ fontSize: '12px', fontWeight: 'normal', color: 'var(--text-secondary)' }}>kgCO2e</span>
             </div>
           </div>
@@ -395,10 +395,10 @@ export default function SustainabilityRecommendationsPanel({
               data-testid="metric-carbon-deficit"
               style={{
                 ...S.metricValue,
-                color: offset.overBudget ? '#ef4444' : '#10b981',
+                color: overBudget ? '#ef4444' : '#10b981',
               }}
             >
-              {offset.deficitKgCO2e.toFixed(2)}{' '}
+              {deficitKgCO2e.toFixed(2)}{' '}
               <span style={{ fontSize: '12px', fontWeight: 'normal', color: 'var(--text-secondary)' }}>kgCO2e</span>
             </div>
           </div>
@@ -419,11 +419,17 @@ export default function SustainabilityRecommendationsPanel({
           </div>
           
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {[offset.marketQuote, ...(offset.alternativeQuotes || [])].map((quote, idx) => (
+            {[marketQuote, ...alternativeQuotes].filter(Boolean).map((quote, idx) => (
               <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.03)', padding: '10px', borderRadius: '6px', border: idx === 0 ? '1px solid rgba(52, 211, 153, 0.3)' : '1px solid transparent' }}>
                 <div>
                   <div style={{ color: '#60a5fa', fontWeight: '600', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    {idx === 0 ? <a href="https://www.coingecko.com/en/coins/toucan-protocol-base-carbon-tonne" target="_blank" rel="noreferrer" style={{color: '#60a5fa', textDecoration: 'none'}}>{quote.source} <ExternalLink size={10} /></a> : quote.source}
+                    {idx === 0 ? (
+                      <a href="https://www.coingecko.com/en/coins/toucan-protocol-base-carbon-tonne" target="_blank" rel="noreferrer" style={{color: '#60a5fa', textDecoration: 'none'}}>{quote.source || 'Toucan Protocol BCT'} <ExternalLink size={10} /></a>
+                    ) : quote.url ? (
+                      <a href={quote.url} target="_blank" rel="noreferrer" style={{color: '#60a5fa', textDecoration: 'none'}}>{quote.source || 'Market Quote'} <ExternalLink size={10} /></a>
+                    ) : (
+                      (quote.source || 'Market Quote')
+                    )}
                   </div>
                   <div style={{ fontSize: '10px', color: '#64748b', marginTop: '4px', display: 'flex', gap: '6px' }}>
                     <span
@@ -442,10 +448,13 @@ export default function SustainabilityRecommendationsPanel({
                   </div>
                 </div>
                 <div style={{ textAlign: 'right' }}>
-                  <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#34d399', fontFamily: 'monospace' }}>
-                    ${quote.spotPricePerMetricTonUSD.toFixed(2)}
+                  <div
+                    data-testid="metric-market-spot-price"
+                    style={{ fontSize: '14px', fontWeight: 'bold', color: '#34d399', fontFamily: 'monospace' }}
+                  >
+                    ${(Number(quote.spotPricePerMetricTonUSD) || 0).toFixed(2)}
                   </div>
-                  <div style={{ fontSize: '9px', color: '#94a3b8' }}>{quote.currency} / tCO2e</div>
+                  <div style={{ fontSize: '9px', color: '#94a3b8' }}>{quote.currency || 'USD'} / tCO2e</div>
                 </div>
               </div>
             ))}
@@ -465,9 +474,9 @@ export default function SustainabilityRecommendationsPanel({
             <div>
               <div style={S.dimLabel}>Required Certificates</div>
               <div data-testid="metric-certificates-needed" style={{ fontSize: '14px', fontWeight: 'bold' }}>
-                {offset.wholeCertificatesNeeded}{' '}
+                {wholeCertificatesNeeded}{' '}
                 <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 'normal' }}>
-                  (~{offset.creditsNeededMetricTons.toFixed(4)} MT)
+                  (~{creditsNeededMetricTons.toFixed(4)} MT)
                 </span>
               </div>
             </div>
@@ -477,7 +486,7 @@ export default function SustainabilityRecommendationsPanel({
                 data-testid="metric-total-offset-cost"
                 style={{ fontSize: '16px', fontWeight: 'bold', color: '#fbbf24', fontFamily: 'monospace' }}
               >
-                ${offset.estimatedCostUSD.toFixed(2)}{' '}
+                ${estimatedCostUSD.toFixed(2)}{' '}
                 <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 'normal' }}>USD</span>
               </div>
             </div>
@@ -489,7 +498,7 @@ export default function SustainabilityRecommendationsPanel({
           data-testid="text-offset-recommendation"
           style={{
             background: 'rgba(30, 41, 59, 0.4)',
-            borderLeft: `3px solid ${offset.overBudget ? '#ef4444' : '#10b981'}`,
+            borderLeft: `3px solid ${overBudget ? '#ef4444' : '#10b981'}`,
             padding: '8px 12px',
             borderRadius: '0 6px 6px 0',
             fontSize: '11px',
@@ -497,8 +506,31 @@ export default function SustainabilityRecommendationsPanel({
             lineHeight: 1.4,
           }}
         >
-          {offset.recommendation}
+          {recommendation}
         </div>
+
+        {overBudget && (
+          <div style={{ marginTop: '12px' }}>
+            <a
+              href="https://carboncredits.com/"
+              target="_blank"
+              rel="noreferrer"
+              style={{
+                ...S.btnAction,
+                textDecoration: 'none',
+                background: 'rgba(52, 211, 153, 0.1)',
+                borderColor: 'rgba(52, 211, 153, 0.3)',
+                color: '#34d399',
+                display: 'flex',
+                justifyContent: 'center',
+                width: '100%',
+              }}
+            >
+              <Coins size={13} style={{ marginRight: '4px' }} />
+              View Carbon Credit Quotes & Alternatives <ExternalLink size={11} style={{ marginLeft: '2px' }} />
+            </a>
+          </div>
+        )}
       </div>
 
       {/* CARD 3: Predictive Maintenance Alerts */}
@@ -512,16 +544,16 @@ export default function SustainabilityRecommendationsPanel({
             data-testid="maintenance-alert-count"
             style={{
               ...S.badge,
-              background: maintenance.activeAlertsCount > 0 ? 'rgba(239, 68, 68, 0.2)' : 'rgba(16, 185, 129, 0.2)',
-              color: maintenance.activeAlertsCount > 0 ? '#ef4444' : '#10b981',
-              border: `1px solid ${maintenance.activeAlertsCount > 0 ? 'rgba(239, 68, 68, 0.4)' : 'rgba(16, 185, 129, 0.4)'}`,
+              background: activeAlertsCount > 0 ? 'rgba(239, 68, 68, 0.2)' : 'rgba(16, 185, 129, 0.2)',
+              color: activeAlertsCount > 0 ? '#ef4444' : '#10b981',
+              border: `1px solid ${activeAlertsCount > 0 ? 'rgba(239, 68, 68, 0.4)' : 'rgba(16, 185, 129, 0.4)'}`,
             }}
           >
-            {maintenance.activeAlertsCount} ACTIVE
+            {activeAlertsCount} ACTIVE
           </span>
         </div>
 
-        {maintenance.activeAlertsCount === 0 ? (
+        {activeAlertsCount === 0 ? (
           <div
             data-testid="maintenance-healthy-status"
             style={{
@@ -541,7 +573,7 @@ export default function SustainabilityRecommendationsPanel({
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {maintenance.warnings.map((w, idx) => (
+            {warnings.map((w, idx) => (
               <div
                 key={idx}
                 data-testid="maintenance-alert-item"
@@ -554,7 +586,7 @@ export default function SustainabilityRecommendationsPanel({
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
                   <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#f87171' }}>
-                    [{w.type.toUpperCase()}] {w.equipmentId}
+                    [{(w?.type || '').toUpperCase()}] {w?.equipmentId || 'Unknown'}
                   </span>
                   <span
                     style={{
@@ -562,21 +594,21 @@ export default function SustainabilityRecommendationsPanel({
                       textTransform: 'uppercase',
                       padding: '1px 5px',
                       borderRadius: '3px',
-                      background: w.severity === 'critical' ? '#ef4444' : '#f59e0b',
+                      background: w?.severity === 'critical' ? '#ef4444' : '#f59e0b',
                       color: '#ffffff',
                       fontWeight: 'bold',
                     }}
                   >
-                    {w.severity}
+                    {w?.severity || 'warning'}
                   </span>
                 </div>
-                <div style={{ fontSize: '11px', color: '#fecaca', marginBottom: '6px' }}>{w.message}</div>
+                <div style={{ fontSize: '11px', color: '#fecaca', marginBottom: '6px' }}>{w?.message || 'Alert'}</div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: '#94a3b8' }}>
-                  <span>Zone: <b>{w.zoneId}</b></span>
-                  <span>Metric: <b>{w.metricValue.toFixed(1)}</b> / Limit: <b>{w.threshold.toFixed(1)}</b></span>
-                  <span>Health: <b>{w.healthScore !== undefined ? `${w.healthScore}%` : 'N/A'}</b></span>
+                  <span>Zone: <b>{w?.zoneId || '—'}</b></span>
+                  <span>Metric: <b>{(Number(w?.metricValue) || 0).toFixed(1)}</b> / Limit: <b>{(Number(w?.threshold) || 0).toFixed(1)}</b></span>
+                  <span>Health: <b>{w?.healthScore !== undefined ? `${w.healthScore}%` : 'N/A'}</b></span>
                 </div>
-                {w.troubleshooting && w.troubleshooting.length > 0 && (
+                {w?.troubleshooting && w.troubleshooting.length > 0 && (
                   <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid rgba(239, 68, 68, 0.2)' }}>
                     <div style={{ fontSize: '10px', color: '#fca5a5', fontWeight: 'bold', marginBottom: '4px' }}>Recommended Troubleshooting:</div>
                     <ul style={{ margin: 0, paddingLeft: '16px', fontSize: '10px', color: '#fecaca' }}>
@@ -616,15 +648,15 @@ export default function SustainabilityRecommendationsPanel({
           <div>
             <div style={S.dimLabel}>Building Space Efficiency</div>
             <div data-testid="metric-space-efficiency" style={{ ...S.metricValue, color: '#a78bfa', fontSize: '22px' }}>
-              {space.overallEfficiencyPercent.toFixed(1)}%
+              {overallEfficiencyPercent.toFixed(1)}%
             </div>
           </div>
           <div style={{ textAlign: 'right' }}>
             <div style={S.dimLabel}>Occupants vs Capacity</div>
             <div style={{ fontSize: '14px', fontWeight: 'bold' }}>
-              <span data-testid="metric-live-occupants">{space.totalLiveOccupants}</span>
+              <span data-testid="metric-live-occupants">{totalLiveOccupants}</span>
               {' / '}
-              <span data-testid="metric-building-capacity">{space.totalBuildingCapacity}</span>
+              <span data-testid="metric-building-capacity">{totalBuildingCapacity}</span>
               <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 'normal' }}> PAX</span>
             </div>
           </div>
@@ -642,8 +674,8 @@ export default function SustainabilityRecommendationsPanel({
         >
           <div
             style={{
-              width: `${Math.min(100, Math.max(0, space.overallEfficiencyPercent))}%`,
-              background: space.overallEfficiencyPercent > 70 ? '#10b981' : space.overallEfficiencyPercent > 30 ? '#38bdf8' : '#f59e0b',
+              width: `${Math.min(100, Math.max(0, overallEfficiencyPercent))}%`,
+              background: overallEfficiencyPercent > 70 ? '#10b981' : overallEfficiencyPercent > 30 ? '#38bdf8' : '#f59e0b',
               height: '100%',
               transition: 'width 0.4s ease',
             }}
@@ -651,7 +683,7 @@ export default function SustainabilityRecommendationsPanel({
         </div>
 
         {/* Zone-by-Zone Table */}
-        {space.zones && space.zones.length > 0 && (
+        {zones && zones.length > 0 && (
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
               <thead>
@@ -663,29 +695,32 @@ export default function SustainabilityRecommendationsPanel({
                 </tr>
               </thead>
               <tbody>
-                {space.zones.map((z, idx) => (
-                  <tr
-                    key={idx}
-                    data-testid="zone-space-item"
-                    style={{
-                      borderBottom: '1px solid rgba(255,255,255,0.04)',
-                      background: idx % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.02)',
-                    }}
-                  >
-                    <td style={{ padding: '6px 4px', color: '#e2e8f0', fontWeight: '500' }}>{z.zoneId}</td>
-                    <td style={{ padding: '6px 4px', textAlign: 'center', color: '#38bdf8' }}>{z.liveOccupants}</td>
-                    <td style={{ padding: '6px 4px', textAlign: 'center', color: '#94a3b8' }}>{z.designCapacity}</td>
-                    <td style={{ padding: '6px 4px', textAlign: 'right', fontWeight: 'bold' }}>
-                      <span
-                        style={{
-                          color: z.efficiencyPercent > 75 ? '#34d399' : z.efficiencyPercent < 30 ? '#f87171' : '#fbbf24',
-                        }}
-                      >
-                        {z.efficiencyPercent.toFixed(1)}%
-                      </span>
-                    </td>
-                  </tr>
-                ))}
+                {zones.map((z, idx) => {
+                  const eff = Number(z?.efficiencyPercent) || 0;
+                  return (
+                    <tr
+                      key={idx}
+                      data-testid="zone-space-item"
+                      style={{
+                        borderBottom: '1px solid rgba(255,255,255,0.04)',
+                        background: idx % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.02)',
+                      }}
+                    >
+                      <td style={{ padding: '6px 4px', color: '#e2e8f0', fontWeight: '500' }}>{z?.zoneId || '—'}</td>
+                      <td style={{ padding: '6px 4px', textAlign: 'center', color: '#38bdf8' }}>{z?.liveOccupants ?? 0}</td>
+                      <td style={{ padding: '6px 4px', textAlign: 'center', color: '#94a3b8' }}>{z?.designCapacity ?? 0}</td>
+                      <td style={{ padding: '6px 4px', textAlign: 'right', fontWeight: 'bold' }}>
+                        <span
+                          style={{
+                            color: eff > 75 ? '#34d399' : eff < 30 ? '#f87171' : '#fbbf24',
+                          }}
+                        >
+                          {eff.toFixed(1)}%
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

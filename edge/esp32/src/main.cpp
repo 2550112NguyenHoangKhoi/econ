@@ -181,7 +181,7 @@ const int STATUS_LED = 2;   // onboard LED = MQTT link status
 
 #if USE_CAMERA
   #include "camera/person_detector.h"
-  CameraPersonDetector cameraDetector;
+  CameraPersonDetector* cameraDetector = nullptr;
 #endif
 
 #if USE_LUX
@@ -510,7 +510,9 @@ void applyHvacSetpoint(float celsius) {
 
 void setLights(bool on) {
   lightsOn = on;
-  digitalWrite(gCfg.pinLightingRelay, on ? HIGH : LOW);
+  if (gCfg.pinLightingRelay != 255) {
+    digitalWrite(gCfg.pinLightingRelay, on ? HIGH : LOW);
+  }
   Serial.printf("[relay] lights %s\n", on ? "ON" : "OFF");
 }
 
@@ -735,7 +737,7 @@ void handleCommand(const String& msg) {
 #if USE_CAMERA
     else if (tok == "CAMERA_TRIGGER") {
       Serial.println("[camera] ML inference triggered via command");
-      cameraDetector.processFrame();
+      cameraDetector->processFrame();
       readAndPublish();
     }
 #endif
@@ -750,9 +752,9 @@ void handleCommand(const String& msg) {
 // calibration of every node on the bus is readable with one subscribe rather than by
 // interrogating boards one at a time.
 void publishConfigState() {
-  StaticJsonDocument<640> doc;
+  StaticJsonDocument<1536> doc;
   cfgSerializeState(doc);
-  char buf[640];
+  char buf[1536];
   size_t n = serializeJson(doc, buf, sizeof(buf));
   client.publish(CONFIG_STATE_TOPIC, (const uint8_t*)buf, n, true);
 }
@@ -850,12 +852,12 @@ void readAndPublish() {
   int occupancy = 0;
   bool present = false;
 #if USE_CAMERA
-  present = cameraDetector.isPersonDetected();
+  present = cameraDetector->isPersonDetected();
   #if USE_MMWAVE
     if (digitalRead(gCfg.pinMmwave) == HIGH) present = true;
   #endif
-  occupancy = present ? (cameraDetector.getPersonCount() > 0 ? cameraDetector.getPersonCount() : 1) : 0;
-  doc["confidence"] = round(cameraDetector.getConfidence() * 100) / 100.0;
+  occupancy = present ? (cameraDetector->getPersonCount() > 0 ? cameraDetector->getPersonCount() : 1) : 0;
+  doc["confidence"] = round(cameraDetector->getConfidence() * 100) / 100.0;
   doc["person_count"] = occupancy;
 #elif USE_PIR || USE_MMWAVE
   present = globalDebouncedPresence;
@@ -935,7 +937,9 @@ void readAndPublish() {
   else Serial.println("[lux] BH1750 read failed -> omitted");
 #endif
 
-  doc["lights"]      = lightsOn ? "ON" : "OFF";
+  if (gCfg.pinLightingRelay != 255) {
+    doc["lights"] = lightsOn ? "ON" : "OFF";
+  }
   doc["setpoint"]    = hvacSetpointC;
   // Whether that setpoint was actually transmitted to an air conditioner, or merely
   // parsed. Same discipline as tempReal: the twin must never count energy saved by a
@@ -1003,7 +1007,7 @@ void handleCameraStream() {
       // Read request
       while(client.available()) client.read();
       
-      const uint8_t* frame = cameraDetector.getDriver().getFrameBuffer();
+      const uint8_t* frame = cameraDetector->getDriver().getFrameBuffer();
       if (!frame) {
          client.println("HTTP/1.1 503 Service Unavailable");
          client.stop();
@@ -1054,7 +1058,9 @@ void setup() {
   // calibration, touch threshold, publish cadence) must report what this node will
   // actually run with, not the compiled default it may already have been told to replace.
   cfgLoad();
-  pinMode(gCfg.pinLightingRelay, OUTPUT);
+  if (gCfg.pinLightingRelay != 255) {
+    pinMode(gCfg.pinLightingRelay, OUTPUT);
+  }
   pinMode(gCfg.pinIrAc, OUTPUT);
 #if USE_IR_AC
   customIrSend.begin();
@@ -1179,9 +1185,10 @@ void setup() {
   client.setCallback(onMessage);
 
 #if USE_CAMERA
-  if (cameraDetector.init()) {
-      Serial.printf("[camera] initialized. model takes %u bytes SRAM\n", (unsigned int)cameraDetector.getArenaUsedBytes());
-      cameraDetector.setZoneAndSensorId(ZONE_TOPIC, CLIENT_ID);
+  cameraDetector = new CameraPersonDetector();
+  if (cameraDetector->init()) {
+      Serial.printf("[camera] initialized. model takes %u bytes SRAM\n", (unsigned int)cameraDetector->getArenaUsedBytes());
+      cameraDetector->setZoneAndSensorId(ZONE_TOPIC, CLIENT_ID);
   } else {
       Serial.println("[camera] initialization failed!");
   }

@@ -1,15 +1,23 @@
-## 2026-09-04T06:29:30Z
-You are teamwork_preview_challenger_m1_1.
-Your working directory is d:\ECON1\econ\.agents\teamwork_preview_challenger_m1_1.
-Read:
-- d:\ECON1\econ\.agents\ORIGINAL_REQUEST.md
-- d:\ECON1\econ\PROJECT.md
-- d:\ECON1\econ\.agents\teamwork_preview_worker_m1\handoff.md
+# Challenger 1 Dispatch — Milestone 1: UI Bug Fixes & Hardware Alignment
 
-Your objective: Empirically verify the mathematical correctness and robustness of the ACS712 True-RMS power algorithm and stripCalAPerV calibration in edge/esp32.
-Write an adversarial host test / verification harness (in C++ or Python) that feeds synthetic sine wave signals with DC offsets (~2.5V, ~1.65V, clipping, harmonics, zero current, low noise) into the algorithm logic to verify:
-- Is the ~2.5V DC offset completely subtracted by the variance formula sqrt(sigma^2)?
-- Does pure noise (< 0.10A) properly result in 0.0W?
-- Does a known AC current (e.g. 5A peak, 3.535A RMS at 230V -> 813W) calculate correctly?
-- Does starved sampling (< 100 samples) trigger omission?
-Write your empirical test results, code, and verdict (APPROVE or CHALLENGE_FAILED) in handoff.md and send a message to parent orchestrator (3d053cc7-022e-47ba-9164-0325863f09a2).
+## Identity & Role
+- **Type**: `teamwork_preview_challenger`
+- **Role**: `3D Viewer & Floor Switcher Adversarial Challenger`
+- **Working Directory**: `/Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_challenger_m1_1`
+- **Parent**: Project Orchestrator (`/Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_orchestrator_13`)
+
+## Authoritative Context & Scope
+- Authoritative User Request: `/Users/nguyenhoangkhoi/Documents/econ/.agents/ORIGINAL_REQUEST.md` (MUST read first)
+- Project Plan: `/Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_orchestrator_13/PROJECT.md`
+- Worker M1 Handoff Report: `/Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_worker_m1/handoff.md`
+
+## Challenge Objectives
+Empirically stress-test Worker M1's 3D floor switcher and active asset updates:
+1. Write and execute an adversarial stress test script targeting `dashboard/src/buildingStore.js` and `dashboard/src/BuildingModel.jsx`.
+2. Test rapid switching between floors (e.g. Floor 1 -> 15 -> 7 -> 2 -> 14 -> 1) and between commercial tower (15 floors) and domestic home (1 floor).
+3. Test invalid/out-of-bounds floor values (e.g. level -1, 0, 999, null, undefined, NaN) to verify `getActiveFloorAsset` returns safe fallbacks without throwing uncaught exceptions.
+4. Verify `data-testid="active-asset"` and `data-testid="active-floor-asset"` in the DOM accurately match expected BIM asset IDs across all transitions.
+5. 
+## 2026-09-08T05:31:00Z
+Empirically stress-test the 3D floor switcher and active asset updates with rapid transitions, out-of-bounds inputs, and model switches. Write and run a test script, verify zero unhandled exceptions, and confirm active asset DOM synchronization.
+Document your challenge results and verdict (APPROVE or REQUEST_CHANGES) in /Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_challenger_m1_1/handoff.md and report to parent.

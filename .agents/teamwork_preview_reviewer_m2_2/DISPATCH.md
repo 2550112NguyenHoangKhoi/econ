@@ -1,27 +1,38 @@
-## 2026-09-04T07:58:27Z
+# Reviewer 2 Dispatch — Milestone 2: Backend State Persistence
 
-You are a Reviewer subagent in the ECON project.
-Your identity: teamwork_preview_reviewer_m2_2
-Your working directory: d:\ECON1\econ\.agents\teamwork_preview_reviewer_m2_2
-Project directory: d:\ECON1\econ
+## Identity & Role
+- **Type**: `teamwork_preview_reviewer`
+- **Role**: `Adversarial Persistence & Concurrency Reviewer`
+- **Working Directory**: `/Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_reviewer_m2_2`
+- **Parent**: Project Orchestrator (`/Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_orchestrator_13`)
 
-CRITICAL CONSTRAINTS:
-- You are an objective reviewer and adversarial challenger.
-- First, read the authoritative user request at: d:\ECON1\econ\.agents\ORIGINAL_REQUEST.md (specifically the latest request ## 2026-09-04T07:14:00Z).
-- Read the global project architecture at: d:\ECON1\econ\PROJECT.md.
-- Read Worker handoff report at: d:\ECON1\econ\.agents\teamwork_preview_worker_m2_gen2\handoff.md.
+## Authoritative Context & Input Reports
+- Authoritative User Request: `/Users/nguyenhoangkhoi/Documents/econ/.agents/ORIGINAL_REQUEST.md` (MUST read first)
+- Worker M2 Handoff: `/Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_worker_m2/handoff.md`
+- Project Plan: `/Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_orchestrator_13/PROJECT.md`
 
-REVIEW SCOPE (Milestone 2: Database Schema & Persistence Integrity):
-1. Verify TimescaleDB schema and migration:
-   `docker exec -i econ_wifi_ch_a-db-1 psql -U econ -d econ -c "\d sensor_readings"`
-   `docker exec -i econ_wifi_ch_a-db-1 psql -U econ -d econ -c "\d telemetry"`
-   Confirm `strip_w` is `DOUBLE PRECISION` and nullable.
-2. Confirm zero historical data loss:
-   Check row counts and verify no `DROP TABLE` was executed.
-   Verify continuous aggregate views (`sensor_readings_5m`) remain healthy.
-3. Verify live rows persisted in TimescaleDB:
-   `docker exec -i econ_wifi_ch_a-db-1 psql -U econ -d econ -c "SELECT time, zone_id, sensor_type, value, device_id, quality, strip_w FROM sensor_readings WHERE sensor_type = 'stripW' OR strip_w IS NOT NULL ORDER BY time DESC LIMIT 5;"`
-4. Run Go tests inside Docker:
-   `docker run --rm -v "d:\ECON1\econ\server:/app" -w /app golang:1.22-alpine go test -v ./...`
-5. Output your explicit gate verdict: APPROVE or REQUEST_CHANGES.
-Write `analysis.md` and complete `handoff.md` in your working directory, then send a message to the orchestrator.
+## Review Scope & Instructions
+Adversarially evaluate Worker M2's implementation:
+1. **Concurrency & Race Conditions**: Check `StateStore` locking (`sync.RWMutex`), clone-on-read in `GetAll()`, concurrent write contention, and atomic file write safety (`.tmp` + `os.Rename`).
+2. **Cold Boot & Engine State Consistency**: Verify that engine state (`AutoPilot`, `Mode`, `Scenario`, `BuildingModel`) correctly restores from persisted state before HTTP/WS listeners accept requests.
+3. **Multi-Device Synchronization & Echo Prevention**: Check WebSocket message framing (`state_sync`, `state_update`, `set_state`) and verify frontend echo loop prevention (`togglesRef.current[key] === value`).
+4. **Environment Constraint Audit**: Confirm that zero external third-party Go dependencies were added to `go.mod`.
+5. **Execute Verification**:
+   - `cd server && go test -v -run TestStatePersistence .`
+   - `cd server && go test ./...`
+   - `cd dashboard && npm run build`
+   - `cd dashboard && npm test`
+
+Document your findings and verdict (`APPROVE` or `REQUEST_CHANGES`) in `/Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_reviewer_m2_2/handoff.md` and notify parent.
+
+## 2026-09-08T06:04:33Z
+You are Reviewer 2 (Adversarial Persistence & Concurrency Reviewer).
+Your working directory is /Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_reviewer_m2_2.
+Your task instructions are in /Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_reviewer_m2_2/DISPATCH.md.
+Authoritative user request: /Users/nguyenhoangkhoi/Documents/econ/.agents/ORIGINAL_REQUEST.md.
+Worker M2 handoff: /Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_worker_m2/handoff.md.
+Project plan: /Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_orchestrator_13/PROJECT.md.
+
+Adversarially evaluate Worker M2's implementation for concurrency safety, cold-boot engine restoration, multi-device WebSocket synchronization, echo loop prevention, and environment constraint compliance (zero new external dependencies).
+Run verification commands: go test -v -run TestStatePersistence ., go test ./..., and npm run build.
+Document your review and verdict (APPROVE or REQUEST_CHANGES) in /Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_reviewer_m2_2/handoff.md and report to parent.

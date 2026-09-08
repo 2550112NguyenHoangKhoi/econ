@@ -1,7 +1,7 @@
-# BRIEFING — 2026-09-04T06:35:00Z
+# BRIEFING — 2026-09-08T05:32:00Z
 
 ## Mission
-Empirically verify the mathematical correctness and robustness of the ACS712 True-RMS power algorithm and stripCalAPerV calibration in edge/esp32.
+Empirically stress-test the 3D floor switcher and active asset updates with rapid transitions, out-of-bounds inputs, and model switches. Verify zero unhandled exceptions and confirm active asset DOM synchronization.
 
 ## 🔒 My Identity
 - Archetype: EMPIRICAL CHALLENGER
@@ -10,6 +10,9 @@ Empirically verify the mathematical correctness and robustness of the ACS712 Tru
 - Original parent: 3d053cc7-022e-47ba-9164-0325863f09a2
 - Milestone: milestone_1
 - Instance: 1 of 1
+- Current Working directory: /Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_challenger_m1_1
+- Current Parent: 94b1bad7-43b4-4ef2-a84c-6c5e8cbf0b7f
+- Current Milestone: Milestone M1 (UI Bug Fixes & Hardware Alignment - 3D Viewer & Floor Switcher)
 
 ## 🔒 Key Constraints
 - Review-only — do NOT modify implementation code
@@ -18,44 +21,49 @@ Empirically verify the mathematical correctness and robustness of the ACS712 Tru
 - Empirical reproducibility required.
 
 ## Current Parent
-- Conversation ID: 3d053cc7-022e-47ba-9164-0325863f09a2
-- Updated: 2026-09-04T06:30:00Z
+- Conversation ID: 94b1bad7-43b4-4ef2-a84c-6c5e8cbf0b7f
+- Updated: 2026-09-08T05:31:00Z
 
 ## Review Scope
 - **Files to review**:
-  - edge/esp32/src/main.cpp
-  - edge/esp32/src/node_config.h
-  - edge/esp32/test/host_config_test.cpp
-  - edge/esp32/test/host_strip_power_test.cpp (added)
-  - edge/esp32/test/verify_strip_power.py (added)
-- **Interface contracts**: d:\ECON1\econ\PROJECT.md, d:\ECON1\econ\.agents\ORIGINAL_REQUEST.md
-- **Review criteria**: Mathematical correctness of True-RMS, DC offset cancellation, noise floor handling, known current accuracy, starved sampling omission.
+  - `dashboard/src/buildingStore.js`
+  - `dashboard/src/BuildingModel.jsx`
+  - `dashboard/src/App.jsx`
+  - `dashboard/verify_webserial_floor_switcher.js`
+- **Interface contracts**: `PROJECT.md`, `ORIGINAL_REQUEST.md`
+- **Review criteria**:
+  - Pure invariants and edge-case safety of `getActiveFloorAsset`
+  - Camera recentering and framing stability in `BuildingModel.jsx` / `towerFraming`
+  - Rapid floor switching without race conditions or memory corruption
+  - Seamless switching between multi-level building (15 floors) and domestic home (1 floor)
+  - DOM synchronization of `data-testid="active-asset"` and `data-testid="active-floor-asset"`
 
 ## Attack Surface
 - **Hypotheses tested**:
-  1. DC offset cancellation at ~2.5V, ~1.65V: Confirmed 100% analytically & empirically cancelled by variance formula.
-  2. Noise floor gating: Confirmed signals/noise < 0.10A clamp to 0.0W; >= 0.10A are reported.
-  3. Known current (5A peak / 3.535A RMS): Confirmed calculates to 813.2W (theoretical 813.17W).
-  4. Starved sampling (N < 100): Confirmed returns -1 and JSON omits "stripW".
-  5. Saturation / Clipping: Revealed hardware vulnerability when 5V ACS712 is unattenuated at 2.5V center — clips above 12A peak (8.5A RMS), causing up to -13.3% under-reporting error at 20A peak.
-  6. Non-linear loads (SMPS harmonics): Confirmed True-RMS captures total RMS within 0.021% error.
-  7. Grid frequency drift (49..51Hz): Confirmed spectral leakage causes < 0.8% variation.
-  8. Calibration multiplier range (1.0..500.0 A/V): Confirmed linear scaling without overflow.
+  1. Out-of-bounds floor levels (-1, 16, 999, NaN, null, undefined) -> Confirmed safe fallback without exceptions.
+  2. Malformed building objects -> Empty object, null, empty array safely return null. However, truthy non-array `building.floors` crashes with unhandled TypeError.
+  3. Ground floor / Level 0 resolution -> Confirmed `Number(0) || 1` falsy coercion causes Level 0 to erroneously return Level 1.
+  4. Rapid floor hopping (1 -> 15 -> 7 -> 2 -> 14 -> 1) under sub-100ms intervals -> Confirmed DOM stays in sync, zero page errors.
+  5. Stepper boundary clamping -> Confirmed 10x prev clamps at L1, 15x next clamps at L15.
+  6. Model switching (15-floor tower <-> 1-floor home) -> Confirmed clamps to L1 on home, updates BIM asset ID, prevents stepping on home, recovers on tower.
+  7. Hit-test transparency -> Confirmed `pointer-events: none` on `data-testid="active-asset"` prevents click blocking.
 - **Vulnerabilities found**:
-  - Unattenuated 2.5V DC bias restricts dynamic range to 12.0A peak before clipping against ESP32 3.3V rail. Requires voltage divider to 1.65V center for full 16A/20A power strip capacity.
-- **Untested angles**: Physical ADC hardware non-linearity (ESP32 ADC INL/DNL near rails <0.1V and >3.1V).
+  1. `TypeError: floors.find is not a function`: When `building.floors` is non-array truthy (`{ floors: 'loading' }`), `getActiveFloorAsset` crashes. Fix: `Array.isArray(building?.floors) ? building.floors : []`.
+  2. `Falsy Level 0 Coercion`: `targetLevel = Number(activeFloor) || 1` coerces `0` to `1`, returning Level 1 instead of Level 0 on buildings with basement/ground level 0. Fix: `Number.isFinite(Number(activeFloor)) ? Number(activeFloor) : 1`.
+- **Untested angles**: WebGL GPU context loss during rapid canvas resize (requires hardware GPU fault injection).
 
 ## Loaded Skills
 - None.
 
 ## Key Decisions Made
-- Implemented C++ host test suite `host_strip_power_test.cpp` and Python verification script `verify_strip_power.py`.
-- Formulated verdict: APPROVE with architectural caveat on ADC input attenuation.
+- Authored and executed dedicated adversarial test suite `dashboard/verify_adversarial_floor_switcher.js`.
+- Formulated verdict: `REQUEST_CHANGES` to fix the two empirical edge-case vulnerabilities in `getActiveFloorAsset`.
 
 ## Artifact Index
-- DISPATCH.md — Recorded dispatch instructions
-- BRIEFING.md — Situational awareness
-- progress.md — Liveness heartbeat
-- edge/esp32/test/host_strip_power_test.cpp — Host C++ test
-- edge/esp32/test/verify_strip_power.py — Python verification harness
-- handoff.md — Final handoff report
+- `DISPATCH.md` — Recorded dispatch instructions
+- `BRIEFING.md` — Situational awareness
+- `progress.md` — Liveness heartbeat
+- `dashboard/verify_adversarial_floor_switcher.js` — Adversarial stress test suite
+- `handoff.md` — Final handoff report and verdict
+
+

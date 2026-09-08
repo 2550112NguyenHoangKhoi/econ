@@ -267,3 +267,89 @@ Integrity mode: benchmark
 - [ ] Integration tests verify the backend is successfully invoking the local Python AI models (LSTM/TimesFM) for live inference, rather than just serving them as a static download.
 
 
+## 2026-09-07T16:45:08Z
+
+# Teamwork Project Prompt — Draft
+
+> Status: Launched
+> Goal: Craft prompt → get user approval → delegate to teamwork_preview
+> Requested team: small focused team
+
+This is a single self-contained fix; keep it small and focused. Fix the React rendering crashes in the `HardwareInspector` component, resolve the telemetry issues causing `plugW` and `stripW` to read as 0, ensure sustainability tracking is active, and harden the camera integration to gracefully handle hardware wiring faults on both the edge and frontend.
+
+Working directory: /Users/nguyenhoangkhoi/Documents/econ
+Integrity mode: development
+
+## Requirements
+
+### R1. UI Crash Resolution
+Fix the React unhandled exceptions and component stack crashes originating in `HardwareInspector.jsx`.
+
+### R2. Telemetry and Sustainability Fixes
+Investigate and resolve why `plugW` and `stripW` are reporting 0 instead of their actual power values. Ensure the sustainability tracking features are properly enabled and accumulating data.
+
+### R3. Camera Fault Tolerance
+Harden the camera integration across the stack. Add C++ guards in the ESP32 firmware for missing I2C devices or wiring faults, and add React fallbacks to ensure the UI does not crash if it receives corrupted image data.
+
+## Acceptance Criteria
+
+### UI Stability Verification
+- [ ] An independent reviewer agent inspects the `HardwareInspector.jsx` code and confirms that the specific line causing the crash (e.g., around line 2868) has been safely guarded against undefined or null state variables.
+- [ ] The Vite development server builds the frontend successfully without errors.
+
+### Telemetry & Logic Verification
+- [ ] An independent reviewer agent verifies the Go backend logic (or frontend mapping) to ensure `plugW` and `stripW` are correctly parsing and passing non-zero values.
+- [ ] The reviewer confirms the sustainability toggle/accumulation logic is properly wired.
+
+### Firmware Verification
+- [ ] An independent reviewer agent inspects the ESP32 `main.cpp` (or camera driver) and confirms I2C probe guards or initialization fallbacks are in place so the firmware doesn't boot-loop on camera failure.
+
+## Follow-up — 2026-09-07T17:05:26Z
+
+The user has requested an additional requirement for the ongoing project: "make the manual controls and actuation wired and works". Please ensure that the Manual Controls and Actuation panel in the Hardware Inspector is fully wired to the backend and works correctly.
+
+## 2026-09-08T04:08:48Z
+
+# Teamwork Project Prompt — Draft
+
+> Status: Launched
+> Goal: Craft prompt → get user approval → delegate to teamwork_preview
+> Requested team: full team
+
+A comprehensive overhaul of the ECON IoT dashboard and backend to support persistent state, fix broken UI components (3D floor switcher, logs panel), and introduce WebSerial capabilities for automatic ESP32 USB connection and interactive WiFi provisioning.
+
+Working directory: /Users/nguyenhoangkhoi/Documents/econ
+Integrity mode: benchmark
+
+## Requirements
+
+### R1. UI Bug Fixes & Hardware Alignment
+Update the backend and frontend telemetry parsing to perfectly reflect the latest single-relay hardware configuration. Fix the 3D asset viewer so that the floor level switcher correctly updates the active 3D model, and repair the logs panel so that system logs stream and render correctly without crashing.
+
+### R2. Backend State Persistence
+Ensure the dashboard remembers toggle states (e.g., switches, manual controls, UI preferences) across sessions. This state must be saved to the backend database and synchronized across all connected devices.
+
+### R3. WebSerial USB Connection & WiFi Provisioning
+Implement a WebSerial interface in the dashboard with a "Connect to ESP32" button. Once permission is granted, it must support an interactive WiFi scanning feature that queries the ESP32 for available networks, lists them in the UI, and allows the user to click a network and enter a password to provision the device over USB.
+
+### R4. Global Pipeline Integrity & Bug Hunting
+Conduct a comprehensive bug hunt across all implemented features. Do not take shortcuts, disable features, or "dumb down" the implementation. Ensure the crucial data pipeline—live data flowing from the physical sensors, through backend processing, and surfacing to the user via recommendations, automations, and manual controls—is robust, enhanced, and uninterrupted.
+
+## Acceptance Criteria
+
+### Backend Verification
+- [ ] Go unit tests verify that toggle states are correctly written to the database and accurately retrieved upon initialization.
+- [ ] An end-to-end integration test (or mock telemetry injector) verifies that simulated raw sensor data correctly flows through the backend, triggers an expected recommendation/automation, and correctly updates the `sustainability-state.json` payload without crashing.
+
+### Frontend Verification
+- [ ] Automated frontend tests (or scriptable DOM checks) confirm the WebSerial 'Connect' button and WiFi scanning UI list mount correctly.
+- [ ] Automated frontend tests verify the 3D floor switcher successfully updates the active asset state when clicked.
+- [ ] The dashboard builds successfully (`npm run build`) with no fatal React/Vite errors.
+
+
+## Follow-up — 2026-09-08T05:31:33Z
+
+**USER ADDENDUM**: The user has requested an additional requirement mid-flight: "make the compute offload work as well". 
+
+Please add **Requirement R5: Compute Offload**.
+Implement a dynamic fallback mechanism where if the ESP32 edge node becomes too strained on processing power (e.g., struggling to run local DSP/denoising alongside the heavy Camera AI), it toggles into a "pass-through" mode, streaming raw unprocessed sensor data to the connected backend. The backend must detect this flag and perform the DSP/denoising algorithms server-side before storing the telemetry.

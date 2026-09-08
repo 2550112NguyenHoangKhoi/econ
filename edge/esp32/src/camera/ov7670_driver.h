@@ -83,12 +83,4 @@ private:
   void generatePersonSilhouette();
   void generateGradientFrame();
   void generateCheckerboardFrame();
-
-#if defined(ESP32) && !defined(HOST_TEST)
-  bool initXclk(uint8_t pin, uint32_t freq_hz = 20000000);
-  bool writeRegister(uint8_t reg, uint8_t val);
-  bool readRegister(uint8_t reg, uint8_t& val);
-  bool applyRegisterTable();
-  bool initI2sDma();
-#endif
 };

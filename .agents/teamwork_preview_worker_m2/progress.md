@@ -1,18 +1,19 @@
 # Progress Log - teamwork_preview_worker_m2
 
-Last visited: 2026-09-06T15:06:30Z
+Last visited: 2026-09-08T05:56:00Z
 
 ## Status
 - [x] Initialized workspace, DISPATCH.md, and BRIEFING.md
-- [x] Read referenced documents (ORIGINAL_REQUEST, PROJECT, explorer handoff)
-- [x] Review current files in server/ (simulation/operation_modes.go, main.go, etc.)
-- [x] Implement server/modeapi.go exposing GET /api/mode and POST /api/mode with CORS
-- [x] Register /api/mode route in server/main.go
-- [x] Implement server/modeapi_test.go verifying GET, POST, input formats ("simulation", "sim", "0", "real", "1"), and mode segregation behavior
-- [x] Run Go backend tests (`go test -v ./...`) - All passed
-- [x] Implement dashboard/src/useOperationMode.js hook
-- [x] Integrate segmented switch in top bar of dashboard/src/App.jsx with data-testid="operation-mode-toggle"
-- [x] Implement automated frontend tests dashboard/src/__tests__/OperationModeToggle.test.jsx
-- [x] Run frontend tests (verify_mode_toggle.js: 23/23 pass) and verify Vite build (vite build succeeds)
-- [x] Update BRIEFING.md and write handoff.md
-- [ ] Send completion message to parent
+- [x] Reviewed authoritative documents: ORIGINAL_REQUEST.md, DISPATCH.md, PROJECT.md, survey report 12_2
+- [x] Investigate existing server/db.go, server/main.go, and dashboard files
+- [x] Implement dual-layer StateStore in `server/state_store.go`
+- [x] Update schema migration in `server/db.go`
+- [x] Implement REST & WebSocket API handlers in `server/stateapi.go`
+- [x] Wire StateStore, cold-boot engine restoration, routes, and WS handlers in `server/main.go`
+- [x] Implement frontend state persistence hook in `dashboard/src/useStatePersistence.js`
+- [x] Wire `useStatePersistence` into `dashboard/src/App.jsx`
+- [x] Implement Go unit tests in `server/state_persistence_test.go`
+- [x] Run backend tests (`go test -v -run TestStatePersistence .` and `go test ./...`) - All 100% PASS
+- [x] Run frontend build (`npm run build`) and test suite (`npm test`) - Clean PASS
+- [x] Complete self-critique, finalize BRIEFING.md, and write handoff.md
+- [ ] Notify parent of task completion

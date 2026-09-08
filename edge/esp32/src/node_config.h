@@ -154,37 +154,37 @@ inline NodeConfig cfgDefaults() {
   #ifdef PLUG_RELAY_PIN
     c.pinPlugRelay = PLUG_RELAY_PIN;
   #else
-    c.pinPlugRelay = 27;
+    c.pinPlugRelay = 26;
   #endif
   
   #ifdef RELAY_PIN
     c.pinLightingRelay = RELAY_PIN;
   #else
-    c.pinLightingRelay = 13;
+    c.pinLightingRelay = 255;
   #endif
   
   #ifdef STRIP_ADC_PIN
     c.pinStripAdc = STRIP_ADC_PIN;
   #else
-    c.pinStripAdc = 33;
+    c.pinStripAdc = 32;
   #endif
   
   #ifdef PLUG_ADC_PIN
     c.pinPlugAdc = PLUG_ADC_PIN;
   #else
-    c.pinPlugAdc = 34;
+    c.pinPlugAdc = 33;
   #endif
   
   #ifdef AC_CLAMP_PIN
     c.pinAcClampAdc = AC_CLAMP_PIN;
   #else
-    c.pinAcClampAdc = 35;
+    c.pinAcClampAdc = 255;
   #endif
   
   #ifdef SUPPLY_TEMP_PIN
     c.pinSupplyTemp = SUPPLY_TEMP_PIN;
   #else
-    c.pinSupplyTemp = 26;
+    c.pinSupplyTemp = 255;
   #endif
   
   #ifdef I2C_SDA
@@ -202,25 +202,25 @@ inline NodeConfig cfgDefaults() {
   #ifdef PIR1_PIN
     c.pinPir1 = PIR1_PIN;
   #else
-    c.pinPir1 = 18;
+    c.pinPir1 = 255;
   #endif
   
   #ifdef PIR2_PIN
     c.pinPir2 = PIR2_PIN;
   #else
-    c.pinPir2 = 18;
+    c.pinPir2 = 255;
   #endif
   
   #ifdef MMWAVE_PIN
     c.pinMmwave = MMWAVE_PIN;
   #else
-    c.pinMmwave = 18;
+    c.pinMmwave = 255;
   #endif
   
   #ifdef DHT_PIN
     c.pinDht = DHT_PIN;
   #else
-    c.pinDht = 4;
+    c.pinDht = 255;
   #endif
 
   c.cfgRev            = 0;
@@ -408,6 +408,11 @@ inline bool cfgApplyJson(const JsonDocument& doc, bool& outReset, bool& outHardw
                 (double)gCfg.setpointMinC, (double)gCfg.setpointMaxC,
                 gCfg.simulateCpuStrain ? 1 : 0);
   return true;
+}
+
+inline bool cfgApplyJson(const JsonDocument& doc, bool& outReset) {
+  bool hwChanged = false;
+  return cfgApplyJson(doc, outReset, hwChanged);
 }
 
 // cfgSerializeState fills `out` with the retained /state document: the effective config,

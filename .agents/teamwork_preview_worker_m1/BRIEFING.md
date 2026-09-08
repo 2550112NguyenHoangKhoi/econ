@@ -1,7 +1,7 @@
-# BRIEFING — 2026-09-04T06:28:45Z
+# BRIEFING — 2026-09-08T05:21:15Z
 
 ## Mission
-Implement Requirement R1: ACS712 power strip metering on ESP32 (node_config.h, main.cpp, host_config_test.cpp) and verify firmware compilation and unit tests.
+Implement Milestone 1 (UI Bug Fixes & Hardware Alignment): 3D floor switcher active asset state & camera update, logs panel streaming stability & memory limits, and single-relay hardware alignment in dashboard.
 
 ## 🔒 My Identity
 - Archetype: teamwork_preview_worker_m1
@@ -11,6 +11,9 @@ Implement Requirement R1: ACS712 power strip metering on ESP32 (node_config.h, m
 - Current working directory: /Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_worker_m1
 - Current parent: b976a556-854f-458a-9757-5f48815efe6f
 - Current milestone: Milestone 1 (Hardware Section expansion & manual controls)
+- Invoked: 2026-09-08T05:21:15Z
+- Active Parent ID: 94b1bad7-43b4-4ef2-a84c-6c5e8cbf0b7f
+- Active Milestone: Milestone 1: UI Bug Fixes & Hardware Alignment (3D floor switcher, logs panel, single relay)
 
 ## 🔒 Key Constraints
 - [constraints from dispatch message]
@@ -29,46 +32,59 @@ Implement Requirement R1: ACS712 power strip metering on ESP32 (node_config.h, m
   - server/command_override_test.go
   - edge/esp32/src/main.cpp
 - Mandatory integrity warning: DO NOT CHEAT. No hardcoding or dummy implementations.
+- Milestone 1 constraints (2026-09-08): Write ownership of:
+  - dashboard/src/buildingStore.js
+  - dashboard/src/BuildingModel.jsx
+  - dashboard/src/App.jsx
+  - dashboard/src/TelemetryLogs.jsx
+  - dashboard/src/HardwareInspector.jsx
+  - dashboard/verify_webserial_floor_switcher.js
+  - .agents/teamwork_preview_worker_m1/*
+- DO NOT modify files outside your ownership scope.
 
 ## Current Parent
-- Conversation ID: b976a556-854f-458a-9757-5f48815efe6f
-- Updated: 2026-09-06T15:05:00Z
+- Conversation ID: 94b1bad7-43b4-4ef2-a84c-6c5e8cbf0b7f
+- Updated: 2026-09-08T05:21:15Z
 
 ## Task Summary
 - **What to build**:
-  1. Expose IR Blaster in Hardware Inspector with protocol dropdown, bits/frequency, hex code input, and manual send button.
-  2. Add manual controls for all edge devices: IR blaster, lighting relays, smart plug relays, VAV dampers, CPU strain test.
-  3. Update Go backend command validation (`server/main.go:isSupportedCommand`) to allow `IR_SEND:`, `PLUG_ON`, `PLUG_OFF`, `DAMPER=`, `VAV_SET:`, `CPU_STRAIN:`, `CONFIG:`.
-  4. Update `applyCommandToZone` in `server/simulation/engine.go` to latch digital twin states (PlugShed, DamperPos, etc.).
-  5. Add tests in `server/command_override_test.go` and frontend test/verification scripts.
+  1. 3D floor switcher active asset state & camera update (buildingStore.js: getActiveFloorAsset; BuildingModel.jsx: initialOverview deps & DynamicControls framing; App.jsx: activeFloorAsset, data-testid="active-asset", data-testid="active-floor-asset", floor button updates).
+  2. Logs panel streaming stability & memory limit (TelemetryLogs.jsx: monotonic sequence keys, safe snapshot guards, model switch baseline reset; HardwareInspector.jsx: sliding window buffer on serial log).
+  3. Single-relay hardware alignment (HardwareInspector.jsx: GPIO 26 Smart Plug Relay as physical primary, GPIO 23 Lighting Relay clearly badged as virtual/unpopulated, DEFAULT_HARDWARE_LIBRARY pin definitions).
+  4. Verification script (dashboard/verify_webserial_floor_switcher.js) and clean build (`npm run build` in dashboard/).
 - **Success criteria**:
-  - `go test ./...` passes in `server/`.
-  - Frontend builds cleanly (`npm run build`).
-  - Unit tests confirm command routing and UI controls.
+  - `getActiveFloorAsset` returns level, name, assetId, zoneCount, elevation, height.
+  - `data-testid="active-asset"` and `data-testid="active-floor-asset"` in DOM dynamically update when switching floors.
+  - Camera re-centers cleanly on floor switch.
+  - No React key collisions or crashes in TelemetryLogs.
+  - Serial log buffer capped to prevent memory leak.
+  - Single relay cleanly aligned to GPIO 26.
+  - `npm run build` passes with exit code 0.
+  - Automated test script passes.
 
 ## Key Decisions Made
-- Preserved append-only 🔒 sections in BRIEFING.md.
-- Adhered to interface contracts defined in PROJECT.md:
-  - `IR_SEND:<protocol>:<hex>:<bits>`
-  - `PLUG_ON`, `PLUG_OFF`
-  - `DAMPER=<percent>`, `VAV_SET:<percent>`
-  - `CPU_STRAIN:HIGH`, `CPU_STRAIN:NORMAL`
+- Maintained append-only 🔒 sections in BRIEFING.md.
+- Followed DISPATCH.md file ownership strictly (buildingStore.js, BuildingModel.jsx, App.jsx, TelemetryLogs.jsx, HardwareInspector.jsx, verify_webserial_floor_switcher.js).
+- Positioned `active-asset` badge cleanly above level stepper with `pointerEvents: 'none'` to guarantee zero overlap with `building-model-toggle` or stepper hit testing.
+- Aligned Hardware Inspector to the physical single-relay configuration (GPIO 26 / pinPlugRelay = 26) while explicitly marking GPIO 23 lighting relay virtual / unpopulated (pinLightingRelay = 255).
+- Replaced unbounded serial log concatenation in UsbTab with a 50,000 character sliding window ring buffer (retaining recent 40,000 chars) to prevent browser memory exhaustion.
+- Replaced 1-second coarse timestamp IDs in TelemetryLogs with monotonic sequence counter + high-resolution timestamp `log-${id}-${ev.key}-${Date.now()}-${++logSeq}` and safe snapshot guards.
 
 ## Change Tracker
 - **Files modified**:
-  - `server/main.go`: Updated `isSupportedCommand` to accept `IR_SEND:`, `PLUG_ON/OFF`, `DAMPER=`, `VAV_SET:`, `CPU_STRAIN:`, `CONFIG:`, compounds, and verbs; updated `commandHandler` to accept `device_id` / `deviceId` aliases and return JSON 200 response.
-  - `server/simulation/engine.go`: Added `DamperPos` and `CpuStrain` fields to `ZoneSim`; updated `applyCommandToZone` to latch twin states (`PlugShed`, `DamperPos`, `CpuStrain`, `DetectedProtocol`, `IrState`); updated `PublishCommand` to mirror damper commands to `VavSim`; updated `normalizeOverride`.
-  - `dashboard/src/HardwareInspector.jsx`: Added `IR_PROTOCOLS`, `HARDWARE_LIBRARY`, `DeviceControls` (IR blaster protocol/hex/bits inputs, quick HVAC controls, plug relay buttons, lighting relay buttons, VAV damper slider & presets, CPU strain test, device library specifications, dispatch feedback banner), and `ControlsTab` with target zone selector; integrated controls in `DeviceCard` and tab bar.
-  - `dashboard/src/__tests__/HardwareInspector.test.jsx`: Created unit/component test suite.
-  - `dashboard/verify_hardware_inspector_headless.js`: Created headless sandboxed verification harness.
-  - `server/command_override_test.go`: Created comprehensive backend test suite for all edge commands.
-- **Build status**: PASS (Vite build success in 4.38s; `go build .` success; `go test ./...` 100% PASS)
+  - `dashboard/src/buildingStore.js`: Implemented and exported `getActiveFloorAsset(building, activeFloor)` returning `{ level, name, assetId, zoneCount, elevation, height }`.
+  - `dashboard/src/BuildingModel.jsx`: Fixed `initialOverview` dependency array to `[activeFloor, safeArea, currentBld]`; enhanced `DynamicControls` camera framing to re-center and update smoothly upon floor level switches.
+  - `dashboard/src/App.jsx`: Derived `activeFloorAsset` using `getActiveFloorAsset(currentBuilding, activeFloor)`; exposed `data-testid="active-asset"` and `data-testid="active-floor-asset"` in DOM with `data-asset-id={activeFloorAsset?.assetId}` and visible level/asset text.
+  - `dashboard/src/TelemetryLogs.jsx`: Added monotonic sequence counter `logSeq`, high-res timestamp key generation, `safeSnapshot` with null/undefined guards, and building model switch baseline reset.
+  - `dashboard/src/HardwareInspector.jsx`: Added bounded sliding window buffer to serial log (`next.length > 50000 ? next.slice(-40000) : next`); aligned with physical single-relay hardware configuration (GPIO 26 Smart Plug Relay as physical primary, GPIO 23 Lighting Relay clearly badged as virtual/unpopulated, updated DEFAULT_HARDWARE_LIBRARY pin definitions).
+  - `dashboard/verify_webserial_floor_switcher.js`: Authored comprehensive verification test harness covering active asset resolution, single-relay hardware alignment, log key monotonicity, and Puppeteer DOM floor switcher and log stability.
+- **Build status**: PASS (Vite production build cleanly compiled in 4.21s with exit code 0)
 - **Pending issues**: None
 
 ## Quality Status
-- **Build/test result**: PASS (11/11 subtests in `server/command_override_test.go`; all root server tests PASS in 123s; simulation tests PASS; 12/12 checks in `verify_hardware_inspector_headless.js` PASS; 6/6 firmware host test suites PASS 100%; Tier 1 F1 and Tier 4 Scenario tests PASS)
+- **Build/test result**: PASS (11/11 tests pass in `verify_webserial_floor_switcher.js`; 11/11 tests pass in `verify_bim_switching.js`; 13/13 tests pass in `verify_level_toggle.js`; 23/23 tests pass in `verify_ai_actions.js`)
 - **Lint status**: Clean
-- **Tests added/modified**: `server/command_override_test.go`, `dashboard/src/__tests__/HardwareInspector.test.jsx`, `dashboard/verify_hardware_inspector_headless.js`
+- **Tests added/modified**: `dashboard/verify_webserial_floor_switcher.js`
 
 ## Loaded Skills
 - None
@@ -78,3 +94,5 @@ Implement Requirement R1: ACS712 power strip metering on ESP32 (node_config.h, m
 - BRIEFING.md — Situational awareness
 - progress.md — Liveness heartbeat & progress tracking
 - handoff.md — Comprehensive handoff report
+
+

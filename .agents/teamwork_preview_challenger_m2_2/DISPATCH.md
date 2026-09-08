@@ -1,21 +1,33 @@
-## 2026-09-04T07:58:28Z
-You are a Challenger subagent in the ECON project.
-Your identity: teamwork_preview_challenger_m2_2
-Your working directory: d:\ECON1\econ\.agents\teamwork_preview_challenger_m2_2
-Project directory: d:\ECON1\econ
+# Challenger 2 Dispatch — Milestone 2: Backend State Persistence
 
-CRITICAL CONSTRAINTS:
-- You are an empirical verifier and stress tester.
-- First, read the authoritative user request at: d:\ECON1\econ\.agents\ORIGINAL_REQUEST.md (specifically the latest request ## 2026-09-04T07:14:00Z).
-- Read the global project architecture at: d:\ECON1\econ\PROJECT.md.
-- Read Worker handoff report at: d:\ECON1\econ\.agents\teamwork_preview_worker_m2_gen2\handoff.md.
+## Identity & Role
+- **Type**: `teamwork_preview_challenger`
+- **Role**: `Multi-Device WebSocket Synchronization & REST API Challenger`
+- **Working Directory**: `/Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_challenger_m2_2`
+- **Parent**: Project Orchestrator (`/Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_orchestrator_13`)
 
-CHALLENGE FOCUS: Database Batch Insertion & Concurrency Stress
-Empirically challenge the database insertion pipeline:
-1. Test high-frequency telemetry writes or burst ingestion to verify `writeCh` (capacity 8192) and `writeLoop()` batching (flush interval 500ms or 500 items).
-2. Verify that 7-parameter tuple construction `($1,$2,$3,$4,$5,$6,$7)` never experiences index mismatches or parameter count errors.
-3. Test querying the compatibility view: `SELECT * FROM telemetry WHERE sensor_type = 'stripW' LIMIT 10;`.
-4. Test that `sensor_readings_5m` continuous aggregate runs without error and time-bucketing functions properly.
-5. Check `docker logs econ_wifi_ch_a-server-1` during stress testing for any database errors.
-6. Output your explicit gate verdict: APPROVE or REJECT.
-Write `analysis.md` and complete `handoff.md` in your working directory, then send a message to the orchestrator.
+## Authoritative Context & Input Reports
+- Authoritative User Request: `/Users/nguyenhoangkhoi/Documents/econ/.agents/ORIGINAL_REQUEST.md` (MUST read first)
+- Worker M2 Handoff: `/Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_worker_m2/handoff.md`
+- Project Plan: `/Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_orchestrator_13/PROJECT.md`
+
+## Challenge Mandate
+Empirically stress-test the REST and WebSocket multi-device synchronization:
+1. Write and execute an adversarial test verifying:
+   - High-concurrency `POST /api/state` and `GET /api/state` bursts via `httptest`.
+   - Simulated multi-client WebSocket topology (e.g. 10 clients connected simultaneously to `/ws`, Client 1 updates a toggle, asserts all other 9 clients receive `state_update` within <50ms).
+   - Malformed JSON payloads to `POST /api/state` and invalid WS text frames (assert graceful HTTP 400 Bad Request or error handling without server crash or panic).
+   - Verify frontend `useStatePersistence.js` echo prevention under rapid simulated broadcast feedback loops.
+2. Document your empirical findings and verdict (`APPROVE` or `REQUEST_CHANGES`) in `/Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_challenger_m2_2/handoff.md` and report to parent.
+
+## 2026-09-08T06:04:33Z
+You are Challenger 2 (Multi-Device WebSocket Synchronization & REST API Challenger).
+Your working directory is /Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_challenger_m2_2.
+Your task instructions are in /Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_challenger_m2_2/DISPATCH.md.
+Authoritative user request: /Users/nguyenhoangkhoi/Documents/econ/.agents/ORIGINAL_REQUEST.md.
+Worker M2 handoff: /Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_worker_m2/handoff.md.
+Project plan: /Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_orchestrator_13/PROJECT.md.
+
+Empirically stress-test the REST and WebSocket sync: high-concurrency POST/GET bursts, simulated 10+ concurrent WS client topology asserting real-time broadcast delivery (<50ms), malformed payloads, and echo loop prevention. Write and run an adversarial test script.
+Document your findings and verdict (APPROVE or REQUEST_CHANGES) in /Users/nguyenhoangkhoi/Documents/econ/.agents/teamwork_preview_challenger_m2_2/handoff.md and report to parent.
+

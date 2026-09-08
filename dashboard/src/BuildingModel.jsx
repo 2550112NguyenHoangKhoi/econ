@@ -613,12 +613,18 @@ function DynamicControls({ targetX, targetY, targetZ, isZoomed, activeFloor, saf
   const initializedRef = useRef(false);
 
   useEffect(() => {
-    if (!initializedRef.current && controlsRef.current) {
+    if (!controlsRef.current) return;
+    if (!initializedRef.current) {
       controlsRef.current.target.copy(overview.target);
       camera.position.copy(overview.position);
+      controlsRef.current.update();
       initializedRef.current = true;
+    } else if (!isZoomed) {
+      setTargetCameraPos(overview.position);
+      setTargetLookAt(overview.target);
+      setAnimating(true);
     }
-  }, [overview, camera]);
+  }, [overview, camera, isZoomed]);
 
   useEffect(() => {
     if (isZoomed) {
@@ -634,7 +640,8 @@ function DynamicControls({ targetX, targetY, targetZ, isZoomed, activeFloor, saf
       setTargetLookAt(overview.target);
       setAnimating(true);
     }
-  }, [isZoomed, targetX, targetY, targetZ, overview, building]);
+  }, [isZoomed, targetX, targetY, targetZ, overview, building, activeFloor]);
+
 
   useFrame(() => {
     if (controlsRef.current && animating) {
@@ -724,7 +731,8 @@ export default function BuildingModel({ simState, activeFloor, onFloorClick, sho
   const initialOverview = useMemo(() => {
     const aspect = (typeof window !== 'undefined' ? window.innerWidth / Math.max(1, window.innerHeight) : 1.6);
     return towerFraming(activeFloor, aspect, safeArea, currentBld);
-  }, [currentBld]); // eslint-disable-line
+  }, [activeFloor, safeArea, currentBld]);
+
 
   return (
     <div style={{ width: '100%', height: '100%', position: 'absolute', top: 0, left: 0, zIndex: 1 }}>

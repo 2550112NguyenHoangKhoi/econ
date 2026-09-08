@@ -34,16 +34,18 @@ export default function ForecastChart({
   const chartData = useMemo(() => {
     // 1. If explicit object series [{ t, mw, hi }] is passed
     if (Array.isArray(series) && series.length > 0 && typeof series[0] === 'object' && series[0] !== null && 't' in series[0]) {
-      return series;
+      const allValid = series.every(d => d && typeof d.mw === 'number' && Number.isFinite(d.mw));
+      if (allValid) return series;
+      return [];
     }
 
     // 2. If numerical series array [0.021, 0.023, ...] is passed
-    if (Array.isArray(series) && series.length > 0 && typeof series[0] === 'number') {
+    if (Array.isArray(series) && series.length > 0 && series.every(v => v != null && (typeof v === 'number' || (typeof v === 'string' && !Number.isNaN(Number(v)))) && Number.isFinite(Number(v)))) {
       const step = stepMinutes > 0 ? stepMinutes : 5;
       return series.map((mw, i) => ({
         t: `+${(i + 1) * step}m`,
         mw: +Number(mw).toFixed(4),
-        hi: Array.isArray(upperBand) && upperBand[i] != null ? +Number(upperBand[i]).toFixed(4) : undefined,
+        hi: Array.isArray(upperBand) && upperBand[i] != null && Number.isFinite(Number(upperBand[i])) ? +Number(upperBand[i]).toFixed(4) : undefined,
       }));
     }
 

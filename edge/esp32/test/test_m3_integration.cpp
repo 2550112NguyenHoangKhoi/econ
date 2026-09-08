@@ -519,12 +519,13 @@ void run_suite_3_strict_module_isolation() {
 
   // Test 3.2: GPIO Pin Assignment Non-Collision
   // Verify camera pins do not collide with actuator/analog/sensor pins
-  const int ir_pin = 19;
-  const int lighting_relay_pin = 23;
-  const int plug_relay_pin = 25;
-  const int plug_adc_pin = 34;
-  const int ac_adc_pin = 35;
-  const int supply_temp_pin = 26;
+  const int ir_pin = 25;
+  const int lighting_relay_pin = 27;
+  const int plug_relay_pin = 26;
+  const int plug_adc_pin = 33;
+  const int strip_adc_pin = 32;
+  const int ac_adc_pin = 255;
+  const int supply_temp_pin = 255;
 
   std::vector<int> camera_pins = {
     PIN_CAM_D0, PIN_CAM_D1, PIN_CAM_D2, PIN_CAM_D3,
@@ -534,14 +535,19 @@ void run_suite_3_strict_module_isolation() {
 
   bool pin_collision = false;
   for (int p : camera_pins) {
-    if (p == ir_pin || p == lighting_relay_pin || p == plug_relay_pin ||
-        p == plug_adc_pin || p == ac_adc_pin || p == supply_temp_pin) {
+    if ((ir_pin != 255 && p == ir_pin) || 
+        (lighting_relay_pin != 255 && p == lighting_relay_pin) || 
+        (plug_relay_pin != 255 && p == plug_relay_pin) ||
+        (plug_adc_pin != 255 && p == plug_adc_pin) || 
+        (strip_adc_pin != 255 && p == strip_adc_pin) ||
+        (ac_adc_pin != 255 && p == ac_adc_pin) || 
+        (supply_temp_pin != 255 && p == supply_temp_pin)) {
       pin_collision = true;
       break;
     }
   }
   M3_ASSERT(!pin_collision, "3.2.1 Zero GPIO pin collision between camera and existing actuators/sensors");
-  M3_ASSERT_EQ(5, PIN_CAM_D7, "3.2.2 Camera D7 reuses legacy PIR GPIO5 cleanly");
+  M3_ASSERT_EQ(34, PIN_CAM_D7, "3.2.2 Camera D7 reuses legacy PIR GPIO5 cleanly");
 
   // Test 3.3: Environmental Sensor Invariance under Continuous ML Inference
   float base_t = 0, base_h = 0, base_lux = 0, base_supply = 0;

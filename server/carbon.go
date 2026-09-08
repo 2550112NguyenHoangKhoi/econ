@@ -109,6 +109,7 @@ type MarketQuote struct {
 	Currency                 string  `json:"currency"`
 	IsLive                   bool    `json:"isLive"`
 	FetchedAt                string  `json:"fetchedAt"`
+	URL                      string  `json:"url,omitempty"`
 }
 
 // sustainabilityState represents the persisted state across server restarts.
@@ -141,6 +142,7 @@ func CalculateOffsetRecommendation(cumulativeEmissionsKg float64, budgetKg float
 				Currency:                 "USD",
 				IsLive:                   false,
 				FetchedAt:                time.Now().UTC().Format(time.RFC3339),
+				URL:                      "https://www.goldstandard.org/",
 			},
 			{
 				Source:                   "Puro.earth CORCs (Biochar)",
@@ -148,6 +150,7 @@ func CalculateOffsetRecommendation(cumulativeEmissionsKg float64, budgetKg float
 				Currency:                 "USD",
 				IsLive:                   false,
 				FetchedAt:                time.Now().UTC().Format(time.RFC3339),
+				URL:                      "https://puro.earth/",
 			},
 			{
 				Source:                   "Moss.Earth MCO2",
@@ -155,6 +158,7 @@ func CalculateOffsetRecommendation(cumulativeEmissionsKg float64, budgetKg float
 				Currency:                 "USD",
 				IsLive:                   false,
 				FetchedAt:                time.Now().UTC().Format(time.RFC3339),
+				URL:                      "https://moss.earth/",
 			},
 			{
 				Source:                   "Verra VCS (Verified Carbon Standard)",
@@ -162,6 +166,7 @@ func CalculateOffsetRecommendation(cumulativeEmissionsKg float64, budgetKg float
 				Currency:                 "USD",
 				IsLive:                   false,
 				FetchedAt:                time.Now().UTC().Format(time.RFC3339),
+				URL:                      "https://verra.org/",
 			},
 			{
 				Source:                   "Climate Action Reserve (CAR)",
@@ -169,6 +174,7 @@ func CalculateOffsetRecommendation(cumulativeEmissionsKg float64, budgetKg float
 				Currency:                 "USD",
 				IsLive:                   false,
 				FetchedAt:                time.Now().UTC().Format(time.RFC3339),
+				URL:                      "https://www.climateactionreserve.org/",
 			},
 			{
 				Source:                   "South Pole (Nature-Based)",
@@ -176,6 +182,7 @@ func CalculateOffsetRecommendation(cumulativeEmissionsKg float64, budgetKg float
 				Currency:                 "USD",
 				IsLive:                   false,
 				FetchedAt:                time.Now().UTC().Format(time.RFC3339),
+				URL:                      "https://www.southpole.com/",
 			},
 		},
 	}
@@ -196,7 +203,7 @@ func CalculateOffsetRecommendation(cumulativeEmissionsKg float64, budgetKg float
 		if whole > 1 {
 			certWord = "certificates"
 		}
-		rec.Recommendation = fmt.Sprintf("Purchase %d carbon credit %s (~%.4f tCO2e deficit) at $%.2f/tCO2e to offset emissions.",
+		rec.Recommendation = fmt.Sprintf("Purchase %d carbon credit %s (~%.4f tCO2e deficit) at $%.2f/tCO2e to offset emissions. You can purchase these credits via our integrated Toucan Protocol exchange, or explore verified alternative registries like Gold Standard and Verra below. Click the external links on each quote to open the corresponding marketplace and complete your purchase.",
 			whole, certWord, rec.CreditsNeededMetricTons, quote.SpotPricePerMetricTonUSD)
 	} else {
 		rec.OverBudget = false

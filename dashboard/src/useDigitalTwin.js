@@ -315,6 +315,7 @@ export function useDigitalTwin(onUpdate) {
               lightsOn: z.lightsOn(), humidity: z.humidity(), co2: z.co2(), alert,
               // APLC: live plug draw (clamp if metered, model otherwise) + sweep state.
               plugW: z.plugW(), plugShed: z.plugShed(),
+              stripW: z.stripW ? z.stripW() : 0,
               // Supply-air temperature the engine's cooling law used for this zone, and
               // whether a probe measured it. Panels that turn airflow into delivered
               // cooling need the real number, not the design constant they assumed.

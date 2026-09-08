@@ -3,9 +3,10 @@ import { Users, Wind, Box, Zap, AlertTriangle, Activity, Settings, Map, Camera, 
 import { ReactFlow, Background, Controls, Handle, Position, applyNodeChanges, applyEdgeChanges } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import BuildingModel, { SingleFloorLayout } from './BuildingModel';
-import { getBuilding, getBuildingModelType, setBuildingModelType, subscribeBuildingChange } from './buildingStore';
+import { getBuilding, getBuildingModelType, setBuildingModelType, subscribeBuildingChange, getActiveFloorAsset } from './buildingStore';
 
 import TelemetryPanel from './TelemetryPanel';
+
 import GlobalMetricsPanel from './GlobalMetricsPanel';
 import TelemetryLogs from './TelemetryLogs';
 import MaintenanceDrawer from './MaintenanceDrawer';
@@ -30,6 +31,7 @@ import CanvasErrorBoundary from './CanvasErrorBoundary';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Canvas } from '@react-three/fiber';
 import { useOperationMode } from './useOperationMode';
+import { useStatePersistence } from './useStatePersistence';
 
 
 // --- P&ID ENGINEERING CUSTOM NODES ---
@@ -285,6 +287,8 @@ const buildTopologyFromSim = (simState, activeFloor, ontology, building = getBui
       data: {
         label: z.label, temp: z.temp, setpoint: z.setpoint, deadband: z.deadband,
         occupancy: z.occupancy, alert: z.alert,
+        plugW: z.plugW ?? 0,
+        stripW: z.stripW ?? 0,
         // Label the terminal unit by the SERVING RELATIONSHIP, not by its raw id. Zone and
         // VAV ids are opaque keys minted by the digitizer and referenced across the Brick
         // ontology, so they outlive any re-classification of what the room is for — which
@@ -330,6 +334,10 @@ function App() {
   const [leftPanelSize, setLeftPanelSize] = useState({ w: 380 });
   const [showWindSim, setShowWindSim] = useState(true);
   const { mode: operationMode, isReal: isRealMode, setMode: setOperationMode } = useOperationMode();
+  const activeFloorAsset = useMemo(
+    () => getActiveFloorAsset(currentBuilding, activeFloor),
+    [currentBuilding, activeFloor]
+  );
 
   useEffect(() => {
     const unsub = subscribeBuildingChange((b, type) => {
@@ -343,12 +351,6 @@ function App() {
     });
     return unsub;
   }, []);
-
-  useEffect(() => {
-    if (isRealMode && activeLeftTab === 'sustainability') {
-      setActiveLeftTab('ai');
-    }
-  }, [isRealMode, activeLeftTab]);
 
   const handleToggleBuildingModel = (type) => {
     setBuildingModelType(type, { force: true });
@@ -546,6 +548,83 @@ function App() {
     streamOpen,
     streamAgeMs,
   } = useDigitalTwin(onSimUpdate);
+
+  // Backend State Persistence & Multi-Device Synchronization (Milestone 2)
+  const handleRemoteStateUpdate = useCallback((updates, isInitial) => {
+    if (!updates) return;
+    if (typeof updates.activeFloor === 'number') {
+      setActiveFloor(updates.activeFloor);
+    }
+    if (updates.showWindSim !== undefined) {
+      setShowWindSim(!!updates.showWindSim);
+    }
+    if (typeof updates.viewMode === 'string') {
+      setViewMode(updates.viewMode);
+    }
+    if (typeof updates.activeLeftTab === 'string') {
+      setActiveLeftTab(updates.activeLeftTab);
+    }
+    if (updates.isLeftPanelOpen !== undefined) {
+      setIsLeftPanelOpen(!!updates.isLeftPanelOpen);
+    }
+    if (typeof updates.autoPilot === 'boolean') {
+      setAutoPilot(updates.autoPilot);
+    }
+    if (updates.operationMode && typeof setOperationMode === 'function') {
+      setOperationMode(updates.operationMode);
+    }
+    if (updates.buildingModelType && updates.buildingModelType !== getBuildingModelType()) {
+      handleToggleBuildingModel(updates.buildingModelType);
+    }
+  }, [setAutoPilot, setOperationMode]);
+
+  const {
+    toggles: persistentToggles,
+    updateToggle,
+  } = useStatePersistence({
+    onRemoteUpdate: handleRemoteStateUpdate,
+  });
+
+  // Synchronize local changes to backend state persistence with debouncing
+  useEffect(() => {
+    if (typeof activeFloor === 'number') {
+      updateToggle('activeFloor', activeFloor);
+    }
+  }, [activeFloor, updateToggle]);
+
+  useEffect(() => {
+    updateToggle('showWindSim', showWindSim);
+  }, [showWindSim, updateToggle]);
+
+  useEffect(() => {
+    updateToggle('viewMode', viewMode);
+  }, [viewMode, updateToggle]);
+
+  useEffect(() => {
+    updateToggle('activeLeftTab', activeLeftTab);
+  }, [activeLeftTab, updateToggle]);
+
+  useEffect(() => {
+    updateToggle('isLeftPanelOpen', isLeftPanelOpen);
+  }, [isLeftPanelOpen, updateToggle]);
+
+  useEffect(() => {
+    if (typeof autoPilot === 'boolean') {
+      updateToggle('autoPilot', autoPilot);
+    }
+  }, [autoPilot, updateToggle]);
+
+  useEffect(() => {
+    if (operationMode) {
+      updateToggle('operationMode', operationMode);
+    }
+  }, [operationMode, updateToggle]);
+
+  useEffect(() => {
+    if (buildingModelType) {
+      updateToggle('buildingModelType', buildingModelType);
+    }
+  }, [buildingModelType, updateToggle]);
 
   const executeRemediation = () => {
     const target = faultTarget || (failingZone?.id && failingZone.id !== 'Unknown Zone' ? failingZone.id : DEFAULT_FAULT_TARGET);
@@ -1177,32 +1256,30 @@ function App() {
               >
                 PLUGS
               </button>
-              {!isRealMode && (
-                <button
-                  data-testid="tab-sustainability"
-                  onClick={() => setActiveLeftTab('sustainability')}
-                  style={{
-                    flex: '1 1 auto',
-                    padding: '10px 6px',
-                    background: activeLeftTab === 'sustainability' ? 'rgba(16, 185, 129, 0.12)' : 'transparent',
-                    color: activeLeftTab === 'sustainability' ? '#10b981' : 'var(--text-secondary)',
-                    border: 'none',
-                    borderBottom: activeLeftTab === 'sustainability' ? '2px solid #10b981' : '2px solid transparent',
-                    cursor: 'pointer',
-                    fontWeight: 'bold',
-                    fontSize: '11px',
-                    whiteSpace: 'nowrap',
-                    letterSpacing: '0.02em',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    minWidth: 'fit-content',
-                    transition: 'all 0.15s ease'
-                  }}
-                >
-                  SUSTAINABILITY
-                </button>
-              )}
+              <button
+                data-testid="tab-sustainability"
+                onClick={() => setActiveLeftTab('sustainability')}
+                style={{
+                  flex: '1 1 auto',
+                  padding: '10px 6px',
+                  background: activeLeftTab === 'sustainability' ? 'rgba(16, 185, 129, 0.12)' : 'transparent',
+                  color: activeLeftTab === 'sustainability' ? '#10b981' : 'var(--text-secondary)',
+                  border: 'none',
+                  borderBottom: activeLeftTab === 'sustainability' ? '2px solid #10b981' : '2px solid transparent',
+                  cursor: 'pointer',
+                  fontWeight: 'bold',
+                  fontSize: '11px',
+                  whiteSpace: 'nowrap',
+                  letterSpacing: '0.02em',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  minWidth: 'fit-content',
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                SUSTAINABILITY
+              </button>
             </div>
             
             <div style={{ flex: 1, overflowY: 'auto', padding: '16px' }}>
@@ -1491,6 +1568,37 @@ function App() {
           ▶
         </button>
       </div>
+
+      {/* Active Floor Asset Badge */}
+      <div
+        data-testid="active-asset"
+        data-asset-id={activeFloorAsset?.assetId || ''}
+        style={{
+          position: 'absolute',
+          bottom: '7.6rem',
+          right: rightPanelWidth + 24 + 12,
+          zIndex: 14,
+          display: 'flex',
+          alignItems: 'center',
+          gap: '4px',
+          background: 'rgba(10, 16, 28, 0.85)',
+          padding: '4px 8px',
+          borderRadius: '8px',
+          border: '1px solid var(--border-glass)',
+          backdropFilter: 'blur(12px)',
+          boxShadow: '0 4px 20px rgba(0, 0, 0, 0.4)',
+          fontSize: '11px',
+          color: 'var(--accent-blue)',
+          fontFamily: 'monospace',
+          pointerEvents: 'none',
+        }}
+      >
+        <span data-testid="active-floor-asset" data-asset-id={activeFloorAsset?.assetId || ''}>
+          {activeFloorAsset?.name || `Level ${activeFloor}`} ({activeFloorAsset?.assetId || ''})
+        </span>
+      </div>
+
+
 
       {/* COMMAND BAR (Floating Bottom Center) */}
       <div className="hud-command-bar">
