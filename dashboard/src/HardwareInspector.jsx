@@ -1013,6 +1013,7 @@ function UsbTab() {
       return [];
     }
   });
+  const readerRef = React.useRef(null);
 
   const appendLog = (chunk) => {
     setLog((l) => {
@@ -1036,10 +1037,26 @@ function UsbTab() {
     }
   };
 
+  const disconnect = async () => {
+    try {
+      if (readerRef.current) {
+        await readerRef.current.cancel();
+      }
+      if (port) {
+        await port.close();
+      }
+    } catch (e) {
+      appendLog(`Disconnect Error: ${e.message}\n`);
+    } finally {
+      setPort(null);
+    }
+  };
+
   const readLoop = async (p) => {
     const textDecoder = new TextDecoderStream();
     p.readable.pipeTo(textDecoder.writable).catch(e => appendLog(`Pipe Error: ${e.message}\n`));
     const reader = textDecoder.readable.getReader();
+    readerRef.current = reader;
     let buffer = '';
     try {
       while (true) {
@@ -1063,6 +1080,7 @@ function UsbTab() {
       appendLog(`Read Error: ${e.message}\n`);
     } finally {
       reader.releaseLock();
+      readerRef.current = null;
       setPort(null);
     }
   };
@@ -1106,9 +1124,12 @@ function UsbTab() {
         <h2 style={{marginTop: 0, color: '#3b82f6'}}>USB Serial Console</h2>
         <div style={{ marginBottom: 12 }}>
           {!port ? (
-            <button style={{...S.btn(true), padding: '6px 14px'}} onClick={connect}>Connect to USB Device</button>
+            <button style={{...S.btn(true), padding: '6px 14px'}} onClick={connect}>Connect to ESP32 via USB</button>
           ) : (
-            <span style={S.badge('#4ade80')}>CONNECTED</span>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <span style={S.badge('#4ade80')}>CONNECTED</span>
+              <button style={{...S.btn(false), padding: '4px 10px'}} onClick={disconnect}>Disconnect</button>
+            </div>
           )}
         </div>
         <div style={{...S.pre, height: 300, overflowY: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all'}}>
@@ -1488,7 +1509,10 @@ export default function HardwareInspector() {
       {tab === 'config' && <ConfigTab />}
       {tab === 'forecast' && <ForecastTab />}
       {tab === 'sustainability' && <SustainabilityTab />}
-      {tab === 'usb' && <UsbTab />}
+      
+      <div style={{ display: tab === 'usb' ? 'block' : 'none' }}>
+        <UsbTab />
+      </div>
     </div>
   );
 }

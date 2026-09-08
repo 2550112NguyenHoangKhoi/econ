@@ -693,6 +693,7 @@ function App() {
       <div className="three-d-canvas-wrapper">
         <CanvasErrorBoundary>
           <BuildingModel
+            key={buildingModelType}
             simState={simData}
             activeFloor={activeFloor}
             onFloorClick={setActiveFloor}
@@ -1285,6 +1286,7 @@ function App() {
             <div style={{ flex: 1, overflowY: 'auto', padding: '16px' }}>
               {activeLeftTab === 'sustainability' ? (
                 <SustainabilityRecommendationsPanel
+                  key={buildingModelType}
                   simData={simData}
                   sendManualOverride={sendManualOverride}
                 />
