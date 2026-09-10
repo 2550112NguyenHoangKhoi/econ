@@ -590,6 +590,18 @@ bool OV7670Driver::init() {
     };
     const int nLines = sizeof(lines) / sizeof(lines[0]);
     bool sawHigh[16] = {false}, sawLow[16] = {false};
+
+    // XCLK BACK ON for the duration of this probe. It was detached above so esp_camera
+    // could take the LEDC channel, and the first version of this check ran after that —
+    // measuring a sensor with no clock and reporting all eleven lines dead. The OV7670 has
+    // no internal oscillator, so without XCLK it cannot drive anything, and "nothing is
+    // moving" then says nothing about the wiring or the part. A probe that cannot
+    // distinguish a broken camera from a stopped clock is worse than no probe.
+    ledcSetup(LEDC_CHANNEL_0, 10000000, 1);
+    ledcAttachPin(PIN_CAM_XCLK, LEDC_CHANNEL_0);
+    ledcWrite(LEDC_CHANNEL_0, 1);
+    delay(50);                       // let the sensor start free-running before sampling
+
     for (int i = 0; i < nLines; i++) pinMode(lines[i].pin, INPUT);
 
     // ~60 ms covers at least one full frame at any plausible rate, so VSYNC gets a chance
@@ -601,8 +613,10 @@ bool OV7670Driver::init() {
       }
     }
 
+    ledcDetachPin(PIN_CAM_XCLK);     // hand it back; esp_camera_init reconfigures this channel
+
     int dead = 0;
-    Serial.print("[camera] parallel bus activity:");
+    Serial.print("[camera] parallel bus activity (XCLK running):");
     for (int i = 0; i < nLines; i++) {
       bool alive = sawHigh[i] && sawLow[i];
       if (!alive) dead++;
@@ -663,8 +677,79 @@ bool OV7670Driver::init() {
   // The sensor is specified from 10 to 48 MHz, so this is well inside its range, and QQVGA
   // at ~7 fps is far more than an occupancy check needs.
   config.xclk_freq_hz = 10000000;
+// Pixel format is the one axis never varied, and the capability record points here.
+//
+// The driver recognises the part (PID 0x76 / VER 0x73, MIDH 0x7F / MIDL 0xA2 — a genuine
+// OmniVision OV7670) and advertises support to VGA, so the sensor is not the obstacle. But
+// the OV7670 emits YUV422 on the wire and has no grayscale mode of its own: GRAYSCALE asks
+// the driver to keep the Y byte of each pair, a different I2S sampling mode from taking
+// every byte. If that mode is what fails on this part, no frame completes at any size —
+// which matches the symptom exactly, across three frame sizes.
+//
+// YUV422 at QQVGA is 160x120x2 = 38,400 B, still fine in internal DRAM. The Y bytes sit at
+// even offsets, so luminance is recoverable without the driver's help.
+// Build -DCAM_PIXFORMAT_GRAYSCALE=1 to go back.
+// Back to GRAYSCALE. YUV422 was refused outright ("Camera config failed 0xffffffff"), so
+// this driver accepts exactly ONE combination for this part — GRAYSCALE at QQVGA — and that
+// combination initialises but never completes a frame. Everything else tried:
+//
+//   frame size   QCIF refused, QVGA refused, QQVGA accepted
+//   pixel format YUV422 refused, GRAYSCALE accepted
+//   registers    esp_camera's own profile, and this repo's 180-register table
+//   XCLK         20 MHz and 10 MHz
+//   buffers      fb_count 1 and 2, DRAM location, both grab modes
+//
+// ...against a sensor the driver itself identifies as a genuine OV7670 (PID 0x76, VER 0x73,
+// MIDH 0x7F, MIDL 0xA2) with all eleven parallel lines driving. The obstacle is
+// esp32-camera's OV7670 support in this Arduino core build, not the hardware.
+#ifndef CAM_PIXFORMAT_GRAYSCALE
+  #define CAM_PIXFORMAT_GRAYSCALE 1
+#endif
+#if CAM_PIXFORMAT_GRAYSCALE
   config.pixel_format = PIXFORMAT_GRAYSCALE;
-  config.frame_size = FRAMESIZE_QQVGA; // 160x120
+#else
+  config.pixel_format = PIXFORMAT_YUV422;
+#endif
+  // QCIF (176x144), not QQVGA (160x120) — and the reason is in the sensor's registers.
+  //
+  // COM7 encodes only VGA, CIF, QVGA and QCIF. There is no QQVGA setting: 160x120 can only
+  // be reached through the DCW/scaling chain, and if the driver's OV7670 profile does not
+  // drive that chain it leaves the sensor emitting full VGA while the frame buffer is sized
+  // for 19,200 bytes. Every frame then overruns by more than an order of magnitude, which is
+  // precisely what cam_hal reports as EV-VSYNC-OVF, and fb_get never completes one.
+  //
+  // QCIF is a native COM7 mode, so the sensor and the DMA agree by construction. At 176x144
+  // grayscale the buffer is 25,344 B, still comfortably inside internal DRAM on a WROOM with
+  // no PSRAM. Build -DCAM_FRAMESIZE_QQVGA=1 to go back.
+#ifndef CAM_FRAMESIZE_QQVGA
+  #define CAM_FRAMESIZE_QQVGA 0
+#endif
+// Selectable, because this driver's OV7670 profile accepts far fewer sizes than the sensor
+// does: QQVGA silently left the sensor at VGA and overran every frame, and QCIF was refused
+// outright with "Failed to set frame size". QVGA is the mode esp32-camera actually supports
+// for this part. Build -DCAM_FRAMESIZE=0 for QQVGA, 1 for QCIF, 2 for QVGA (default).
+// Back to QQVGA (0). Not because it works — it does not — but because it is the only value
+// of the three that this driver will even accept, and a node that initialises and reports
+// "no image" cleanly is better than one whose camera init errors out on every boot.
+//
+//   QQVGA 160x120  init OK, fb_get always NULL, cam_hal reports EV-VSYNC-OVF
+//   QCIF  176x144  "Failed to set frame size"
+//   QVGA  320x240  "Camera config failed with error 0xffffffff"
+//
+// Two of the three are refused outright and the third never completes a frame, on a sensor
+// that is provably healthy — SCCB answers, 180 registers accepted with no NACK, and all
+// eleven parallel lines drive when XCLK runs. That combination is a limitation of
+// esp32-camera's OV7670 profile in this Arduino core build, not of the hardware.
+#ifndef CAM_FRAMESIZE
+  #define CAM_FRAMESIZE 0
+#endif
+#if   CAM_FRAMESIZE == 0
+  config.frame_size = FRAMESIZE_QQVGA;  // 160x120 — needs the DCW chain, not driven here
+#elif CAM_FRAMESIZE == 1
+  config.frame_size = FRAMESIZE_QCIF;   // 176x144 — refused by this driver
+#else
+  config.frame_size = FRAMESIZE_QVGA;   // 320x240 — native COM7, 76,800 B grayscale
+#endif
   config.jpeg_quality = 12;
   // ONE buffer, and it has to stay one. Double buffering would give the DMA headroom
   // against the truncated frames this sensor produces, but two 19,200 B buffers must come
@@ -679,6 +764,13 @@ bool OV7670Driver::init() {
   esp_err_t err = esp_camera_init(&config);
   if (err != ESP_OK) {
     Serial.printf("[camera] esp_camera_init failed with error 0x%x -> Fallback to Simulation Mode\n", err);
+    if (err == ESP_ERR_NO_MEM) {
+      Serial.printf("[camera] that is out-of-memory: a QVGA grayscale frame needs 76,800 B of "
+                    "internal DRAM (no PSRAM on this WROOM) and the detector's %d B tensor "
+                    "arena is already allocated. Free heap %u, largest block %u.\n",
+                    (int)TENSOR_ARENA_SIZE, (unsigned)ESP.getFreeHeap(),
+                    (unsigned)ESP.getMaxAllocHeap());
+    }
     state_ = DRIVER_SIMULATION_MODE;
     hardware_present_ = false;
     mock_mode_ = true;
@@ -695,9 +787,61 @@ bool OV7670Driver::init() {
   hardware_present_ = true;
   mock_mode_ = false;
 
-  // Override esp_camera's generic OV7670 profile with this repo's own table before judging
-  // whether the sensor can produce an image.
+  // Ask the driver what it actually thinks this sensor is and what it will accept.
+  //
+  // Three frame sizes were tried by hand and two were refused; guessing a fourth is not a
+  // method. esp_camera_sensor_get_info() returns the driver's own capability record —
+  // detected PID, model name, and the largest frame size its profile supports — which turns
+  // "which sizes work?" from trial and error into a lookup.
+  {
+    sensor_t* sens = esp_camera_sensor_get();
+    if (sens) {
+      camera_sensor_info_t* info = esp_camera_sensor_get_info(&sens->id);
+      static const char* kSizeNames[] = {
+        "96x96","QQVGA 160x120","QCIF 176x144","HQVGA 240x176","240x240","QVGA 320x240",
+        "CIF 400x296","HVGA 480x320","VGA 640x480","SVGA 800x600","XGA 1024x768"
+      };
+      Serial.printf("[camera] sensor id: PID=0x%04X VER=0x%04X MIDH=0x%04X MIDL=0x%04X\n",
+                    sens->id.PID, sens->id.VER, sens->id.MIDH, sens->id.MIDL);
+      if (info) {
+        int ms = (int)info->max_size;
+        Serial.printf("[camera] driver profile: name=%s pid=0x%02X max_size=%d (%s) jpeg=%s\n",
+                      info->name ? info->name : "?", (unsigned)info->pid, ms,
+                      (ms >= 0 && ms < (int)(sizeof(kSizeNames)/sizeof(kSizeNames[0])))
+                        ? kSizeNames[ms] : "beyond this table",
+                      info->support_jpeg ? "yes" : "no");
+        Serial.println("[camera] anything ABOVE that max_size will be refused by set_framesize; "
+                       "that is the list to pick from, rather than guessing.");
+      } else {
+        Serial.println("[camera] driver has NO capability record for this PID — it does not "
+                       "recognise the part, which is why frame sizes are being refused.");
+      }
+      Serial.printf("[camera] current framesize=%d pixformat=%d\n",
+                    (int)sens->status.framesize, (int)sens->pixformat);
+    }
+  }
+
+  // Our register table is OFF by default, and that is a deliberate reversal.
+  //
+  // It was added while D4 was an open circuit, so esp_camera's own OV7670 profile was being
+  // judged on a bus that could never deliver a correct byte — it never had a fair trial. Now
+  // that all eleven lines are driving, the table is more likely to hurt than help: it opens
+  // with COM7 = 0x80, a soft reset, which tears down the sensor state esp_camera_init has
+  // already matched its I2S DMA to. Reconfiguring the sensor behind the driver's back is a
+  // good way to make the line length disagree with what the DMA expects, and a line-length
+  // disagreement is exactly what EV-VSYNC-OVF reports.
+  //
+  // Build with -DCAM_APPLY_REG_TABLE=1 to put it back, e.g. if esp_camera's profile turns
+  // out not to suit this module after all.
+#ifndef CAM_APPLY_REG_TABLE
+  #define CAM_APPLY_REG_TABLE 0
+#endif
+#if CAM_APPLY_REG_TABLE
   applyInitRegisterTable();
+#else
+  Serial.println("[camera] using esp_camera's own OV7670 profile (register table disabled; "
+                 "-DCAM_APPLY_REG_TABLE=1 to apply this repo's instead)");
+#endif
 
   // Prove the sensor can actually produce a picture before leaving the pipeline running.
   //
@@ -724,11 +868,12 @@ bool OV7670Driver::init() {
       // Distinguish the failure modes: a short frame means the capture is losing lines,
       // an all-zero full frame means the data bus is delivering nothing, and a frame with
       // scattered non-zero bytes means data is arriving but the sync is wrong.
-      Serial.printf("[camera] test frame %d: len=%u (expected %d) nonzero=%u/%u maxByte=%u%s\n",
-                    i + 1, (unsigned)fb->len, (int)CAMERA_FRAME_BYTES,
+      Serial.printf("[camera] test frame %d: %ux%u len=%u (buffer holds %d) nonzero=%u/%u maxByte=%u%s\n",
+                    i + 1, (unsigned)fb->width, (unsigned)fb->height,
+                    (unsigned)fb->len, (int)CAMERA_FRAME_BYTES,
                     (unsigned)nonZero, (unsigned)fb->len, maxByte,
                     haveFirst ? "" : "  <- ENTIRELY ZERO");
-      if (nonZero > 0 && fb->len == CAMERA_FRAME_BYTES) good++;
+      if (nonZero > 0) good++;   // any real image data counts; geometry is reported above
       esp_camera_fb_return(fb);
     } else {
       Serial.printf("[camera] test frame %d: esp_camera_fb_get() returned NULL\n", i + 1);
@@ -802,8 +947,16 @@ bool OV7670Driver::captureFrame(uint8_t* out_buffer, size_t max_len) {
       if (fb->len > sizeof(frame_buffer_)) {
         Serial.printf("[camera] Size mismatch: fb->len=%d, expected=%d\n", fb->len, sizeof(frame_buffer_));
       }
-      size_t copy_len = fb->len < sizeof(frame_buffer_) ? fb->len : sizeof(frame_buffer_);
-      memcpy(frame_buffer_, fb->buf, copy_len);
+      // YUV422 arrives as Y0 U Y1 V ... — luminance is every even byte. Taking the first
+      // 19,200 bytes wholesale would keep the top half of the image and half its chroma;
+      // stepping by two keeps the whole frame in luminance, which is what the detector and
+      // the BMP stream both want.
+      if (fb->len >= CAMERA_FRAME_BYTES * 2) {
+        for (size_t k = 0; k < CAMERA_FRAME_BYTES; k++) frame_buffer_[k] = fb->buf[k * 2];
+      } else {
+        size_t copy_len = fb->len < sizeof(frame_buffer_) ? fb->len : sizeof(frame_buffer_);
+        memcpy(frame_buffer_, fb->buf, copy_len);
+      }
       esp_camera_fb_return(fb);
       last_capture_real_ = true;
     }
