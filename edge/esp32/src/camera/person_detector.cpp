@@ -50,6 +50,7 @@ CameraPersonDetector::~CameraPersonDetector() {}
 bool CameraPersonDetector::init() {
   // 1. Validate Flash-resident Model FlatBuffer
   if (g_person_detect_model_data_len < 1024) {
+    Serial.printf("[detector] model too small: %u bytes\n", (unsigned)g_person_detect_model_data_len);
     state_ = DetectorState::ERROR_MODEL;
     return false;
   }
@@ -59,6 +60,7 @@ bool CameraPersonDetector::init() {
       g_person_detect_model_data[5] != 'F' ||
       g_person_detect_model_data[6] != 'L' ||
       g_person_detect_model_data[7] != '3') {
+    Serial.println("[detector] model FlatBuffer magic is not TFL3");
     state_ = DetectorState::ERROR_MODEL;
     return false;
   }
@@ -73,6 +75,8 @@ bool CameraPersonDetector::init() {
   // 3. Load Model in Real TFLite Micro on ESP32
   const tflite::Model* model = tflite::GetModel(g_person_detect_model_data);
   if (model->version() != TFLITE_SCHEMA_VERSION) {
+    Serial.printf("[detector] model schema v%lu, this TFLite expects v%d\n",
+                  (unsigned long)model->version(), TFLITE_SCHEMA_VERSION);
     state_ = DetectorState::ERROR_MODEL;
     return false;
   }
@@ -94,10 +98,21 @@ bool CameraPersonDetector::init() {
   static tflite::MicroInterpreter static_interpreter(
       model, resolver, tensor_arena_, TENSOR_ARENA_SIZE, error_reporter);
 
+  // Report the memory picture on failure. AllocateTensors is the step that fails when the
+  // 80 KB arena will not fit alongside the camera frame buffer, which now also lives in
+  // internal DRAM because this WROOM has no PSRAM — and the two only compete once the
+  // camera actually initialises, which until now it never did.
   if (static_interpreter.AllocateTensors() != kTfLiteOk) {
+    Serial.printf("[detector] AllocateTensors FAILED. arena=%d B, free heap=%u B, "
+                  "largest free block=%u B\n",
+                  (int)TENSOR_ARENA_SIZE,
+                  (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
     state_ = DetectorState::ERROR_MODEL;
     return false;
   }
+  Serial.printf("[detector] tensors allocated: %u B of %d B arena, free heap %u B\n",
+                (unsigned)static_interpreter.arena_used_bytes(), (int)TENSOR_ARENA_SIZE,
+                (unsigned)ESP.getFreeHeap());
 
   arena_used_bytes_ = static_interpreter.arena_used_bytes();
 #else

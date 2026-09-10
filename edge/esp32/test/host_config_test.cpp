@@ -47,9 +47,18 @@ int main() {
   NodeConfig d = cfgDefaults();
   // The whole compatibility promise: an unconfigured node runs the compiled flags.
   check(d.publishIntervalMs == 5000,           "publish interval defaults to the old 5000 ms");
-  check(std::abs(d.plugCalAPerV - 60.6f) < 1e-3, "plug calibration defaults to the -000 + 33ohm figure");
+  // Assert against the constant, not a literal. This restated 60.6 — the value derived
+  // from a nominal 33 ohm burden — and so failed the moment the clamp was calibrated
+  // against a known load and moved to a measured 45.1. A test that repeats a number cannot
+  // notice when that number stops describing the hardware; that is this check's whole job.
+  check(std::abs(d.plugCalAPerV - (float)PLUG_CAL_A_PER_V) < 1e-3,
+        "plug calibration defaults to the configured PLUG_CAL_A_PER_V");
   check(std::abs(d.plugMainsV - 230.0f) < 1e-3, "plug mains defaults to Vietnam 230 V");
-  check(std::abs(d.stripCalAPerV - 15.0f) < 1e-3, "strip calibration defaults to 15.0 A/V");
+  // Assert against the constant, not a literal. This previously hard-coded 15.0 (the
+  // ACS712-30A) and had to be edited when the node's actual 20 A module was identified —
+  // a test that restates a value cannot notice when that value is wrong for the hardware.
+  check(std::abs(d.stripCalAPerV - (float)STRIP_CAL_A_PER_V) < 1e-3,
+        "strip calibration defaults to the configured STRIP_CAL_A_PER_V");
   check(d.touchEnterPct == 62 && d.touchExitPct == 82, "touch hysteresis defaults to the observed 62/82");
   check(d.cfgRev == 0,                          "a node that was never configured is at rev 0");
   check(cfgValidate(d),                         "the compiled defaults are themselves valid");

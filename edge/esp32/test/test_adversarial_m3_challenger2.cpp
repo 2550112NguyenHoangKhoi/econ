@@ -565,15 +565,15 @@ void run_suite_3_subsystem_invariance_verification() {
     if (std::abs(read_h - TRUTH_HUM_RH) > 0.01f) all_sht30_hum_exact = false;
 
     // 2. ACD1200 CO2 Simulation & CRC-8 verification
-    uint8_t d_co2[9] = {0, 0, 0, (uint8_t)(TRUTH_CO2_PPM >> 8), (uint8_t)(TRUTH_CO2_PPM & 0xFF), 0, 0, 0, 0};
+    uint8_t d_co2[9] = {(uint8_t)(TRUTH_CO2_PPM >> 8), (uint8_t)(TRUTH_CO2_PPM & 0xFF), 0, 0, 0, 0, 0, 0, 0};
     d_co2[2] = calc_crc8_31(d_co2[0], d_co2[1]);
     d_co2[5] = calc_crc8_31(d_co2[3], d_co2[4]);
     d_co2[8] = calc_crc8_31(d_co2[6], d_co2[7]);
 
-    if (calc_crc8_31(d_co2[3], d_co2[4]) != d_co2[5]) {
+    if (calc_crc8_31(d_co2[0], d_co2[1]) != d_co2[2]) {
       all_co2_crc_valid = false;
     }
-    int read_ppm = (int)(((uint32_t)d_co2[0] << 24) | ((uint32_t)d_co2[1] << 16) | ((uint32_t)d_co2[3] << 8) | (uint32_t)d_co2[4]);
+    int read_ppm = ((int)d_co2[0] << 8) | d_co2[1];
     if (read_ppm != TRUTH_CO2_PPM) all_co2_exact = false;
 
     // 3. CT Clamps Power Calculation

@@ -164,7 +164,12 @@ struct FirmwareOffloadHarness {
 };
 
 // Generate synthetic AC sine samples (nominal 50 Hz, 100 ms at 10 kHz -> 1000 samples)
-static std::vector<int> generateSineWave(float rmsAmps, float calAPerV = 15.0f, float divider = 0.5f, int nSamples = 1000) {
+// Synthesise against the calibration the firmware is actually built with. Defaulting this
+// to a literal 15.0 meant the generator and the denoiser disagreed the moment the node's
+// real ACS712-20A was calibrated for, and the recovered current came out 1.5x high — a test
+// failure that described the test's own stale assumption rather than any defect in the code.
+static std::vector<int> generateSineWave(float rmsAmps, float calAPerV = (float)STRIP_CAL_A_PER_V,
+                                         float divider = 0.5f, int nSamples = 1000) {
   std::vector<int> samples(nSamples);
   double vPeakAdc = (rmsAmps * std::sqrt(2.0) / calAPerV) * divider;
   double dcVolts = 1.25; // 2.5V / 2 from ACS712 voltage divider

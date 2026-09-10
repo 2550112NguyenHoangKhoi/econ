@@ -55,8 +55,36 @@
 #ifndef PUBLISH_INTERVAL_MS_DEFAULT
   #define PUBLISH_INTERVAL_MS_DEFAULT 5000
 #endif
+// SCT-013 clamp: amps of primary current per volt at the ADC.
+//
+// 22.1, identified against a known load with a 94 ohm burden (two 47 ohm in series). The
+// burden was doubled from 47 ohm deliberately, to halve the smallest load this channel can
+// resolve: 8.4 W per ADC count became 4.1 W, over a range that still reaches 5.7 kW.
+//
+// Identified, not derived, and the history is worth keeping because the derivation has been
+// wrong every time:
+//
+//   burden   nominal 2000/R   identified   error
+//    33 ohm      60.6            --        resistor was never in the circuit
+//    47 ohm      42.6           45.3       +6.3%
+//    94 ohm      21.3           22.1       +3.9%
+//
+// Both identified values sit a few percent above what the nominal burden predicts, and by a
+// consistent amount — which is what a stable tolerance stack looks like rather than a
+// measurement error: the SCT-013's turns ratio (+/-3%), the ACS712-05B it is compared
+// against (+/-1.5%), and ESP32 ADC nonlinearity. The consistency across two burdens is the
+// reassuring part; a one-off would not have been.
+//
+// Method, for when the burden or the clamp changes again: put ONE load on the circuit (a
+// ~1 kW hair dryer), confirm both current channels are on the same conductor with nothing
+// branching between them, wait for both to settle, then scale this constant by
+// stripW_amps / plugW_amps. The ACS712 is the reference because at ~4.2 A it runs at 84% of
+// its 5 A full scale, where a Hall part is most accurate, against this clamp at 4.2% of
+// 100 A where a CT is least.
+//
+// A calibration change alters the MEANING of plugW, so it bumps cfgRev like any other.
 #ifndef PLUG_CAL_A_PER_V
-  #define PLUG_CAL_A_PER_V 60.6
+  #define PLUG_CAL_A_PER_V 22.1
 #endif
 #ifndef PLUG_MAINS_V
   #define PLUG_MAINS_V 230.0
@@ -67,8 +95,24 @@
 #ifndef AC_MAINS_V
   #define AC_MAINS_V 220.0f
 #endif
+// ACS712 sensitivity, as amps per volt at the sensor's output. The part number sets this
+// and getting it wrong scales every watt this channel publishes:
+//   ACS712-05B  185 mV/A ->  5.41 A/V
+//   ACS712-05B  185 mV/A ->  5.41 A/V   <- the module now fitted to this node
+//   ACS712-20A  100 mV/A -> 10.0  A/V
+//   ACS712-30A   66 mV/A -> 15.15 A/V
+// This has now been wrong twice: it shipped at 15.0 (the 30 A part) against a 20 A module,
+// over-reporting by half — the first real reading this node produced, 27.0 W, was 18.0 W.
+// The 5 A part fitted now gives 1.85x the signal of the 20 A for the same current, which is
+// what the strip channel needed: it was resolving ~30 W and up against loads well below it.
+// A calibration change alters the MEANING of stripW, so it bumps cfgRev like any other.
+//
+// Headroom check for the 5 A part: it idles at Vcc/2 = 2.5 V and swings 185 mV/A. At its
+// rated 5 A RMS (7.07 A peak) that is +/-1.31 V, which the 10k/10k divider halves to
+// 1.25 +/- 0.65 V at the pin — comfortably inside 0-3.3 V. 5 A is ~1150 W at 230 V, a
+// sensible ceiling for a power strip, and the sensor saturates before the ADC does.
 #ifndef STRIP_CAL_A_PER_V
-  #define STRIP_CAL_A_PER_V 15.0f
+  #define STRIP_CAL_A_PER_V 5.41f
 #endif
 // Touch presence hysteresis, as a percentage of the boot-time baseline. Enter on a firm
 // touch, leave only after recovering most of the way — the literals 62 and 82 come from

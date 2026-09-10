@@ -48,6 +48,12 @@ public:
   // Status Queries
   bool isHardwarePresent() const { return hardware_present_; }
   bool isMockMode() const { return mock_mode_; }
+
+  // True only when the last captureFrame() copied bytes off the sensor. The driver falls
+  // back to a synthetic frame when a grab fails, and a synthetic frame handed to an
+  // occupancy model is a fabricated measurement wearing a real channel's clothes — the
+  // stream must be able to refuse it rather than pass it off as a picture of the room.
+  bool lastCaptureWasReal() const { return last_capture_real_; }
   CameraDriverState getState() const { return state_; }
   uint32_t getFrameCounter() const { return frame_counter_; }
   uint32_t getLastCaptureTimeMs() const { return last_capture_time_ms_; }
@@ -62,10 +68,21 @@ public:
   // Register configuration table accessor (for test inspection)
   static const OV7670RegisterConfig* getInitRegisterTable(size_t* count);
 
+  // Write that table to the sensor over SCCB. It has existed in this repo as data with no
+  // caller since esp_camera replaced the hand-rolled driver; esp_camera configures OV7670
+  // from its own generic profile instead, and that profile is what has been failing here.
+  // Returns the number of registers successfully written, or -1 off-target.
+  int applyInitRegisterTable();
+
+private:
+  bool writeSccb(uint8_t reg, uint8_t value);
+public:
+
 private:
   CameraDriverState state_;
   bool              hardware_present_;
   bool              mock_mode_;
+  bool              last_capture_real_ = false;
   SyntheticPattern  mock_pattern_;
   bool              mock_person_active_;
 

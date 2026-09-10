@@ -104,7 +104,7 @@ const int STATUS_LED = 2;   // onboard LED = MQTT link status
   #define USE_PIR 1                   // Dual PIR motion sensors -> measured presence
 #endif
 #ifndef USE_CO2
-  #define USE_CO2 0                  // ASAIR ACD1200 NDIR (I2C) -> measured CO2 ppm
+  #define USE_CO2 1                  // ASAIR ACD1200 NDIR (I2C) -> measured CO2 ppm
 #endif
 #ifndef USE_MMWAVE
   #define USE_MMWAVE 0               // HLK-LD2410C radar -> presence incl. stationary people
@@ -115,7 +115,7 @@ const int STATUS_LED = 2;   // onboard LED = MQTT link status
   // second relay that switches the zone's non-critical socket circuit. This is the load a
   // conventional BMS neither meters nor controls — 26.4% of energy in the Hanoi office
   // case study — and the reason this node exists.
-  #define USE_PLUG 0
+  #define USE_PLUG 1
 #endif
 
 // ---------------------------------------------------------------------------------
@@ -181,7 +181,10 @@ const int STATUS_LED = 2;   // onboard LED = MQTT link status
 
 #if USE_CAMERA
   #include "camera/person_detector.h"
+#include "esp_camera.h"   // esp_camera_deinit() when the detector has no model
   CameraPersonDetector* cameraDetector = nullptr;
+bool cameraReady = false;        // TFLite detector usable; gates processFrame()
+bool cameraStreamReady = false;  // esp_camera driver usable; gates frame-buffer access
 #endif
 
 #if USE_LUX
@@ -199,11 +202,10 @@ const int STATUS_LED = 2;   // onboard LED = MQTT link status
   // to GPIO34. The -030 (1 V voltage-output) variant needs only the bias divider.
   // Plug-circuit relay (active HIGH), separate from the lighting relay on GPIO23. Boots
   // ON: a reboot must never leave the room's sockets dead (fail-energized, like a BMS).
-  // Calibration: amps of primary current per volt at the ADC. 100 A / (0.05 A × 33 Ω)
-  // ≈ 60.6 for the -000 variant with a 33 Ω burden; 30.0 for the -030 (30 A / 1 V).
-  #ifndef PLUG_CAL_A_PER_V
-    #define PLUG_CAL_A_PER_V 60.6
-  #endif
+  // Calibration lives in node_config.h, which is included above — this file's copy was a
+  // shadow that could never take effect, and carried the stale 60.6 while the real value
+  // moved to a measured 45.1. Two #ifndef definitions of one constant differ only by
+  // include order, which is the kind of thing that is right until it silently is not.
   #ifndef PLUG_MAINS_V
     #define PLUG_MAINS_V 230.0       // Vietnam single-phase nominal
   #endif
@@ -300,20 +302,45 @@ const int STATUS_LED = 2;   // onboard LED = MQTT link status
   // on a bus error or any failed checksum, so the caller omits "co2" rather than inventing an
   // air-quality reading the building never measured.
   bool readCo2(int &ppm) {
-    Wire.beginTransmission(ACD1200_ADDR);
-    Wire.write(0x03); Wire.write(0x00);
-    if (Wire.endTransmission() != 0) return false;
+    if (millis() < 120000) {
+      Serial.printf("[co2] Sensor is in 120s preheat (%.0f s remaining). May NACK or read 0.\n", (120000 - millis()) / 1000.0);
+    }
+    
+    // ASAIR/Aosong sensors aggressively sleep their I2C interface.
+    // A dummy write is strictly required to wake the MCU before it will ACK the real command.
+    Wire1.beginTransmission(ACD1200_ADDR);
+    Wire1.endTransmission();
     delay(5);
-    if (Wire.requestFrom(ACD1200_ADDR, 9) != 9) return false;
-    uint8_t d[9];
-    for (int i = 0; i < 9; i++) d[i] = Wire.read();
-    if (crc8_31(d[0], d[1]) != d[2]) return false;   // PPM3 PPM2
-    if (crc8_31(d[3], d[4]) != d[5]) return false;   // PPM1 PPM0
-    uint32_t v = ((uint32_t)d[0] << 24) | ((uint32_t)d[1] << 16) | ((uint32_t)d[3] << 8) | (uint32_t)d[4];
-    ppm = (int)v;
-    // Datasheet range is 400-5000 ppm; allow a little slack either side but reject the zeros
-    // and garbage the sensor emits during its 120 s preheat.
-    return ppm >= 300 && ppm <= 10000;
+
+    Wire1.beginTransmission(ACD1200_ADDR);
+    Wire1.write(0x03); Wire1.write(0x00);
+    if (Wire1.endTransmission() != 0) {
+      Serial.println("[co2] endTransmission failed on Wire1 (device not found or I2C bus error)");
+      return false;
+    }
+    delay(5);
+    int bytesRead = Wire1.requestFrom((uint16_t)ACD1200_ADDR, (uint8_t)9, (bool)true);
+    if (bytesRead < 6) {
+      Serial.printf("[co2] requestFrom failed on Wire1, only read %d bytes\n", bytesRead);
+      return false;
+    }
+    uint8_t d[9] = {0};
+    for (int i = 0; i < bytesRead; i++) d[i] = Wire1.read();
+    
+    // Validate both word pairs' CRCs
+    if (crc8_31(d[0], d[1]) != d[2] || crc8_31(d[3], d[4]) != d[5]) {
+      Serial.printf("[co2] CRC failed: d[0]=%02X d[1]=%02X d[2]=%02X | d[3]=%02X d[4]=%02X d[5]=%02X\n", d[0], d[1], d[2], d[3], d[4], d[5]);
+      return false;
+    }
+    
+    // The ACD1200 concentration is a 32-bit integer spanning the first two word pairs
+    ppm = ((int)d[0] << 24) | ((int)d[1] << 16) | ((int)d[3] << 8) | d[4];
+    
+    if (ppm < 300 || ppm > 10000) {
+      Serial.printf("[co2] Bounds check failed, ppm=%d\n", ppm);
+      return false;
+    }
+    return true;
   }
 
   // The ACD1200 ships in AUTOMATIC baseline calibration (datasheet 1.1): 24 h after
@@ -332,21 +359,21 @@ const int STATUS_LED = 2;   // onboard LED = MQTT link status
   bool co2DisableAutoCal() {
     // Set calibration mode = manual: 0x5306 + data 0x0000 + CRC over the data bytes
     // (datasheet table 7; its own example CRC 0x81 = crc8_31(0x00,0x00), validated).
-    Wire.beginTransmission(ACD1200_ADDR);
-    Wire.write(0x53); Wire.write(0x06);
-    Wire.write(0x00); Wire.write(0x00);
-    Wire.write(crc8_31(0x00, 0x00));
-    if (Wire.endTransmission() != 0) return false;
+    Wire1.beginTransmission(ACD1200_ADDR);
+    Wire1.write(0x53); Wire1.write(0x06);
+    Wire1.write(0x00); Wire1.write(0x00);
+    Wire1.write(crc8_31(0x00, 0x00));
+    if (Wire1.endTransmission() != 0) return false;
     delay(10);                                   // datasheet: >5 ms before the readback
     // Read the mode back (tables 8/9): the set command alone proves nothing, so require
     // a CRC-valid response whose low data byte says manual (0 = manual, 1 = automatic).
-    Wire.beginTransmission(ACD1200_ADDR);
-    Wire.write(0x53); Wire.write(0x06);
-    if (Wire.endTransmission() != 0) return false;
+    Wire1.beginTransmission(ACD1200_ADDR);
+    Wire1.write(0x53); Wire1.write(0x06);
+    if (Wire1.endTransmission() != 0) return false;
     delay(5);
-    if (Wire.requestFrom(ACD1200_ADDR, 3) != 3) return false;
+    if (Wire1.requestFrom(ACD1200_ADDR, 3) != 3) return false;
     uint8_t d[3];
-    for (int i = 0; i < 3; i++) d[i] = Wire.read();
+    for (int i = 0; i < 3; i++) d[i] = Wire1.read();
     if (crc8_31(d[0], d[1]) != d[2]) return false;
     return d[1] == 0x00;
   }
@@ -398,6 +425,9 @@ unsigned long lastReconnectAttempt = 0;
 // actuated state (echoed back in telemetry for diagnostics)
 bool  lightsOn = true;
 float hvacSetpointC = 24.0;
+// Whether the AC is currently commanded ON. The engine's whole vacancy saving is a
+// HVAC_SET:OFF, so "off" has to be a state this node can actually be in, not a setpoint.
+bool  hvacPowerOn    = true;
 
 // ---------------- WIFI ----------------
 void setupWifi() {
@@ -446,6 +476,14 @@ void setupWifi() {
     #define IR_AC_FAN kAuto          // stdAc::fanspeed_t member name
   #endif
 
+  // The protocol the blaster currently speaks. Compile-time IR_AC_PROTOCOL is only the
+  // starting guess: engine.go carries a DetectedProtocol per zone (set by
+  // UpdateDetectedProtocol when a camera reads the unit's branding) and prefixes its
+  // commands with PROTOCOL=<name>. Until now the firmware ignored that token and stayed on
+  // whatever was compiled in, so recognising a brand could never actually retarget the
+  // blaster — the last link in that chain was missing.
+  decode_type_t gIrProtocol = decode_type_t::IR_AC_PROTOCOL;
+
   IRac ac(gCfg.pinIrAc);
   IRsend customIrSend(gCfg.pinIrAc);       // Generic IR sender for fans, TVs, etc.
   bool irAcReady = false;            // protocol compiled AND supported by the library
@@ -468,14 +506,22 @@ void applyHvacSetpoint(float celsius) {
                   celsius, (double)lo, (double)hi);
     celsius = isnan(celsius) ? (lo + hi) / 2.0f : (celsius < lo ? lo : hi);
   }
+  // Same reasoning as applyHvacOff(): only transmit when something actually changes.
+  // A repeated identical setpoint is a no-op to the air conditioner and costs a blocking
+  // IR frame each time it arrives.
+  if (hvacPowerOn && fabsf(hvacSetpointC - celsius) < 0.05f) {
+    hvacSetpointC = celsius;
+    return;
+  }
   hvacSetpointC = celsius;
+  hvacPowerOn   = true;
 
 #if USE_IR_AC
   if (irAcReady) {
     // The AC's full desired state, not just a temperature: these units are stateless
     // receivers — each frame carries mode, fan and power as well, so omitting them would
     // let the machine fall back to whatever it last heard from the handset.
-    ac.next.protocol = decode_type_t::IR_AC_PROTOCOL;
+    ac.next.protocol = gIrProtocol;
     ac.next.model    = IR_AC_MODEL;
     ac.next.mode     = stdAc::opmode_t::kCool;
     ac.next.celsius  = true;
@@ -495,7 +541,7 @@ void applyHvacSetpoint(float celsius) {
     ac.next.power    = true;
     ac.sendAc();
     Serial.printf("[hvac] IR frame sent: %s -> %.1f C\n",
-                  typeToString(decode_type_t::IR_AC_PROTOCOL).c_str(), celsius);
+                  typeToString(gIrProtocol).c_str(), celsius);
     return;
   }
   Serial.println("[hvac] WARNING: IR AC compiled in but protocol unsupported -> not sent");
@@ -508,6 +554,72 @@ void applyHvacSetpoint(float celsius) {
 #endif
 }
 
+// applyHvacOff powers the air conditioner down.
+//
+// This exists because "OFF" was being fed through applyHvacSetpoint(): String::toFloat()
+// returns 0.0 for any non-numeric text, 0.0 fails the 16-30 C band, and the clamp turned
+// it into the FLOOR of that band. A vacancy shutdown therefore reached the compressor as
+// "power on, cool, 16 C" — maximum cooling for an empty room, which is the exact inverse
+// of the command and of the saving engine.go:1197 believes it just made. The engine then
+// latches z.IrState="OFF" on send and never repeats it, so the room stays there.
+void applyHvacOff() {
+  // Idempotent. engine.go re-issues LIGHTS_OFF;HVAC_SET:OFF on every tick it considers the
+  // zone vacant — 130 commands in 50 s on this node — and each one was driving a fresh IR
+  // frame. An IRremoteESP8266 send blocks for tens of milliseconds with interrupts largely
+  // masked, so ~2.6 transmissions a second is both pointless (the unit is already off) and
+  // enough blocking to destabilise the node. Send the state change; ignore the repeats.
+  if (!hvacPowerOn) return;
+  hvacPowerOn = false;
+#if USE_IR_AC
+  if (irAcReady) {
+    ac.next.protocol = gIrProtocol;
+    ac.next.model    = IR_AC_MODEL;
+    ac.next.mode     = stdAc::opmode_t::kCool;   // carried for units that need a valid mode
+    ac.next.celsius  = true;
+    ac.next.degrees  = hvacSetpointC;            // stateless receivers: send a sane payload
+    ac.next.fanspeed = stdAc::fanspeed_t::IR_AC_FAN;
+    ac.next.swingv   = stdAc::swingv_t::kOff;
+    ac.next.swingh   = stdAc::swingh_t::kOff;
+    ac.next.light    = false;
+    ac.next.beep     = false;
+    ac.next.econo    = false;
+    ac.next.filter   = false;
+    ac.next.turbo    = false;
+    ac.next.quiet    = false;
+    ac.next.clean    = false;
+    ac.next.sleep    = -1;
+    ac.next.clock    = -1;
+    ac.next.power    = false;                    // the one bit that matters here
+    ac.sendAc();
+    Serial.printf("[hvac] IR frame sent: %s -> POWER OFF\n",
+                  typeToString(gIrProtocol).c_str());
+    return;
+  }
+  Serial.println("[hvac] WARNING: IR AC compiled in but protocol unsupported -> OFF not sent");
+#else
+  Serial.println("[hvac] OFF parsed (no IR AC compiled in; acReal:false)");
+#endif
+}
+
+// Setpoint tokens carry either a number or the literal OFF. Parse strictly: toFloat()
+// silently maps every unparseable string to 0.0, and 0.0 is inside no sane band, so a
+// corrupt token would otherwise be clamped into a real command to a real compressor.
+// An unreadable setpoint is dropped, which leaves the AC where it is.
+static void applyHvacToken(const String& value) {
+  String v = value;
+  v.trim();
+  if (v.equalsIgnoreCase("OFF")) { applyHvacOff(); return; }
+
+  char* end = nullptr;
+  const char* cstr = v.c_str();
+  float parsed = strtof(cstr, &end);
+  if (end == cstr || *end != '\0' || isnan(parsed)) {
+    Serial.printf("[hvac] setpoint token \"%s\" is not a number and not OFF -> ignored\n", cstr);
+    return;
+  }
+  applyHvacSetpoint(parsed);
+}
+
 void setLights(bool on) {
   lightsOn = on;
   if (gCfg.pinLightingRelay != 255) {
@@ -515,6 +627,86 @@ void setLights(bool on) {
   }
   Serial.printf("[relay] lights %s\n", on ? "ON" : "OFF");
 }
+
+
+// ---------------------------------------------------------------------------------------
+// Hardware-timed ADC acquisition
+//
+// The previous loop was `analogRead()` followed by `delayMicroseconds(70)`, which sets the
+// sample interval by how long the loop happens to take. That is fine for an RMS over a
+// window and wrong for anything that reasons about frequency: analogRead's duration varies,
+// WiFi interrupts land in the middle of it, and the window came out with 619-631 samples
+// from one tick to the next. Every frequency-domain step downstream — drift rejection at
+// bin 1, the periodicity gate, the harmonic content of a switch-mode load — assumes samples
+// are evenly spaced in time. They were not.
+//
+// This paces on the microsecond clock instead of on accumulated delays, so a slow read or a
+// preempted loop steals from the following gap rather than shifting every sample after it.
+// The result is a fixed sample count at a known rate, which makes bin k exactly k*10 Hz for
+// a 100 ms window instead of approximately so.
+//
+// esp_timer/I2S DMA would be tighter still, but both take the ADC away from analogRead()
+// (which the plug, strip and AC-clamp channels all share) and neither survives the ADC2/WiFi
+// arbitration on this chip. Deadline-paced polling gets the uniformity the DSP needs without
+// that fight.
+// 4 kHz, not 6. analogRead() on this core costs ~100 us (it walks the calibration path on
+// every call), so a 166 us slot at 6 kHz left ~60 us of headroom and every single window
+// reported a slot overrun once WiFi interrupts landed in it. A 250 us slot absorbs that.
+// 80 samples per 50 Hz cycle is still far above what the harmonics here need, and 400
+// samples over 100 ms keeps bin k at exactly k*10 Hz.
+#ifndef ADC_SAMPLE_RATE_HZ
+  #define ADC_SAMPLE_RATE_HZ 4000        // 80 samples per 50 Hz cycle, 66 per 60 Hz cycle
+#endif
+#ifndef ADC_WINDOW_MS
+  #define ADC_WINDOW_MS 100              // exactly 5 cycles at 50 Hz, 6 at 60 Hz
+#endif
+#define ADC_WINDOW_SAMPLES ((ADC_SAMPLE_RATE_HZ * ADC_WINDOW_MS) / 1000)   // 600
+
+// Fills `buf` with exactly ADC_WINDOW_SAMPLES readings paced to ADC_SAMPLE_RATE_HZ.
+// Returns the number of samples taken, and reports how far the pacing actually slipped so a
+// window whose timing was disturbed can be recognised rather than silently trusted.
+// The rate the last window ACTUALLY achieved, in Hz. Every frequency-domain step downstream
+// assumes samples are evenly spaced at a known rate — if analogRead overruns its slot the
+// window stretches, 400 samples no longer span 100 ms, and a 50 Hz signal stops landing where
+// the analysis looks for it. Measured, not assumed.
+static float gLastSampleRateHz = (float)ADC_SAMPLE_RATE_HZ;
+
+static int sampleAdcWindow(uint8_t pin, int* buf, uint32_t* worstSlipUs) {
+  const uint32_t periodUs = 1000000UL / ADC_SAMPLE_RATE_HZ;   // 250 us at 4 kHz
+
+  // Throwaway reads first, to settle the ADC on this channel.
+  //
+  // The plug, strip and AC-clamp channels share one ADC and are sampled in turn, and the
+  // ESP32's sample-and-hold carries charge across a channel switch: the first conversions
+  // after a change are pulled toward whatever the previous channel was sitting at. It shows
+  // up plainly here — the strip's rest level alternated between 1662 and 1763 counts window
+  // to window while the plug channel sat at 1790, i.e. every other strip window was dragged
+  // up by its neighbour. A DC offset that alternates is not noise the DSP can average out;
+  // it lands in the low-frequency bins and inflates drift.
+  for (int i = 0; i < 8; i++) (void)analogRead(pin);
+
+  const uint32_t windowStart = micros();
+  uint32_t next = windowStart;
+  uint32_t worst = 0;
+  for (int i = 0; i < ADC_WINDOW_SAMPLES; i++) {
+    next += periodUs;
+    buf[i] = analogRead(pin);
+    // Absolute deadline, not a relative delay: errors do not accumulate across the window.
+    int32_t remaining = (int32_t)(next - micros());
+    if (remaining > 0) {
+      delayMicroseconds((uint32_t)remaining);
+    } else if ((uint32_t)(-remaining) > worst) {
+      worst = (uint32_t)(-remaining);   // this read overran its slot
+    }
+  }
+  const uint32_t elapsedUs = micros() - windowStart;
+  if (elapsedUs > 0) {
+    gLastSampleRateHz = (float)ADC_WINDOW_SAMPLES * 1000000.0f / (float)elapsedUs;
+  }
+  if (worstSlipUs) *worstSlipUs = worst;
+  return ADC_WINDOW_SAMPLES;
+}
+// ---------------------------------------------------------------------------------------
 
 #if USE_PLUG
 bool plugOn = true;  // fail-energized: sockets are live until the engine says otherwise
@@ -525,12 +717,31 @@ void setPlug(bool on) {
   Serial.printf("[relay] plug circuit %s\n", on ? "ON" : "OFF");
 }
 
+// Noise floor for THIS channel, measured on the node rather than assumed.
+//
+// The shared 300.0 (sigma 17.3 counts) was a guess, and on this hardware it is ~5x too
+// large: eight consecutive idle windows on GPIO33 measured var = 44.9 .. 77.9 counts^2
+// (sigma 6.7 .. 8.8), mean 1788 counts, so the 1.65 V bias divider is healthy and the
+// front end is quiet. Subtracting 300 from ~62 clamps signalVariance to zero every time,
+// which is why plugW published exactly 0.00 W for 2684 messages. The threshold that
+// matters is sqrt(noiseVariance - realVariance): at 300 nothing under ~0.75 A (173 W)
+// could ever appear.
+//
+// 100.0 sits above the observed spread plus the estimator's own jitter (with n~540,
+// SE(var) = var*sqrt(2/n) ~ 3.8 counts^2, so ~5 SE of headroom above the 77.9 maximum)
+// and puts the floor at sqrt(100-62) = 6.2 counts = 0.30 A = ~70 W. Re-derive per node
+// from the [plugW floor] line below; the 33 ohm burden, at 11.2 W per count, is what
+// stops this going lower.
+#ifndef PLUG_NOISE_VARIANCE
+  #define PLUG_NOISE_VARIANCE 100.0
+#endif
+
 static CurrentDenoiser plugDenoiser([]() {
   CurrentDenoiseConfig c;
   c.calAPerV     = PLUG_CAL_A_PER_V;
   c.dividerRatio = 1.0f; // Direct CT clamp burden without voltage divider
-  c.noiseVariance = 300.0;
-  c.cutoffAmps   = 0.15f;
+  c.noiseVariance = PLUG_NOISE_VARIANCE;
+  c.cutoffAmps   = 0.02f;
   c.emaAlpha     = 0.35f;
   c.deadbandAmps = 0.03f;
   return c;
@@ -540,15 +751,63 @@ static CurrentDenoiser plugDenoiser([]() {
 // denoise via CurrentDenoiser (Stage 1 variance subtraction + Stage 2 EMA/deadband).
 // Returns amps, or -1 when the window was starved of samples (< 100 samples).
 float readPlugAmps() {
-  int n = 0;
-  const int MAX_SAMPLES = 1200;
-  static int sampleBuf[MAX_SAMPLES];
-  unsigned long start = millis();
-  while (millis() - start < 100 && n < MAX_SAMPLES) {
-    sampleBuf[n++] = analogRead(gCfg.pinPlugAdc);
+  static int sampleBuf[ADC_WINDOW_SAMPLES];
+  uint32_t slipUs = 0;
+  int n = sampleAdcWindow(gCfg.pinPlugAdc, sampleBuf, &slipUs);
+  if (slipUs > 200) {
+    Serial.printf("[plug] sampling slipped up to %lu us past its slot (target %d Hz) — "
+                  "frequency-domain results from this window are unreliable\n",
+                  (unsigned long)slipUs, ADC_SAMPLE_RATE_HZ);
   }
+  
   plugDenoiser.setCal(gCfg.plugCalAPerV);
-  return plugDenoiser.processWindow(sampleBuf, n);
+  plugDenoiser.setSampleRateHz(gLastSampleRateHz);
+  float amps = plugDenoiser.processWindow(sampleBuf, n);
+
+  // Raw samples plus the statistics Stage 1 actually decides on. Reading 0.00 W has two
+  // completely different causes that the published value cannot tell apart, and this line
+  // separates them:
+  //   mean near 0 or near 4095      -> the ADC pin is sitting on a rail: the 1.65 V bias
+  //                                    divider is not doing its job, so nothing is wired
+  //                                    through to GPIO33 and no load will ever show.
+  //   mean near 2048, var << noise  -> bias is good and the front end is quiet: either
+  //                                    there is genuinely no load, or the burden resistor
+  //                                    is too small for the current being measured.
+  //   var just under noiseVariance  -> a real load is being subtracted away by the noise
+  //                                    floor. sqrt(noiseVariance) counts is the cliff.
+  // Running minimum of observed window variance. The quietest window this node has seen
+  // is an upper bound on its true noise floor, so this is the number PLUG_NOISE_VARIANCE
+  // should be set from — measured on the installed hardware, not carried over from
+  // another board. If minVar ever approaches noiseVariance, the constant is too low and
+  // idle noise is being published as power; if it sits far below, real load is being
+  // subtracted away.
+  static double plugMinVar = 1e18;
+  if (plugDenoiser.lastVariance() > 0.0 && plugDenoiser.lastVariance() < plugMinVar) {
+    plugMinVar = plugDenoiser.lastVariance();
+  }
+
+  static unsigned long lastDump = 0;
+  if (millis() - lastDump > 2000) {
+    lastDump = millis();
+    double inForce = plugDenoiser.lastNoiseVariance();
+    Serial.printf("[plugW floor] measured=%.1f cts^2 (sigma=%.2f) configured=%.1f "
+                  "in-force=%.1f -> detection floor %.1f W\n",
+                  plugDenoiser.observedFloor(), sqrt(plugDenoiser.observedFloor()),
+                  plugDenoiser.getConfig().noiseVariance, inForce,
+                  (double)(sqrt(inForce) * 0.5 * (3.3 / 4095.0)
+                           * gCfg.plugCalAPerV * gCfg.plugMainsV));
+    Serial.print("[plugW raw ADC] ");
+    for (int i = 0; i < 10 && i < n; i++) Serial.printf("%d ", sampleBuf[i]);
+    Serial.printf("| n=%d mean=%.1f var=%.1f sigma=%.2f cts | floor in-force=%.1f | "
+                  "fs=%.0fHz | drift=%.0f | periodicCov=%+.3f | raw=%.3f A -> published %.3f A = %.1f W\n",
+                  n, plugDenoiser.lastMean(), plugDenoiser.lastVariance(),
+                  sqrt(plugDenoiser.lastVariance()), plugDenoiser.lastNoiseVariance(),
+                  (double)gLastSampleRateHz, plugDenoiser.lastDriftEnergy(), plugDenoiser.lastFullPeriodCov(),
+                  (double)plugDenoiser.lastRawAmps(), (double)amps,
+                  (double)(amps >= 0 ? amps * gCfg.plugMainsV : 0.0f));
+  }
+
+  return amps;
 }
 #endif
 
@@ -558,7 +817,7 @@ static CurrentDenoiser acDenoiser([]() {
   c.calAPerV     = AC_CAL_A_PER_V;
   c.dividerRatio = 1.0f; // Direct CT clamp burden without voltage divider
   c.noiseVariance = 300.0;
-  c.cutoffAmps   = 0.15f;
+  c.cutoffAmps   = 0.02f;
   c.emaAlpha     = 0.35f;
   c.deadbandAmps = 0.03f;
   return c;
@@ -566,25 +825,28 @@ static CurrentDenoiser acDenoiser([]() {
 
 // True-RMS on the air conditioner's own supply via CurrentDenoiser.
 float readAcAmps() {
-  int n = 0;
-  const int MAX_SAMPLES = 1200;
-  static int sampleBuf[MAX_SAMPLES];
-  unsigned long start = millis();
-  while (millis() - start < 100 && n < MAX_SAMPLES) {
-    sampleBuf[n++] = analogRead(gCfg.pinAcClampAdc);
-  }
+  static int sampleBuf[ADC_WINDOW_SAMPLES];
+  int n = sampleAdcWindow(gCfg.pinAcClampAdc, sampleBuf, nullptr);
   acDenoiser.setCal(gCfg.acCalAPerV);
   return acDenoiser.processWindow(sampleBuf, n);
 }
 #endif
 
 #if USE_STRIP
+// Ratio of the ACS712 output divider feeding the ADC. 0.5 is the 10k/10k pair the wiring
+// guide specifies; 1.0 means the sensor drives the pin directly. The firmware cannot infer
+// this, so it checks the measured rest level against it at runtime and complains on a
+// mismatch rather than scaling every reading wrongly in silence.
+#ifndef STRIP_DIVIDER_RATIO
+  #define STRIP_DIVIDER_RATIO 0.5f
+#endif
+
 static CurrentDenoiser stripDenoiser([]() {
   CurrentDenoiseConfig c;
   c.calAPerV     = STRIP_CAL_A_PER_V;
-  c.dividerRatio = 0.5f; // ACS712 10k/10k voltage divider
+  c.dividerRatio = STRIP_DIVIDER_RATIO; // ACS712 divider; see the rest-level check below
   c.noiseVariance = 300.0;
-  c.cutoffAmps   = 0.15f;
+  c.cutoffAmps   = 0.02f;
   c.emaAlpha     = 0.35f;
   c.deadbandAmps = 0.03f;
   return c;
@@ -593,7 +855,7 @@ static CurrentDenoiser stripDenoiser([]() {
 // CPU strain detection and raw pass-through fallback state
 static bool gCpuStrainDetected = false;
 static unsigned long gLastDspDurationUs = 0;
-const unsigned long DSP_TIME_BUDGET_US = 15000; // 15 ms DSP execution budget
+const unsigned long DSP_TIME_BUDGET_US = 50000; // 50 ms DSP execution budget (increased from 15ms)
 
 const int MAX_RAW_STRIP_SAMPLES = 60;
 static int gRawStripSamples[MAX_RAW_STRIP_SAMPLES];
@@ -608,22 +870,27 @@ inline bool isCpuStrained() {
 // Stage 2 inter-window EMA with deadband and zero-snapping.
 // When CPU strain is detected or simulated, bypasses local DSP and captures raw decimated samples.
 float readStripAmps() {
-  int n = 0;
-  const int MAX_SAMPLES = 1200;
-  static int sampleBuf[MAX_SAMPLES];
-  unsigned long start = millis();
-  while (millis() - start < 100 && n < MAX_SAMPLES) {
-    sampleBuf[n++] = analogRead(gCfg.pinStripAdc);
-  }
+  static int sampleBuf[ADC_WINDOW_SAMPLES];
+  uint32_t slipUs = 0;
+  int n = sampleAdcWindow(gCfg.pinStripAdc, sampleBuf, &slipUs);
 
-  // Starvation guard (< 100 samples in window)
   if (n < 100) {
+    Serial.printf("[strip] ADC starved! n=%d\n", n);
     return -1.0f;
+  }
+  // A slot overrun means samples were not evenly spaced, which is precisely the assumption
+  // the frequency-domain stages rest on. Say so rather than publishing a number derived
+  // from a window whose time base moved.
+  if (slipUs > 200) {
+    Serial.printf("[strip] sampling slipped up to %lu us past its slot (target %d Hz) — "
+                  "frequency-domain results from this window are unreliable\n",
+                  (unsigned long)slipUs, ADC_SAMPLE_RATE_HZ);
   }
 
   // Compute offload pass-through mode: if CPU is strained (simulated or measured),
   // skip local DSP execution and capture decimated raw ADC samples for backend offload.
   if (isCpuStrained()) {
+    gCpuStrainDetected = false; // clear latch so it retries local DSP next tick
     const int TARGET_RAW = 30;
     gRawStripSampleCount = 0;
     int count = (n < TARGET_RAW) ? n : TARGET_RAW;
@@ -637,7 +904,90 @@ float readStripAmps() {
   // Normal mode: run local DSP and measure execution timing
   unsigned long dspStart = micros();
   stripDenoiser.setCal(gCfg.stripCalAPerV);
+  stripDenoiser.setSampleRateHz(gLastSampleRateHz);
   float amps = stripDenoiser.processWindow(sampleBuf, n);
+
+  // Same window statistics the plug channel reports. Without these, a channel reading 0.0 W
+  // is indistinguishable between "no load", "front end dead" and "signal subtracted away by
+  // the noise floor" — three faults with nothing in common but their output.
+  // Does the measured DC rest level agree with the divider the firmware was told about?
+  // An ACS712 idles at Vcc/2. Through the specified 10k/10k divider that lands near 1600
+  // counts; wired straight to the pin it lands near 3200. Getting this wrong scales every
+  // reading by 2x silently — and if the divider really is absent, the sensor's output swings
+  // toward 5 V on a 3.3 V-only pin as load rises, which is a hardware risk, not just a
+  // calibration one. Check it once, out loud.
+  {
+    static bool dividerChecked = false;
+    if (!dividerChecked && n >= 100) {
+      dividerChecked = true;
+      double mean = stripDenoiser.lastMean();
+      double expected = (2.6 * (float)STRIP_DIVIDER_RATIO / 3.3) * 4095.0;
+      double ratioSeen = mean / ((2.6 / 3.3) * 4095.0);   // implied divider from the rest level
+
+      // A rest level near ZERO is its own fault, and the check above missed it entirely:
+      // it only ever warned when the level was too HIGH, so a pin reading a flat 0 sailed
+      // through as "agrees with divider ratio 0.50" — which is nonsense, because an ACS712
+      // outputs Vcc/2 whether or not any current flows. Zero means no sensor output is
+      // reaching the pin at all.
+      //
+      // Two causes look identical on the ADC, so separate them electrically: engage the
+      // ESP32's own pull-up and see whether the pin can be pulled up. If it can, the pin is
+      // healthy and something upstream is simply sitting at 0 V (an unpowered ACS712, or a
+      // divider whose top leg is open). If it cannot, the pin itself is tied to ground.
+      if (mean < 100.0) {
+        pinMode(gCfg.pinStripAdc, INPUT_PULLUP);
+        delayMicroseconds(500);
+        bool canPullUp = digitalRead(gCfg.pinStripAdc) == HIGH;
+        pinMode(gCfg.pinStripAdc, INPUT);
+        Serial.printf("[strip] FAULT: rest level %.0f counts — an ACS712 always outputs Vcc/2, "
+                      "so nothing is reaching GPIO%d.\n", mean, gCfg.pinStripAdc);
+        if (canPullUp) {
+          Serial.println("[strip] the pin pulls HIGH, so GPIO32 itself is fine — the source is "
+                         "at 0 V. Check the ACS712's VCC is on 5V (measure at the module's own "
+                         "pin), then that OUT reaches the top of the divider.");
+        } else {
+          Serial.println("[strip] the pin STAYS LOW even with the internal pull-up on — GPIO32 "
+                         "is shorted to ground. Look for the divider's midpoint wire landing in "
+                         "a ground row, or a jumper bridging to the GND rail.");
+        }
+      } else if (mean > expected * 1.5) {
+        Serial.printf("[strip] WARNING: rest level %.0f counts implies NO voltage divider "
+                      "(implied ratio %.2f, configured %.2f, expected ~%.0f counts).\n",
+                      mean, ratioSeen, (double)(float)STRIP_DIVIDER_RATIO, expected);
+        Serial.println("[strip] Two consequences: every reading is scaled 2x wrong, and the "
+                       "ACS712's output swings toward 5 V on a 3.3 V-only pin as load rises. "
+                       "Fit the 10k/10k divider, or rebuild with -DSTRIP_DIVIDER_RATIO=1.0 "
+                       "if the sensor is genuinely driving the pin directly.");
+      } else {
+        Serial.printf("[strip] rest level %.0f counts agrees with divider ratio %.2f\n",
+                      mean, (double)(float)STRIP_DIVIDER_RATIO);
+      }
+    }
+  }
+
+  {
+    static unsigned long lastStripDump = 0;
+    if (millis() - lastStripDump > 2000) {
+      lastStripDump = millis();
+      // A full mains cycle, not a 10-sample peek. Ten consecutive samples span 1.6 ms and
+      // cannot show whether a 20 ms waveform exists; the periodicity gate is rejecting both
+      // channels, and deciding whether that verdict is right needs the actual shape.
+      // A FULL window (~5 mains cycles). The periodicity gate says there is no 50 Hz
+      // content; that verdict rests on assumptions about lag and uniform sampling, and the
+      // only way to check it independently is to look at the samples themselves off-board.
+      // (full-window dump removed: it identified the 10 Hz drift and would now just flood)
+      Serial.printf("[stripW raw ADC] ");
+      for (int i = 0; i < 10 && i < n; i++) Serial.printf("%d ", sampleBuf[i]);
+      Serial.printf("| n=%d mean=%.1f var=%.1f | floor: measured=%.1f configured=%.1f "
+                    "in-force=%.1f | fs=%.0fHz | drift=%.0f | periodicCov=%+.3f | raw=%.3f A -> published %.3f A = %.1f W\n",
+                    n, stripDenoiser.lastMean(), stripDenoiser.lastVariance(),
+                    stripDenoiser.observedFloor(), stripDenoiser.getConfig().noiseVariance,
+                    stripDenoiser.lastNoiseVariance(), (double)gLastSampleRateHz, stripDenoiser.lastDriftEnergy(),
+                    stripDenoiser.lastFullPeriodCov(),
+                    (double)stripDenoiser.lastRawAmps(), (double)amps,
+                    (double)(amps >= 0 ? amps * gCfg.plugMainsV : 0.0f));
+    }
+  }
   unsigned long dspDuration = micros() - dspStart;
   gLastDspDurationUs = dspDuration;
   if (dspDuration > DSP_TIME_BUDGET_US) {
@@ -688,10 +1038,35 @@ void handleCommand(const String& msg) {
     String tok = (sep == -1) ? msg.substring(start) : msg.substring(start, sep);
     tok.trim();
 
-    if (tok == "LIGHTS_ON")       setLights(true);
+    if (tok.startsWith("PROTOCOL=")) {
+#if USE_IR_AC
+      // Retarget the blaster to the brand the camera recognised. Validate before adopting:
+      // an unknown name, or one this library build cannot transmit, must leave the working
+      // protocol in place rather than silently disabling AC control.
+      String want = tok.substring(9);
+      want.trim();
+      decode_type_t p = strToDecodeType(want.c_str());
+      if (p == decode_type_t::UNKNOWN) {
+        Serial.printf("[hvac] PROTOCOL=%s not recognised — keeping %s\n",
+                      want.c_str(), typeToString(gIrProtocol).c_str());
+      } else if (!IRac::isProtocolSupported(p)) {
+        Serial.printf("[hvac] PROTOCOL=%s is not send-supported by this library build — "
+                      "keeping %s\n", want.c_str(), typeToString(gIrProtocol).c_str());
+      } else if (p != gIrProtocol) {
+        Serial.printf("[hvac] IR protocol switched %s -> %s (recognised by camera)\n",
+                      typeToString(gIrProtocol).c_str(), typeToString(p).c_str());
+        gIrProtocol = p;
+        irAcReady = true;
+        hvacPowerOn = !hvacPowerOn;   // force the next command to actually transmit
+      }
+#else
+      Serial.println("[hvac] PROTOCOL= ignored (built without USE_IR_AC=1)");
+#endif
+    }
+    else if (tok == "LIGHTS_ON")       setLights(true);
     else if (tok == "LIGHTS_OFF") setLights(false);
-    else if (tok.startsWith("SETPOINT=")) applyHvacSetpoint(tok.substring(9).toFloat());
-    else if (tok.startsWith("HVAC_SET:")) applyHvacSetpoint(tok.substring(9).toFloat());
+    else if (tok.startsWith("SETPOINT=")) applyHvacToken(tok.substring(9));
+    else if (tok.startsWith("HVAC_SET:")) applyHvacToken(tok.substring(9));
     else if (tok.startsWith("IR_SEND:")) {
 #if USE_IR_AC
       int p1 = tok.indexOf(':', 8);
@@ -941,6 +1316,13 @@ void readAndPublish() {
     doc["lights"] = lightsOn ? "ON" : "OFF";
   }
   doc["setpoint"]    = hvacSetpointC;
+  // engine.go:3277 latches z.IrState="OFF" the moment it SENDS a shutdown and never
+  // repeats it, so without this the twin's belief about the compressor is never checked
+  // against the node. Published only when this node genuinely drives an AC — otherwise
+  // omitted, so an unequipped node cannot be read as confirming a state it cannot set.
+#if USE_IR_AC
+  if (irAcReady) doc["irState"] = hvacPowerOn ? "ON" : "OFF";
+#endif
   // Whether that setpoint was actually transmitted to an air conditioner, or merely
   // parsed. Same discipline as tempReal: the twin must never count energy saved by a
   // setback that terminated in a serial log line.
@@ -1007,6 +1389,7 @@ void handleCameraStream() {
       // Read request
       while(client.available()) client.read();
       
+      if (!cameraStreamReady) return;   // no driver, no frame buffer to hand out
       const uint8_t* frame = cameraDetector->getDriver().getFrameBuffer();
       if (!frame) {
          client.println("HTTP/1.1 503 Service Unavailable");
@@ -1014,8 +1397,13 @@ void handleCameraStream() {
          return;
       }
       
-      // BMP Header for 160x120 8-bit Grayscale
-      uint8_t bmpHeader[1078] = {0};
+      // BMP header, 8-bit grayscale 160x120. STATIC, not on the stack: 1078 bytes of local
+      // array on the Arduino loop task's 8 KB stack, on top of what the WiFi client needs
+      // for a 19 KB write, overflowed it — the node abort()ed the moment a client connected
+      // and the request died after the header. It is a fixed, single-threaded buffer, so
+      // .bss is where it belongs.
+      static uint8_t bmpHeader[1078];
+      memset(bmpHeader, 0, sizeof(bmpHeader));
       bmpHeader[0] = 'B'; bmpHeader[1] = 'M';
       uint32_t fileSize = 1078 + 19200;
       memcpy(bmpHeader + 2, &fileSize, 4);
@@ -1044,7 +1432,14 @@ void handleCameraStream() {
       client.println();
       
       client.write(bmpHeader, 1078);
-      client.write(frame, 19200);
+      // Chunked, so a slow or stalled reader cannot park the whole frame inside one blocking
+      // write. Bail out the moment the peer goes away instead of spinning on a dead socket.
+      const size_t CHUNK = 1024;
+      for (size_t sent = 0; sent < 19200; sent += CHUNK) {
+        if (!client.connected()) break;
+        size_t n = (19200 - sent < CHUNK) ? (19200 - sent) : CHUNK;
+        if (client.write(frame + sent, n) != n) break;
+      }
       client.flush();
     }
     client.stop();
@@ -1072,14 +1467,14 @@ void setup() {
   // Ask the library, rather than assuming: a protocol name can compile fine and still be
   // send-unsupported in this build of IRremoteESP8266, and finding that out at the first
   // setpoint command (silently) is exactly the failure this whole change is about.
-  irAcReady = IRac::isProtocolSupported(decode_type_t::IR_AC_PROTOCOL);
+  irAcReady = IRac::isProtocolSupported(gIrProtocol);
   if (irAcReady) {
     Serial.printf("[hvac] IR AC control ACTIVE: %s on GPIO%d\n",
-                  typeToString(decode_type_t::IR_AC_PROTOCOL).c_str(), gCfg.pinIrAc);
+                  typeToString(gIrProtocol).c_str(), gCfg.pinIrAc);
   } else {
     Serial.printf("[hvac] WARNING: protocol %s is not send-supported by this library build; "
                   "setpoints will NOT reach the AC (acReal:false)\n",
-                  typeToString(decode_type_t::IR_AC_PROTOCOL).c_str());
+                  typeToString(gIrProtocol).c_str());
   }
 #else
   Serial.printf("[hvac] no IR AC compiled in (build -DUSE_IR_AC=1); setpoints are parsed "
@@ -1090,6 +1485,10 @@ void setup() {
 #if USE_SHT30 || USE_CO2 || USE_LUX
   Wire.begin(gCfg.pinI2cSda, gCfg.pinI2cScl);
   Serial.printf("[i2c] bus up on SDA=GPIO%d SCL=GPIO%d\n", gCfg.pinI2cSda, gCfg.pinI2cScl);
+#if USE_CO2
+  Wire1.begin(27, 5);
+  Serial.printf("[i2c] secondary bus (Wire1) up for CO2 on SDA=GPIO27 SCL=GPIO5\n");
+#endif
 #endif
 #if USE_SHT30
   Serial.printf("[sht30] expecting I2C addr 0x%02X\n", SHT30_ADDR);
@@ -1116,6 +1515,69 @@ void setup() {
     Serial.println("[co2] WARNING: could not confirm manual calibration; ABC remains ON");
   }
   #endif
+  // Scan the secondary bus before trusting any read. "co2 omitted" covers four distinct
+  // faults — nothing on the bus, a device at another address, a protocol mismatch, and a
+  // reading out of bounds — and only the first two are visible from a scan. Without it the
+  // level shifter's most common wiring error (AVCC unpowered, so the 5 V side has no
+  // pull-ups and the sensor can never ACK) looks identical to a dead sensor.
+  {
+    // Before scanning, look at the lines themselves. An I2C bus at rest must float HIGH on
+    // both wires. If either reads LOW with the ESP32's own pull-up engaged, nothing on the
+    // bus can ever ACK and no scan result means anything: the line is shorted, or the
+    // level shifter's FET is holding it down because its rail is unpowered. That is a
+    // different fault from "the sensor is absent", and the scan alone cannot tell them apart.
+    // Detect whether an EXTERNAL pull-up is present and powered on each line, which is the
+    // question "is the level shifter alive?" reduces to. A BSS138 module carries 10k
+    // pull-ups on both sides, but they only pull when that side's rail is powered — so a
+    // shifter with BVCC unwired, a dead shifter, and no shifter at all are all the same
+    // electrically, and all of them make every scan return nothing.
+    //
+    // The ESP32's own INPUT_PULLUP cannot answer this: it would hold the line high by
+    // itself and every case would look identical. So drive the line low to discharge it,
+    // release it as a plain floating input, and look. An external 10k against a few tens
+    // of pF snaps back high in well under a microsecond; a line with nothing on it stays
+    // down, held only by leakage. This needs no multimeter and no probing.
+    auto probeLine = [](uint8_t pin) -> bool {
+      pinMode(pin, OUTPUT);
+      digitalWrite(pin, LOW);
+      delayMicroseconds(50);          // discharge the line and any cable capacitance
+      pinMode(pin, INPUT);            // release: NO internal pull-up, so only external pulls
+      delayMicroseconds(20);          // 10k x ~20 pF settles in ~0.2 us; 20 us is ample
+      return digitalRead(pin) == HIGH;
+    };
+    bool sdaPulled = probeLine(27), sclPulled = probeLine(5);
+    Serial.printf("[co2] Wire1 pull-up probe: SDA(GPIO27)=%s SCL(GPIO5)=%s -> %s\n",
+                  sdaPulled ? "pulled HIGH" : "stays LOW",
+                  sclPulled ? "pulled HIGH" : "stays LOW",
+                  (sdaPulled && sclPulled)
+                    ? "external pull-ups ARE present and powered: the shifter's low-voltage"
+                      " side is alive, so look past it (5V rail, AVCC, sensor wiring, address)"
+                    : "NO powered external pull-up on at least one line. Nothing on this bus"
+                      " can ever ACK. Check BVCC=3.3V, AVCC=5V, both grounds tied, and the"
+                      " module actually seated — before suspecting the sensor.");
+    Wire1.begin(27, 5);   // reclaim the pins after the probe
+
+    int found = 0;
+    Serial.print("[co2] scanning Wire1 (SDA=GPIO27 SCL=GPIO5):");
+    for (uint8_t addr = 0x08; addr < 0x78; addr++) {
+      Wire1.beginTransmission(addr);
+      if (Wire1.endTransmission() == 0) {
+        Serial.printf(" 0x%02X", addr);
+        found++;
+      }
+    }
+    if (found == 0) {
+      Serial.println(" nothing responded.\n"
+                     "[co2] no device on the bus at all. Check, in this order: the shifter's"
+                     " AVCC on 5V and BVCC on 3.3V (both sides need power for their pull-ups),"
+                     " AGND/BGND tied to the ESP32 GND, the sensor on the A/high-voltage side"
+                     " and GPIO27/GPIO5 on the B/low-voltage side (not swapped), and 5V on the"
+                     " sensor's VCC.");
+    } else {
+      Serial.printf("\n[co2] %d device(s) answered; ACD1200 is expected at 0x%02X\n",
+                    found, ACD1200_ADDR);
+    }
+  }
   Serial.printf("[co2] ACD1200 expected at I2C 0x%02X (120 s preheat; needs a 5V<->3.3V level shifter)\n",
                 ACD1200_ADDR);
 #endif
@@ -1186,11 +1648,35 @@ void setup() {
 
 #if USE_CAMERA
   cameraDetector = new CameraPersonDetector();
-  if (cameraDetector->init()) {
+  bool detectorOk = cameraDetector->init();
+  // The camera DRIVER and the ML DETECTOR fail independently, and conflating them cost the
+  // node a reboot loop. esp_camera can be up and streaming real frames while TFLite refuses
+  // the model — which is exactly the state this board is in. Track the two separately so a
+  // dead model does not also kill the video stream, and so neither can be driven blind.
+  cameraStreamReady = cameraDetector->getDriver().isHardwarePresent();
+  if (detectorOk) {
+    cameraReady = true;
       Serial.printf("[camera] initialized. model takes %u bytes SRAM\n", (unsigned int)cameraDetector->getArenaUsedBytes());
       cameraDetector->setZoneAndSensorId(ZONE_TOPIC, CLIENT_ID);
   } else {
-      Serial.println("[camera] initialization failed!");
+      // Latch the failure. loop() previously called processFrame() whenever the pointer was
+      // non-null, so a detector that failed init was driven anyway — straight into an
+      // abort() and a reboot loop. A camera that cannot start must degrade to no occupancy
+      // data, never take the node down with it.
+      cameraReady = false;
+      // Deliberately KEEP the capture pipeline running. Inference for this node happens on
+      // the host, not on the ESP32: frames go out over the BMP stream on :8080 for occupancy
+      // and for reading the air conditioner's branding. The on-device TFLite model being a
+      // stub therefore does not mean the camera is useless — it means the local detector is
+      // the wrong consumer. Only the local inference path is disabled below.
+      if (cameraStreamReady) {
+        Serial.println("[camera] capture pipeline STAYS UP — frames are served to the host "
+                       "for offloaded inference on http://<node-ip>:8080");
+      }
+      Serial.printf("[camera] detector unavailable — occupancy reports 0 and the detector is "
+                    "NOT polled. Camera hardware itself is %s.\n",
+                    cameraStreamReady ? "UP (frames still available to the stream)"
+                                      : "down as well");
   }
 #endif
 
@@ -1199,6 +1685,13 @@ void setup() {
 void loop() {
 #if USE_CAMERA
   handleCameraStream();
+  if (cameraDetector && cameraReady) {
+    static unsigned long lastCameraPoll = 0;
+    if (millis() - lastCameraPoll >= 150) {
+      lastCameraPoll = millis();
+      cameraDetector->processFrame();
+    }
+  }
 #endif
   while (Serial.available()) {
     String line = Serial.readStringUntil('\n');

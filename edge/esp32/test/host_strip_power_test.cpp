@@ -46,6 +46,21 @@ static float calculateStripAmps(const std::vector<int>& samples, float stripCalA
 }
 
 // Generate synthetic ADC samples
+// Calibration pinned for the DSP behaviour groups below.
+//
+// These tests exercise the denoiser's frequency response, DC-offset rejection, noise gating
+// and reconstruction accuracy. None of that depends on which ACS712 variant is fitted, but
+// the groups synthesise fixed absolute currents — 5 A, 10 A, a 30 A inrush, a 0.07 A trickle
+// — and those only stay inside the ADC's 0-3.3 V range for a COARSE calibration. Driving
+// them from the build's default broke five of them the moment this node moved from a 20 A
+// part to a 5 A one, and every failure was physically right: on a 2x more sensitive sensor a
+// 10 A synthetic signal really does clip, and 0.07 A really does rise above the noise gate
+// instead of being swallowed by it. That is the sensor changing, not the DSP regressing.
+//
+// So pin the sensor here and let these groups test the thing they are named after. Whether
+// the SHIPPED default is right for the fitted hardware is host_config_test's job.
+static const float kDspTestCal = 10.0f;   // ACS712-20A, 100 mV/A
+
 static std::vector<int> generateSamples(
     int nSamples,
     double sampleRateHz,
@@ -117,8 +132,8 @@ int main() {
   {
     double testOffsets[] = { 0.5, 1.0, 1.65, 2.0, 2.5, 2.8, 3.2 };
     for (double dc : testOffsets) {
-      auto samples = generateSamples(1000, 10000.0, dc, 0.0, gCfg.stripCalAPerV);
-      float amps = calculateStripAmps(samples, gCfg.stripCalAPerV);
+      auto samples = generateSamples(1000, 10000.0, dc, 0.0, kDspTestCal);
+      float amps = calculateStripAmps(samples, kDspTestCal);
       char msg[128];
       snprintf(msg, sizeof(msg), "DC offset %.2fV results in exactly 0.0A", dc);
       check(amps == 0.0f, msg);
@@ -133,8 +148,8 @@ int main() {
     double testOffsets[] = { 1.0, 1.65, 2.0, 2.5, 2.8 };
     double expRms = 5.0 / sqrt(2.0); // 3.535534 A
     for (double dc : testOffsets) {
-      auto samples = generateSamples(1000, 10000.0, dc, 5.0, gCfg.stripCalAPerV);
-      float amps = calculateStripAmps(samples, gCfg.stripCalAPerV);
+      auto samples = generateSamples(1000, 10000.0, dc, 5.0, kDspTestCal);
+      float amps = calculateStripAmps(samples, kDspTestCal);
       float watts = static_cast<float>(round(static_cast<double>(amps) * static_cast<double>(gCfg.plugMainsV) * 10.0) / 10.0);
       char msg[128];
       snprintf(msg, sizeof(msg), "DC %.2fV: amps=%.3fA, watts=%.1fW (expected ~813.2W)", dc, amps, watts);
@@ -149,8 +164,8 @@ int main() {
   printf("strip_power: noise floor gating (< 12.0 counts RMS -> 0.0W)\n");
   {
     // Sub-threshold AC current: 0.07A RMS (0.099A peak, ~5.8 counts < 12.0 counts)
-    auto samplesSub = generateSamples(1000, 10000.0, 2.5, 0.07 * sqrt(2.0), gCfg.stripCalAPerV);
-    float ampsSub = calculateStripAmps(samplesSub, gCfg.stripCalAPerV);
+    auto samplesSub = generateSamples(1000, 10000.0, 2.5, 0.07 * sqrt(2.0), kDspTestCal);
+    float ampsSub = calculateStripAmps(samplesSub, kDspTestCal);
     check(ampsSub == 0.0f, "0.07A RMS (~5.8 counts < 12.0 counts threshold) is clamped to 0.0A");
 
     // Pure ADC quantization noise around 2.5V (simulated by alternating +- 3 counts)
@@ -159,12 +174,12 @@ int main() {
     for (int i = 0; i < 1000; i++) {
       noiseSamples[i] = center + ((i % 4 == 0) ? 3 : ((i % 4 == 2) ? -3 : 0));
     }
-    float ampsNoise = calculateStripAmps(noiseSamples, gCfg.stripCalAPerV);
+    float ampsNoise = calculateStripAmps(noiseSamples, kDspTestCal);
     check(ampsNoise == 0.0f, "ADC noise of +-3 counts is clamped to 0.0A (below 12.0 counts threshold)");
 
     // Above-threshold AC current: 0.15A RMS (0.212A peak, ~12.4 counts > 12.0 counts)
-    auto samplesAbove = generateSamples(1000, 10000.0, 2.5, 0.15 * sqrt(2.0), gCfg.stripCalAPerV);
-    float ampsAbove = calculateStripAmps(samplesAbove, gCfg.stripCalAPerV);
+    auto samplesAbove = generateSamples(1000, 10000.0, 2.5, 0.15 * sqrt(2.0), kDspTestCal);
+    float ampsAbove = calculateStripAmps(samplesAbove, kDspTestCal);
     check(ampsAbove >= 0.14f && ampsAbove <= 0.16f, "0.15A RMS (~12.4 counts > 12.0 counts threshold) is correctly reported");
   }
 
@@ -182,8 +197,8 @@ int main() {
       { 10.0, 2300.0 }
     };
     for (auto& tc : cases) {
-      auto samples = generateSamples(1000, 10000.0, 1.65, tc.rmsAmps * sqrt(2.0), gCfg.stripCalAPerV);
-      float amps = calculateStripAmps(samples, gCfg.stripCalAPerV);
+      auto samples = generateSamples(1000, 10000.0, 1.65, tc.rmsAmps * sqrt(2.0), kDspTestCal);
+      float amps = calculateStripAmps(samples, kDspTestCal);
       float watts = static_cast<float>(round(static_cast<double>(amps) * static_cast<double>(gCfg.plugMainsV) * 10.0) / 10.0);
       char msg[128];
       snprintf(msg, sizeof(msg), "Target %.3fA: got %.3fA, %.1fW (exp %.1fW)", tc.rmsAmps, amps, watts, tc.expWatts);
@@ -199,7 +214,7 @@ int main() {
     int starveCounts[] = { 0, 1, 10, 50, 99 };
     for (int n : starveCounts) {
       std::vector<int> starvedSamples(n, 2048);
-      float amps = calculateStripAmps(starvedSamples, gCfg.stripCalAPerV);
+      float amps = calculateStripAmps(starvedSamples, kDspTestCal);
       char msg[128];
       snprintf(msg, sizeof(msg), "Sample count N=%d returns -1", n);
       check(amps == -1.0f, msg);
@@ -214,8 +229,8 @@ int main() {
     }
 
     // N = 100 is the boundary where calculation starts
-    auto samples100 = generateSamples(100, 1000.0, 1.65, 5.0, gCfg.stripCalAPerV);
-    float amps100 = calculateStripAmps(samples100, gCfg.stripCalAPerV);
+    auto samples100 = generateSamples(100, 1000.0, 1.65, 5.0, kDspTestCal);
+    float amps100 = calculateStripAmps(samples100, kDspTestCal);
     check(amps100 >= 0.0f, "Sample count N=100 succeeds and does not return -1");
 
     StaticJsonDocument<384> docValid;
@@ -244,11 +259,11 @@ int main() {
       double i3rd  = 1.2 * sin(2.0 * M_PI * 150.0 * t);
       double i5th  = 0.6 * sin(2.0 * M_PI * 250.0 * t);
       double iTotal = iFund + i3rd + i5th;
-      double vTotal = 1.65 + (iTotal / gCfg.stripCalAPerV);
+      double vTotal = 1.65 + (iTotal / kDspTestCal);
       int count = (int)round(vTotal * 4095.0 / 3.3);
       harmSamples.push_back(count);
     }
-    float ampsHarm = calculateStripAmps(harmSamples, gCfg.stripCalAPerV);
+    float ampsHarm = calculateStripAmps(harmSamples, kDspTestCal);
     float wattsHarm = static_cast<float>(round(static_cast<double>(ampsHarm) * static_cast<double>(gCfg.plugMainsV) * 10.0) / 10.0);
     check(std::abs(ampsHarm - 1.7029f) < 0.01f, "SMPS harmonics: RMS current within 0.01A of theoretical 1.703A");
     check(std::abs(wattsHarm - 391.7f) <= 0.5f, "SMPS harmonics: Watts within 0.5W of theoretical 391.7W");
@@ -261,8 +276,8 @@ int main() {
   {
     double testFreqs[] = { 49.0, 50.0, 51.0, 60.0 };
     for (double f : testFreqs) {
-      auto samples = generateSamples(1000, 10000.0, 1.65, 5.0, gCfg.stripCalAPerV, f);
-      float amps = calculateStripAmps(samples, gCfg.stripCalAPerV);
+      auto samples = generateSamples(1000, 10000.0, 1.65, 5.0, kDspTestCal, f);
+      float amps = calculateStripAmps(samples, kDspTestCal);
       float watts = static_cast<float>(round(static_cast<double>(amps) * static_cast<double>(gCfg.plugMainsV) * 10.0) / 10.0);
       char msg[128];
       snprintf(msg, sizeof(msg), "Grid freq %.1f Hz: got %.1fW (leakage error < 1.0%%)", f, watts);
@@ -296,13 +311,13 @@ int main() {
   printf("strip_power: R3 waveform reconstruction with ESP32 ADC noise (0A, 0.5A, 2A, 10A)\n");
   {
     // Test 0A with typical ESP32 ADC noise (sigma = 8.0 counts): must output 0.0A (prevent ghost readings)
-    auto samples0A = generateSamplesWithNoise(1000, 10000.0, 1.65, 0.0, gCfg.stripCalAPerV, 8.0);
-    float amps0A = calculateStripAmps(samples0A, gCfg.stripCalAPerV);
+    auto samples0A = generateSamplesWithNoise(1000, 10000.0, 1.65, 0.0, kDspTestCal, 8.0);
+    float amps0A = calculateStripAmps(samples0A, kDspTestCal);
     check(amps0A == 0.0f, "0A with typical ESP32 ADC noise (sigma=8) outputs exactly 0.0A (no ghost reading)");
 
     // Test 0A with elevated ESP32 ADC noise (sigma = 10.0 counts): must output 0.0A
-    auto samples0AHigh = generateSamplesWithNoise(1000, 10000.0, 1.65, 0.0, gCfg.stripCalAPerV, 10.0);
-    float amps0AHigh = calculateStripAmps(samples0AHigh, gCfg.stripCalAPerV);
+    auto samples0AHigh = generateSamplesWithNoise(1000, 10000.0, 1.65, 0.0, kDspTestCal, 10.0);
+    float amps0AHigh = calculateStripAmps(samples0AHigh, kDspTestCal);
     check(amps0AHigh == 0.0f, "0A with elevated ESP32 ADC noise (sigma=10) outputs exactly 0.0A (no ghost reading)");
 
     // Test known AC loads with typical ESP32 ADC noise (sigma = 8.0 counts): must reconstruct within 5% accuracy
@@ -314,8 +329,8 @@ int main() {
     };
 
     for (auto& tc : noiseCases) {
-      auto samples = generateSamplesWithNoise(1000, 10000.0, 1.65, tc.targetAmps, gCfg.stripCalAPerV, 8.0);
-      float amps = calculateStripAmps(samples, gCfg.stripCalAPerV);
+      auto samples = generateSamplesWithNoise(1000, 10000.0, 1.65, tc.targetAmps, kDspTestCal, 8.0);
+      float amps = calculateStripAmps(samples, kDspTestCal);
       double errPct = std::abs((double)amps - tc.targetAmps) / tc.targetAmps * 100.0;
       char msg[128];
       snprintf(msg, sizeof(msg), "%s (got %.4fA, target %.4fA, err %.2f%%)", tc.desc, amps, tc.targetAmps, errPct);
@@ -367,8 +382,8 @@ int main() {
     // Extreme frequency wander on cheap portable generators: 45 Hz and 65 Hz over 100ms window
     double extremeFreqs[] = { 45.0, 65.0 };
     for (double f : extremeFreqs) {
-      auto samples = generateSamples(1000, 10000.0, 1.65, 5.0, gCfg.stripCalAPerV, f);
-      float amps = calculateStripAmps(samples, gCfg.stripCalAPerV);
+      auto samples = generateSamples(1000, 10000.0, 1.65, 5.0, kDspTestCal, f);
+      float amps = calculateStripAmps(samples, kDspTestCal);
       float watts = static_cast<float>(round(static_cast<double>(amps) * static_cast<double>(gCfg.plugMainsV) * 10.0) / 10.0);
       double errPct = std::abs(watts - 813.2f) / 813.2f * 100.0;
       char msg[128];
@@ -378,8 +393,8 @@ int main() {
 
     // Heavy motor inrush current: 30A RMS (42.4A peak) hard-clipping at ADC rails (0V / 3.3V)
     // Sensor calculation must not crash, produce NaN, negative values, or freeze.
-    auto samplesInrush = generateSamples(1000, 10000.0, 1.65, 30.0 * sqrt(2.0), gCfg.stripCalAPerV);
-    float ampsInrush = calculateStripAmps(samplesInrush, gCfg.stripCalAPerV);
+    auto samplesInrush = generateSamples(1000, 10000.0, 1.65, 30.0 * sqrt(2.0), kDspTestCal);
+    float ampsInrush = calculateStripAmps(samplesInrush, kDspTestCal);
     check(ampsInrush > 0.0f && !std::isnan(ampsInrush) && !std::isinf(ampsInrush),
           "30A motor inrush hard clipping produces valid finite positive RMS without crashing");
   }

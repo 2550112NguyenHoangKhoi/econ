@@ -80,6 +80,43 @@
   #define PIN_CAM_D7     34 // Data bit 7 (MSB)
 #endif
 
+// Power-down and reset, driven by the ESP32 rather than strapped to fixed rails.
+//
+// Hard-wiring PWDN to GND and RESET to 3V3 works only if both wires are actually present:
+// leave either floating and the sensor is powered down or held in reset, silent on SCCB,
+// and indistinguishable from a missing module. Driving them means the node can sequence
+// the sensor properly (PWDN low -> XCLK running -> release RESET), which is the order the
+// OV7670 datasheet requires, and can retry a hard cycle instead of relying on a rail.
+//
+// Pin choice is forced: 21/22 are I2C, 27/5 are the CO2 bus, 32/33 are the current ADCs,
+// 25/26 are IR and the plug relay, 2 is the status LED, 34-39 are input-only, and 1/3 are
+// the serial console. That leaves 0, 12 and 15, and GPIO0 is the boot-mode strap the
+// USB-serial auto-reset drives during flashing, so it is unusable here.
+//
+// Only RESET is driven. PWDN stays hard-wired to GND, and that asymmetry is deliberate.
+//
+// GPIO12 was tried for PWDN and must never be used for it. MTDI is latched at every reset
+// to select the VDD_SDIO rail: HIGH selects 1.8 V, which browns out a 3.3 V flash before
+// the ROM can boot. The OV7670 module carries a pull-up on its PWDN pin, so wiring PWDN to
+// GPIO12 holds that strap HIGH at power-on regardless of what the firmware later does —
+// the board went into an unrecoverable loop, resetting inside the boot banner with
+// rst:0x10 (RTCWDT_RTC_RESET). No firmware change can fix that; the strap is read before
+// any of it runs. PWDN belongs on the GND rail.
+//
+// GPIO15 (MTDO) is safe by contrast: it idles HIGH on its own internal pull-up, which is
+// exactly the level RESET needs to leave the sensor running, and pulling it LOW at boot
+// only silences the ROM log rather than preventing boot. It is driven solely after boot.
+//
+// RESET is also the more useful of the two to control: it is the one that must be released
+// while XCLK is already running, and pulsing it recovers a sensor that came up in a bad
+// state. Build with -DPIN_CAM_RESET=-1 to go back to a fixed 3V3 rail.
+#ifndef PIN_CAM_PWDN
+  #define PIN_CAM_PWDN   -1 // hard-wired to GND — see the GPIO12 warning above
+#endif
+#ifndef PIN_CAM_RESET
+  #define PIN_CAM_RESET  15 // LOW = held in reset, HIGH = running
+#endif
+
 // SCCB / I2C Configuration Bus (Shared with SHT30 0x44, ACD1200 0x2A, BH1750 0x23)
 #ifndef PIN_CAM_SIOD
   #define PIN_CAM_SIOD   21 // I2C SDA

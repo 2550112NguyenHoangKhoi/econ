@@ -116,12 +116,12 @@ struct MockEnvironmentSensors {
   }
 
   bool readCo2(int& ppm) const {
-    uint8_t d[9] = {0, 0, 0, (uint8_t)(co2_ppm >> 8), (uint8_t)(co2_ppm & 0xFF), 0, 0, 0, 0};
+    uint8_t d[9] = {(uint8_t)(co2_ppm >> 8), (uint8_t)(co2_ppm & 0xFF), 0, 0, 0, 0, 0, 0, 0};
     d[2] = calc_crc8_31(d[0], d[1]);
     d[5] = calc_crc8_31(d[3], d[4]);
     d[8] = calc_crc8_31(d[6], d[7]);
-    if (calc_crc8_31(d[3], d[4]) != d[5]) return false;
-    ppm = co2_ppm;
+    if (calc_crc8_31(d[0], d[1]) != d[2]) return false;
+    ppm = ((int)d[0] << 8) | d[1];
     return true;
   }
 
