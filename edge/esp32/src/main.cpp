@@ -1376,6 +1376,28 @@ void loop() {
         gWifiJoinPending   = true;
         gWifiJoinStartedMs = millis();
       }
+    } else if (line == "[i2c] scan") {
+      // Bring-up diagnostic: every I2C sensor reports "expected at 0x.." at boot
+      // whether or not it is present, so the only way to tell a missing sensor from
+      // a wiring fault is to ask the bus who answers.
+#if USE_SHT30 || USE_CO2 || USE_LUX
+      Serial.printf("[i2c] scanning SDA=GPIO%d SCL=GPIO%d...\n", gCfg.pinI2cSda, gCfg.pinI2cScl);
+      int found = 0;
+      for (uint8_t addr = 1; addr < 127; addr++) {
+        Wire.beginTransmission(addr);
+        if (Wire.endTransmission() == 0) {
+          const char* who = "unknown";
+          if (addr == SHT30_ADDR)   who = "SHT30 temp/humidity";
+          if (addr == 0x2A)         who = "ACD1200 CO2";
+          if (addr == 0x21)         who = "OV7670 camera";
+          Serial.printf("[i2c] 0x%02X responding -- %s\n", addr, who);
+          found++;
+        }
+      }
+      Serial.printf("[i2c] scan done, %d device(s)\n", found);
+#else
+      Serial.println("[i2c] bus not compiled in (no USE_SHT30/USE_CO2/USE_LUX)");
+#endif
     } else if (line.startsWith("[mqtt] host ")) {
       String host = line.substring(12);
       host.trim();
