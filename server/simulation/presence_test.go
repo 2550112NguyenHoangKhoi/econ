@@ -1,6 +1,7 @@
 package simulation
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 )
@@ -128,5 +129,36 @@ func TestDepartingFallsBackToVacantWithoutCo2(t *testing.T) {
 	}
 	if p.State != PresenceVacant {
 		t.Fatalf("beam clear 10min with no CO2 must reach vacant, stuck in %q", p.State)
+	}
+}
+
+// co2Confirmed must describe the evidence now, not the decision that set the state. The
+// state is sticky on purpose; the confirmation flag must not inherit that.
+func TestConfirmedFlagDoesNotOutliveItsEvidence(t *testing.T) {
+	p := &PresenceFusion{}
+	now := time.Now()
+	now = drive(p, now, 300, true, func(i int) float64 { return 800 + float64(i)*0.5 })
+	if p.State != PresenceOccupied {
+		t.Fatalf("setup: expected occupied, got %q", p.State)
+	}
+	// CO2 stops reporting; radar keeps asserting. State may stay occupied, but nothing is
+	// corroborating it any more.
+	for i := 0; i < 200; i++ {
+		p.Update(now, true, 0, false, time.Time{})
+		now = now.Add(5 * time.Second)
+	}
+	b, err := p.MarshalJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var w map[string]any
+	if err := json.Unmarshal(b, &w); err != nil {
+		t.Fatal(err)
+	}
+	if w["co2SlopeResolved"] == true {
+		t.Fatal("slope should be unresolved once samples age out")
+	}
+	if w["co2Confirmed"] == true {
+		t.Fatal("co2Confirmed must be false when no slope is resolved")
 	}
 }

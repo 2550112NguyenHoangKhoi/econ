@@ -108,11 +108,16 @@ func (p *PresenceFusion) MarshalJSON() ([]byte, error) {
 		SecondsInState float64       `json:"secondsInState"`
 	}
 	implausible := ok && math.Abs(slope) > co2ImplausiblePpmPerMin
+	// Confirmed reports whether respiration corroborates the beam RIGHT NOW, not whether it
+	// once did. The state is deliberately sticky -- a confirmed occupant is not demoted the
+	// moment ventilation catches up and CO2 stops climbing -- but the confirmation flag must
+	// not inherit that stickiness, or it reports "respiration agrees" off a decision made
+	// hours ago. Observed reporting co2Confirmed=true alongside co2SlopeResolved=false after
+	// four hours in state, which is self-contradictory on its face.
+	corroboratedNow := ok && !implausible && slope >= co2RisingPpmPerMin
 	w := wire{
 		State: p.State, Derived: true,
-		// Confirmed means "respiration agrees", so it cannot be true on a slope the sensor
-		// could not physically have produced.
-		Confirmed:   p.Confirmed() && !implausible,
+		Confirmed:   p.State == PresenceOccupied && corroboratedNow,
 		SlopeOK:     ok && !implausible,
 		SlopePpmMin: slope, Implausible: implausible, Since: p.Since,
 	}
