@@ -43,6 +43,11 @@ type co2Sample struct {
 
 const (
 	co2WindowSamples = 48              // ~4 min at the node's 5 s cadence, one per measurement
+	// Samples older than this are discarded. Without an age limit the window kept whatever
+	// it last held, so a zone whose CO2 sensor stopped reporting went on producing a
+	// confident slope from minutes-old data -- and a slope computed from a dead sensor is
+	// exactly the fabricated measurement this fusion exists to avoid.
+	co2MaxSampleAge = 6 * time.Minute
 	co2WindowMin     = 90 * time.Second // shortest span that yields a usable slope
 	// One adult emits roughly 18 L/h of CO2. In a small unventilated office that is on the
 	// order of 10 ppm/min; with ventilation, a few. +/-1.5 ppm/min is comfortably outside
@@ -62,6 +67,9 @@ const (
 	// alone. Confirming on it would put a near-field artifact behind a room-level claim, and
 	// disputing on it would be worse still, since a face at the probe means someone IS there.
 	co2ImplausiblePpmPerMin = 100.0
+	// How long the beam must stay clear before "departing" falls through to "vacant" with no
+	// usable CO2 slope. Long enough that a real decay gets a chance to be measured first.
+	departingFallback = 5 * time.Minute
 	// How long radar may assert without CO2 corroboration before the claim is disputed.
 	// Long enough that a person who walks in and sits still is not called a false positive
 	// before their own CO2 has had time to accumulate.
@@ -160,6 +168,16 @@ func (p *PresenceFusion) Update(now time.Time, radarPresent bool, co2 float64, c
 			p.samples = p.samples[len(p.samples)-co2WindowSamples:]
 		}
 	}
+	// Age out stale samples every pass, not only when a new one arrives -- the case that
+	// matters is precisely the one where nothing new is arriving.
+	cutoff := now.Add(-co2MaxSampleAge)
+	keep := p.samples[:0]
+	for _, smp := range p.samples {
+		if smp.at.After(cutoff) {
+			keep = append(keep, smp)
+		}
+	}
+	p.samples = keep
 
 	slope, slopeOK := p.Co2SlopePpmPerMin()
 	p.SlopePpmMin = slope
@@ -209,10 +227,20 @@ func (p *PresenceFusion) Update(now time.Time, radarPresent bool, co2 float64, c
 		next = PresenceDeparting
 	case !radarPresent:
 		// Beam clear and CO2 no longer falling: the decay has finished, the room is empty.
-		if p.State == PresenceDeparting && slopeOK && slope > co2FallingPpmPerMin {
+		//
+		// The unresolved-slope case has to be handled explicitly. An earlier version only
+		// left PresenceDeparting when the slope RESOLVED above the falling threshold, so a
+		// zone that lost its CO2 sensor mid-decay (or whose sample window went short) stayed
+		// "departing" forever with the radar clear the whole time. Radar alone is weak
+		// evidence, but "beam clear for a full disappearance window" is enough to call a
+		// room empty when there is no CO2 to consult.
+		switch {
+		case p.State != PresenceDeparting:
 			next = PresenceVacant
-		} else if p.State != PresenceDeparting {
-			next = PresenceVacant
+		case slopeOK && slope > co2FallingPpmPerMin:
+			next = PresenceVacant // decay finished
+		case !slopeOK && radarHeld >= departingFallback:
+			next = PresenceVacant // no CO2 to consult; the beam has been clear long enough
 		}
 	}
 

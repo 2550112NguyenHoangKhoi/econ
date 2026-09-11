@@ -107,6 +107,19 @@ function Spark({ points, width = 520, height = 90 }) {
 const IR_PROTOCOLS = [
   'COOLIX',
   'ELECTRA_AC',
+  // Hitachi ships several incompatible frame lengths under one brand and the remote does not
+  // say which, so this is a try-in-order list: HITACHI_AC (224-bit) covers most split units
+  // and the numbered variants are the frame's bit count.
+  //
+  // AC2 and AC3 are deliberately absent. IRremoteESP8266 can decode them but IRac cannot
+  // BUILD them, so isProtocolSupported() on the node rejects them -- listing them would
+  // offer a choice that always fails. Raw frames for those still work via IR_SEND.
+  'HITACHI_AC',
+  'HITACHI_AC1',
+  'HITACHI_AC264',
+  'HITACHI_AC296',
+  'HITACHI_AC344',
+  'HITACHI_AC424',
   'DAIKIN',
   'PANASONIC',
   'MITSUBISHI',

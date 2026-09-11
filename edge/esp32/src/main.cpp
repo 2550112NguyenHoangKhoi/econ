@@ -2347,12 +2347,22 @@ void loop() {
   #endif
     if (!gRadarAlive[h]) {
       // Retry the UART probe rather than treating one cold-start miss as permanent absence.
+      //
+      // With EXPONENTIAL BACKOFF, because these calls block: openCommandMode alone can spend
+      // ~650 ms waiting for an ACK, and enableReporting ~2.4 s. That runs inside loop(), so a
+      // head that is genuinely unplugged used to stall MQTT keepalive, relay commands and
+      // presence polling for over two seconds every 30 s, indefinitely. Backing off to a
+      // 10-minute ceiling keeps recovery working while making a permanently dead head cost
+      // almost nothing.
       static uint32_t lastProbe[2] = { 0, 0 };
-      if (io && millis() - lastProbe[h] > 30000) {
+      static uint32_t probeBackoff[2] = { 30000, 30000 };
+      if (io && millis() - lastProbe[h] > probeBackoff[h]) {
         lastProbe[h] = millis();
+        probeBackoff[h] = (probeBackoff[h] < 600000) ? probeBackoff[h] * 2 : 600000;
         if (rd03::openCommandMode(*io)) {
           rd03::closeCommandMode(*io);
           gRadarAlive[h] = true;
+          probeBackoff[h] = 30000;   // recovered: reset so the next loss retries promptly
           gRadarStream[h] = rd03::enableReporting(*io, h == 0 ? "head1" : "head2");
           Serial.printf("[mmwave] head%d is answering again — rejoined\n", h + 1);
         }
@@ -2360,20 +2370,22 @@ void loop() {
       continue;
     }
     if (!io) continue;
-    // A head that did not answer at boot is retried, for the same reason: the UART probe runs
-    // before the module has finished warming up, and "did not answer once, 40 seconds after
-    // power-on" is not the same as "absent".
     // Re-arm a head that has gone quiet. Reporting mode is entered once at boot, so any
     // event that knocks a module out of it -- a command-mode round trip, a glitch on the
     // rail, the module's own watchdog -- silently ended the energy stream until the next
     // reflash. The live view then showed data frozen minutes in the past.
     if (millis() - gRadarSeen[h] > 15000) {
+      // Same blocking cost as the probe above, same backoff for the same reason: a head that
+      // accepts commands but never streams (one of the two here behaves that way) would
+      // otherwise pay ~2.4 s of stalled loop every 20 s for the life of the node.
       static uint32_t lastRearm[2] = { 0, 0 };
-      if (millis() - lastRearm[h] > 20000) {
+      static uint32_t rearmBackoff[2] = { 20000, 20000 };
+      if (millis() - lastRearm[h] > rearmBackoff[h]) {
         lastRearm[h] = millis();
+        rearmBackoff[h] = (rearmBackoff[h] < 600000) ? rearmBackoff[h] * 2 : 600000;
         Serial.printf("[rd03] head%d silent for >15s — re-arming reporting mode\n", h + 1);
         gRadarStream[h] = rd03::enableReporting(*io, h == 0 ? "head1" : "head2");
-        if (gRadarStream[h]) gRadarSeen[h] = millis();
+        if (gRadarStream[h]) { gRadarSeen[h] = millis(); rearmBackoff[h] = 20000; }
       }
     }
 

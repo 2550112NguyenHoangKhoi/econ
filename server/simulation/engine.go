@@ -2443,7 +2443,11 @@ func (e *Engine) tick(dt float64) {
 	{
 		now := time.Now()
 		for _, z := range e.Zones {
-			if z.MqttTopic == "" || !z.Live {
+			// hwFresh(), not Live. Live is sticky -- it means "real occupancy has been seen
+			// at some point" and never goes false -- so gating on it fed the fusion a frozen
+			// Occupancy value for as long as a dead node stayed dead, and it went on
+			// reporting a presence state derived from telemetry that stopped arriving.
+			if z.MqttTopic == "" || !z.Live || !z.hwFresh() {
 				continue
 			}
 			if z.Presence == nil {

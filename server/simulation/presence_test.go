@@ -109,3 +109,24 @@ func TestImplausibleCo2SlopeDoesNotDispute(t *testing.T) {
 			p.SlopePpmMin)
 	}
 }
+
+// Losing the CO2 sensor mid-decay must not strand a zone in "departing" forever. Radar alone
+// is weak evidence, but a beam clear for a full window is enough to call the room empty.
+func TestDepartingFallsBackToVacantWithoutCo2(t *testing.T) {
+	p := &PresenceFusion{}
+	now := time.Now()
+	// Occupied, then the person leaves and CO2 decays -> departing.
+	now = drive(p, now, 300, true, func(i int) float64 { return 800 + float64(i)*0.5 })
+	now = drive(p, now, 200, false, func(i int) float64 { return 830 - float64(i)*0.4 })
+	if p.State != PresenceDeparting {
+		t.Fatalf("setup: expected departing, got %q", p.State)
+	}
+	// CO2 sensor now stops reporting entirely; radar stays clear for 10 minutes.
+	for i := 0; i < 120; i++ {
+		p.Update(now, false, 0, false, time.Time{})
+		now = now.Add(5 * time.Second)
+	}
+	if p.State != PresenceVacant {
+		t.Fatalf("beam clear 10min with no CO2 must reach vacant, stuck in %q", p.State)
+	}
+}
