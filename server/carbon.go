@@ -539,15 +539,19 @@ func (t *CarbonTracker) Snapshot(engine *simulation.Engine, now time.Time) Susta
 	var plugW, stripW, acW float64
 	var equipList []equipMeasurement
 
-	if engine != nil && len(engine.Zones) > 0 {
+	zoneSnap := map[string]*simulation.ZoneSim{}
+	if engine != nil {
+		zoneSnap = engine.SnapshotZones()
+	}
+	if len(zoneSnap) > 0 {
 		var zoneIds []string
-		for id := range engine.Zones {
+		for id := range zoneSnap {
 			zoneIds = append(zoneIds, id)
 		}
 		sort.Strings(zoneIds)
 
 		for _, id := range zoneIds {
-			z := engine.Zones[id]
+			z := zoneSnap[id]
 
 			// Plug draw
 			pW := 0.0
@@ -724,18 +728,24 @@ func computeSpaceUtilization(engine *simulation.Engine) SpaceUtilizationData {
 	data := SpaceUtilizationData{
 		Zones: make([]ZoneSpaceUtilization, 0),
 	}
-	if engine == nil || len(engine.Zones) == 0 {
+	if engine == nil {
+		return data
+	}
+	// One consistent snapshot: ranging the live map and re-indexing it afterwards raced
+	// ReloadBuilding and crashed the engine on a nil zone. See Engine.SnapshotZones.
+	zoneSnap := engine.SnapshotZones()
+	if len(zoneSnap) == 0 {
 		return data
 	}
 
 	var zoneIds []string
-	for id := range engine.Zones {
+	for id := range zoneSnap {
 		zoneIds = append(zoneIds, id)
 	}
 	sort.Strings(zoneIds)
 
 	for _, id := range zoneIds {
-		z := engine.Zones[id]
+		z := zoneSnap[id]
 		areaPerPerson, occupiable := getDesignAreaPerOccupant(z.Type)
 		if !occupiable || areaPerPerson <= 0 {
 			// Exclude non-occupiable service zones (corridor, wet-core, plant-room, store, etc.)
