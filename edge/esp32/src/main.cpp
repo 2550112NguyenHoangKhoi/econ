@@ -133,6 +133,10 @@ static bool gRadarAlive[2] = { true, true };
 // presence -- not UART liveness, which is a separate channel, and not blind trust, which
 // publishes a floating pin's pull-up as occupancy.
 static bool gOt2Driven[2] = { true, true };
+// Set when the OT2 pull test sees a pin come back to life. The UART probe is expensive and
+// backed off, but OT2 turning driven is free proof the head has power again -- so it is used
+// to cut the backoff short rather than making a visibly-recovered head wait out the ceiling.
+static bool gRadarMaybeBack[2] = { false, false };
 
 // Re-test whether an OT2 pin is driven. The Rd-03 needs ~30 s after power-up before its
 // output stage is live, and the boot probe runs long before that -- so a cold start reads an
@@ -2330,6 +2334,7 @@ void loop() {
         lastPull[h] = millis();
         if (ot2PullTest(otPin)) {
           gOt2Driven[h] = true;
+          gRadarMaybeBack[h] = true;   // cut the UART backoff short: this head has power
           Serial.printf("[mmwave] RD03-%d OT2 on GPIO%u is now DRIVEN — head warmed up, "
                         "presence restored\n", h + 1, (unsigned)otPin);
         }
@@ -2356,6 +2361,13 @@ void loop() {
       // almost nothing.
       static uint32_t lastProbe[2] = { 0, 0 };
       static uint32_t probeBackoff[2] = { 30000, 30000 };
+      if (gRadarMaybeBack[h]) {
+        // Independent evidence the head is powered. Retry now instead of waiting out a
+        // backoff that exists only to stop us hammering a head that is genuinely absent.
+        gRadarMaybeBack[h] = false;
+        probeBackoff[h] = 30000;
+        lastProbe[h] = 0;
+      }
       if (io && millis() - lastProbe[h] > probeBackoff[h]) {
         lastProbe[h] = millis();
         probeBackoff[h] = (probeBackoff[h] < 600000) ? probeBackoff[h] * 2 : 600000;
