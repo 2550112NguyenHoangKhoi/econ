@@ -899,7 +899,18 @@ function GateProfile({ gates, at, label }) {
   // than a person. Labelled as what it is.
   let peakGate = -1;
   gates.forEach((v, g) => { if (v >= 0 && (peakGate < 0 || v > gates[peakGate])) peakGate = g; });
+
+  // The lowest bin the module is willing to report. Everything below it is blanked, so a
+  // target nearer than that has nowhere to land except this bin -- point the head at
+  // something 30cm away and the peak still shows up here.
+  //
+  // When the peak IS that floor bin, its midpoint is NOT a measurement: the target is
+  // somewhere between zero and the TOP of the bin. Printing "1.75 m" in that case reports a
+  // limit of the display as though it were a distance, which is how this readout misled us.
+  const floorGate = gates.findIndex((v) => v >= 0);
+  const atFloor = peakGate >= 0 && peakGate === floorGate && floorGate > 0;
   const peakM = peakGate >= 0 ? mid(peakGate) : null;
+  const floorTopM = floorGate >= 0 ? (floorGate + 1) * GATE_M : null;
 
   return (
     <div style={{ opacity: stale ? 0.4 : 1 }}>
@@ -911,10 +922,20 @@ function GateProfile({ gates, at, label }) {
           {stale ? 'stale' : `peak ${peak.toLocaleString()}`}
         </span>
         {!stale && peakM !== null && (
-          <span style={{ fontSize: 11, color: '#f59e0b', fontWeight: 700 }}>
-            strongest return @ {peakM.toFixed(2)} m
-            <span style={{ color: '#6b7280', fontWeight: 400 }}> (gate {peakGate})</span>
-          </span>
+          atFloor ? (
+            <span style={{ fontSize: 11, color: '#f59e0b', fontWeight: 700 }}>
+              strongest return &le; {floorTopM.toFixed(1)} m
+              <span style={{ color: '#6b7280', fontWeight: 400 }}>
+                {' '}(gate {peakGate} is the nearest reportable bin &mdash; anything closer is
+                blanked, so this is a floor, not a distance)
+              </span>
+            </span>
+          ) : (
+            <span style={{ fontSize: 11, color: '#f59e0b', fontWeight: 700 }}>
+              strongest return @ {peakM.toFixed(2)} m
+              <span style={{ color: '#6b7280', fontWeight: 400 }}> (gate {peakGate})</span>
+            </span>
+          )
         )}
       </div>
       <svg width={gates.length * (W + GAP)} height={H + 20}
@@ -952,6 +973,12 @@ function GateProfile({ gates, at, label }) {
         The <span style={{ color: '#f59e0b' }}>amber</span> bin holds the most energy &mdash; that is
         the strongest <em>reflector</em>, not necessarily a person: a wall returns more than a body,
         and energy falls off steeply with range.
+        {floorGate > 0 && (
+          <> The module is blanking everything below{' '}
+            <strong>{(floorGate * 0.7).toFixed(1)}&nbsp;m</strong>, so this head cannot report a
+            target nearer than that at all &mdash; near objects pile into the first live bin.
+          </>
+        )}
       </div>
     </div>
   );
