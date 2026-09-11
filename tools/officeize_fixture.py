@@ -38,6 +38,14 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 FIXTURE = ROOT / "server" / "data" / "building-data.json"
+# The dashboard bundles its own copy of the fixture as the offline fallback it renders
+# when the engine cannot be reached (see dashboard/src/buildingStore.js). That copy was
+# taken from the RAW segmenter output once and never regenerated, so it sat four months
+# behind this script: the engine served 735 officeized zones while any dashboard that
+# missed the fetch rendered the original 1350, complete with 555 "server rooms", a
+# 1110-entry fault-target list and the 15 MW this script exists to correct. A mirror
+# nothing regenerates is a mirror that drifts, so it is written here.
+DASHBOARD_FIXTURE = ROOT / "dashboard" / "src" / "building-data.json"
 LIBRARY = ROOT / "server" / "data" / "programme-library.json"
 RAW_BACKUP = FIXTURE.with_suffix(".json.digitizer-raw")
 
@@ -274,8 +282,11 @@ def build(doc, lib, write):
         if not RAW_BACKUP.exists():
             shutil.copy(FIXTURE, RAW_BACKUP)
             print("\nraw digitizer output preserved at %s" % RAW_BACKUP.name)
-        FIXTURE.write_text(json.dumps(doc, separators=(",", ":")))
+        payload = json.dumps(doc, separators=(",", ":"))
+        FIXTURE.write_text(payload)
+        DASHBOARD_FIXTURE.write_text(payload)
         print("wrote %s" % FIXTURE.relative_to(ROOT))
+        print("wrote %s  (dashboard offline fallback)" % DASHBOARD_FIXTURE.relative_to(ROOT))
     else:
         print("\n(dry run -- pass --write to apply)")
 
