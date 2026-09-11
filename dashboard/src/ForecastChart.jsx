@@ -272,7 +272,10 @@ export default function ForecastChart({
           <LineChart
             className="forecast-chart"
             data={chartData}
-            margin={{ top: 6, right: 8, bottom: 0, left: -22 }}
+            // left was -22, which pulled the Y axis off the left edge. That was survivable
+            // while the ticks were bare numbers; once they carried a unit the numeric part
+            // was clipped away and the axis read "MW MW MW MW kW".
+            margin={{ top: 6, right: 8, bottom: 0, left: 2 }}
           >
             <XAxis
               dataKey="t"
@@ -286,7 +289,7 @@ export default function ForecastChart({
               tickLine={false}
               axisLine={false}
               domain={yDomain}
-              width={46}
+              width={38}
               // The domain is fitted to the data (lo - pad, hi + pad), so its bounds are
               // arbitrary reals and Recharts derives equally arbitrary ticks from them.
               // With no formatter it printed them at full float precision —
@@ -296,7 +299,16 @@ export default function ForecastChart({
               // powerMw is the same formatter the header and the legend below use, so the
               // axis now agrees with the figures printed beside it instead of contradicting
               // them, and picks W / kW / MW to suit the magnitude.
-              tickFormatter={(v) => powerMw(v)}
+              // Numeric only. powerMw would repeat "MW" on every tick, which costs the width
+              // the numbers need in a 300 px card; the unit is stated once in the header and
+              // again on each legend row. Precision follows the span so a narrow band does
+              // not collapse to five identical labels.
+              tickFormatter={(v) => {
+                const [lo, hi] = yDomain;
+                const span = (typeof hi === 'number' && typeof lo === 'number') ? hi - lo : 0;
+                const digits = span >= 1 ? 1 : span >= 0.1 ? 2 : 3;
+                return Number(v).toFixed(digits);
+              }}
             />
             <Tooltip
               contentStyle={{
