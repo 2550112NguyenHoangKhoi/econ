@@ -1,7 +1,7 @@
 // ============================================================================
 // flowfield.js — physically-constrained HVAC airflow for one floor.
 //
-// The old AirflowVectorField just radiated air from each zone centroid, ignoring
+// An earlier vector-field renderer just radiated air from each zone centroid, ignoring
 // the room layout. This module builds a real 2D flow domain from the floor's
 // geometry — walls (zone boundaries + envelope), doorways (shared-edge openings),
 // windows (perimeter relief), supply diffusers (VAVs), return grilles (the core/
@@ -10,7 +10,8 @@
 // doorways, converges on the returns, and leaks at windows, never crossing a wall.
 //
 // Pure JS (no React/three) so it can be unit-reasoned about and memoized. The
-// React layer (ConstrainedAirflow.jsx) only renders what this returns.
+// React layers (ConstrainedAirflow3D.jsx, FloorInfrastructure.jsx) only render what this
+// returns.
 //
 // Coordinate frame matches the 3D zones exactly: local (x, z) = (px - 20, 20 - py),
 // so everything lines up with BuildingModel/AirflowWindow without a second mapping.

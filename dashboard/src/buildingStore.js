@@ -22,6 +22,10 @@ let homeData = bundledHome;
 let live = false;
 const listeners = new Set();
 
+// The last building-switch failure, or null. Kept so a panel can show "could not switch,
+// still on X" in the page instead of a modal that stops the page.
+let lastSwitchError = null;
+
 export function isMultiLevelBuilding(b) {
   return Boolean(
     b &&
@@ -84,6 +88,7 @@ export async function setBuildingModelType(type, options = {}) {
     return getBuilding();
   }
 
+  lastSwitchError = null;
   const prevModelType = activeModelType;
   const prevTowerData = towerData;
   const prevHomeData = homeData;
@@ -149,16 +154,33 @@ export async function setBuildingModelType(type, options = {}) {
     homeData = prevHomeData;
     live = prevLive;
     
-    // Show error
-    alert(`Failed to switch building model. Reverting to ${prevModelType}.`);
-    
+    // Report the failure WITHOUT alert().
+    //
+    // alert() is a modal: it suspends the page until someone clicks OK. On an operator
+    // console that is streaming telemetry at 30 fps that is the wrong instrument — the
+    // twin freezes behind the dialog, and on a wall display nobody is there to dismiss
+    // it. It also silently wedged the verify_*.js suites: puppeteer does not auto-accept
+    // dialogs, so the modal raised by one failed switch blocked every later evaluation
+    // and the run died on protocol timeouts that looked like a hang in the 3D scene.
+    // Under Node it was worse still — `alert` is not defined there, so the error handler
+    // itself threw a ReferenceError and took the whole process down.
+    //
+    // The revert above already put the UI back on a coherent building. Listeners are told
+    // about it, and now carry the error so a panel can surface it in place.
+    lastSwitchError = error;
+    console.error(`[building] switch to "${type}" failed; reverted to ${prevModelType}:`, error);
+
     // Notify listeners of the revert
     listeners.forEach((fn) => {
-      try { fn(getBuilding(), activeModelType); } catch (e) { console.error(e); }
+      try { fn(getBuilding(), activeModelType, error); } catch (e) { console.error(e); }
     });
   }
 
   return getBuilding();
+}
+
+export function getLastBuildingSwitchError() {
+  return lastSwitchError;
 }
 
 export function subscribeBuildingChange(fn) {

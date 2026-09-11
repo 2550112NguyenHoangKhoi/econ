@@ -1167,7 +1167,7 @@ Everything outside this diagram is in A.6 or A.7.
 `flowfield.js`, `floorGeometry.js`, `buildingStore.js`, `telemetry.ts`. Boundaries:
 `ErrorBoundary`, `UIErrorBoundary`, `CanvasErrorBoundary`.
 
-**Orphaned — no importer:**
+**Removed — earlier airflow iterations, deleted 2026-09-12 (1,171 lines):**
 
 | File | Superseded by |
 |---|---|
@@ -1175,9 +1175,16 @@ Everything outside this diagram is in A.6 or A.7.
 | `AirflowField.jsx`, `AirflowVectorField.jsx`, `VectorFieldFlow.jsx` | `flowfield3d.js` masked Poisson solve |
 | `WindSimulation.jsx` | `LiveWeatherBackground.jsx` |
 
-These are earlier iterations of the airflow visualization, retained because they document the
-progression from cosmetic particles to a physically-constrained field. They are dead code in
-the shipped bundle.
+These documented the progression from cosmetic particles to a physically-constrained field,
+and were kept for that reason long after nothing imported them. The table is the part worth
+keeping; the files were not, and carrying 1,171 lines of unreachable code so that a lineage
+could be read off the filesystem is the cost this entry was quietly paying. Git history holds
+them if the progression ever needs reading in full.
+
+Verified unreferenced before removal — no static import, no dynamic import, no JSX usage, no
+string reference anywhere in the repo — and nothing became newly orphaned by their removal.
+The three surviving mentions were prose in comments, which were corrected rather than left
+pointing at files that no longer exist.
 
 #### A.4.1 Dashboard audit, 2026-08-21
 

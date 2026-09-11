@@ -69,8 +69,8 @@ prior, not the answer.
   identified rooms; that is expected, not a bug.
 - **Code that exists is not code that runs.** Several complete, working modules have no
   caller: the YOLOv11 symbol detector (trained, mAP@50 69.5%) is never invoked by the
-  digitizer; `/api/rooms/models` and `/api/forecast/load` have no dashboard consumer; five
-  dashboard airflow components are orphaned; `backend/core_engine/` has **zero references
+  digitizer; `/api/rooms/models` and `/api/forecast/load` have no dashboard consumer;
+  `backend/core_engine/` has **zero references
   anywhere** and was superseded by the Go engine. PAPER.md Appendix A is the full list —
   consult it before extending something that may already be dead.
   *(`acW` and `lux` were listed here as dead. They are not, and have not been for a while:

@@ -55,7 +55,7 @@ function LayerChip({ label, on, onClick, color }) {
 }
 
 // Standalone, resizable airflow viewer — its own panel + WebGL canvas (like the topology
-// window). Renders the layout-constrained supply-air field (ConstrainedAirflow): a Manim
+// window). Renders the layout-constrained supply-air field (ConstrainedAirflow3D): a Manim
 // arrow field + tracer streams that respect walls, doors, windows, diffusers, returns and
 // occupants, instead of the old "radiate from every centroid" approximation.
 export default function AirflowWindow({ floor, activeFloor, simState, size, setSize, onClose, bottom = 90, right = 24 }) {
