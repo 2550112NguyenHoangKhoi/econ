@@ -24,7 +24,10 @@ fi
 
 # Prefer the broker image's own mosquitto_passwd so the hash format always matches the
 # broker that will read it, rather than whatever happens to be installed on this laptop.
-gen() { LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32; }
+# Subshell body, so `set +o pipefail` stays local: head(1) exits after 32 bytes and
+# SIGPIPEs tr, which under the script's `set -o pipefail` aborts the whole run. That
+# made credential minting fail intermittently depending on how fast tr was scheduled.
+gen() ( set +o pipefail; LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32 )
 
 ENGINE_PW=$(gen); NODE_PW=$(gen); GATEWAY_PW=$(gen)
 
@@ -33,7 +36,14 @@ if command -v mosquitto_passwd >/dev/null 2>&1; then
   RUN() { mosquitto_passwd "$@"; }
 elif command -v docker >/dev/null 2>&1; then
   echo "mosquitto_passwd not installed locally — using the eclipse-mosquitto image."
-  RUN() { docker run --rm -i -v "$PWD/mosquitto:/m" eclipse-mosquitto:2 mosquitto_passwd "${@/mosquitto\//\/m\/}"; }
+  # Rewrite the host-side mosquitto/ prefix to the container mount point. The
+  # replacement must not be backslash-escaped: bash keeps those backslashes
+  # literally, which produced "\/m\/passwd" and a file the broker could not open.
+  RUN() {
+    local args=() a
+    for a in "$@"; do args+=( "${a/#mosquitto\///m/}" ); done
+    docker run --rm -i -v "$PWD/mosquitto:/m" eclipse-mosquitto:2 mosquitto_passwd "${args[@]}"
+  }
 else
   echo "ERROR: need either mosquitto_passwd or docker to hash the passwords." >&2
   exit 1

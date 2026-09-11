@@ -27,6 +27,8 @@
 #include <WiFi.h>
 #include <WiFiUdp.h>
 #include <PubSubClient.h>
+#include <Preferences.h>
+#include <ESPmDNS.h>
 #include <ArduinoJson.h>
 void readAndPublish();
 
@@ -400,12 +402,108 @@ bool  lightsOn = true;
 float hvacSetpointC = 24.0;
 
 // ---------------- WIFI ----------------
+// Bounded, and never fatal. The USB serial console in loop() is the only way to
+// provision new credentials, so setup() must not block forever on the old ones:
+// a node carried to a new site would print dots until reset and never answer
+// "[wifi] scan". If the join times out we continue offline -- loop() already
+// retries MQTT every 5 s, so the node recovers on its own once WiFi returns.
+static const unsigned long WIFI_CONNECT_TIMEOUT_MS = 20000;
+
+// Provisioning is stored in NVS, not compiled in. wifi_secrets.h pins the node to
+// one network and one laptop IP; move either and the node is bricked until someone
+// reflashes it. The values there are now only the factory default -- whatever is
+// provisioned over USB wins and survives a power cycle.
+//
+// gMqttHost may hold either a literal IP or an mDNS name ("Khois-MacBook-Air.local").
+// A name is what makes this portable: every macOS and most Linux boxes advertise
+// <hostname>.local over Bonjour, so the node finds the engine on any network it
+// joins without anyone having to look up a DHCP address first.
+Preferences gPrefs;
+char gWifiSsid[64];
+char gWifiPass[64];
+char gMqttHost[64];
+
+// Resolved broker address. Re-resolved whenever the host string changes or a
+// connection attempt fails, because a laptop's DHCP lease moves.
+IPAddress gBrokerIp;
+bool      gBrokerResolved = false;
+
+void loadProvisioning() {
+  gPrefs.begin("econ", false);
+  String ssid = gPrefs.getString("ssid", WIFI_SSID);
+  String pass = gPrefs.getString("pass", WIFI_PASS);
+  String host = gPrefs.getString("mqtt", MQTT_HOST);
+  snprintf(gWifiSsid, sizeof(gWifiSsid), "%s", ssid.c_str());
+  snprintf(gWifiPass, sizeof(gWifiPass), "%s", pass.c_str());
+  snprintf(gMqttHost, sizeof(gMqttHost), "%s", host.c_str());
+  Serial.printf("[prov] ssid=\"%s\" broker=\"%s\"%s\n", gWifiSsid, gMqttHost,
+                gPrefs.isKey("ssid") ? " (from NVS)" : " (factory default)");
+}
+
+void saveWifiProvisioning(const char* ssid, const char* pass) {
+  snprintf(gWifiSsid, sizeof(gWifiSsid), "%s", ssid);
+  snprintf(gWifiPass, sizeof(gWifiPass), "%s", pass);
+  gPrefs.putString("ssid", ssid);
+  gPrefs.putString("pass", pass);
+}
+
+void saveBrokerProvisioning(const char* host) {
+  snprintf(gMqttHost, sizeof(gMqttHost), "%s", host);
+  gPrefs.putString("mqtt", host);
+  gBrokerResolved = false; // force a fresh lookup against the new name
+}
+
+// Turn gMqttHost into an address. A literal IP is used as-is; anything else is
+// treated as an mDNS name and queried over Bonjour. Returns false when the name
+// cannot be resolved yet -- the caller simply retries on its normal cadence.
+bool resolveBroker() {
+  if (gBrokerResolved) return true;
+  IPAddress parsed;
+  if (parsed.fromString(gMqttHost)) {
+    gBrokerIp = parsed;
+    gBrokerResolved = true;
+    return true;
+  }
+  if (WiFi.status() != WL_CONNECTED) return false;
+
+  // Strip a trailing ".local" -- queryHost() wants the bare hostname.
+  String name(gMqttHost);
+  if (name.endsWith(".local")) name = name.substring(0, name.length() - 6);
+  IPAddress found = MDNS.queryHost(name.c_str(), 2000);
+  if (found != IPAddress((uint32_t)0)) {
+    gBrokerIp = found;
+    gBrokerResolved = true;
+    Serial.printf("[mqtt] resolved %s -> %s via mDNS\n", gMqttHost, gBrokerIp.toString().c_str());
+    return true;
+  }
+  Serial.printf("[mqtt] could not resolve \"%s\" over mDNS yet\n", gMqttHost);
+  return false;
+}
+
+// Set when the USB console hands over new credentials: WiFi.begin() is asynchronous,
+// so the join result has to be collected back in loop() instead of blocking here.
+bool          gWifiJoinPending   = false;
+unsigned long gWifiJoinStartedMs = 0;
+char          gPendingSsid[64]   = {0};
+char          gPendingPass[64]   = {0};
+
 void setupWifi() {
   WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASS);
-  Serial.printf("[wifi] connecting to %s", WIFI_SSID);
-  while (WiFi.status() != WL_CONNECTED) { delay(400); Serial.print("."); }
-  Serial.printf("\n[wifi] connected, ip=%s\n", WiFi.localIP().toString().c_str());
+  WiFi.begin(gWifiSsid, gWifiPass);
+  Serial.printf("[wifi] connecting to %s", gWifiSsid);
+  unsigned long started = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - started < WIFI_CONNECT_TIMEOUT_MS) {
+    delay(400);
+    Serial.print(".");
+  }
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.printf("\n[wifi] connected, ip=%s\n", WiFi.localIP().toString().c_str());
+    MDNS.begin(CLIENT_ID); // also lets the node be found by name from the engine side
+  } else {
+    Serial.printf("\n[wifi] not connected after %lu s -- continuing offline.\n",
+                  WIFI_CONNECT_TIMEOUT_MS / 1000);
+    Serial.println("[wifi] provision over USB: \"[wifi] scan\", then \"[wifi] connect \\\"SSID\\\" \\\"PASS\\\"\"");
+  }
 }
 
 // ---------------- HVAC IR ----------------
@@ -958,7 +1056,9 @@ void readAndPublish() {
 
 // ---------------- MQTT CONNECT ----------------
 bool mqttConnect() {
-  Serial.print("[mqtt] connecting...");
+  if (!resolveBroker()) return false;
+  client.setServer(gBrokerIp, MQTT_PORT);
+  Serial.printf("[mqtt] connecting to %s (%s)...", gMqttHost, gBrokerIp.toString().c_str());
   // LWT: broker publishes "offline" (retained) on STATUS_TOPIC if this node drops.
   //
   // Credentials come from wifi_secrets.h (MQTT_USER / MQTT_PASS), because the shipped
@@ -1176,11 +1276,13 @@ void setup() {
   snprintf(CONFIG_STATE_TOPIC, sizeof(CONFIG_STATE_TOPIC), "econ/config/%s/state", ZONE_TOPIC);
   snprintf(CLIENT_ID,          sizeof(CLIENT_ID),          "econ-esp32-%s",       ZONE_TOPIC);
 
+  loadProvisioning();
   setupWifi();
 #if USE_CAMERA
   streamServer.begin();
 #endif
-  client.setServer(MQTT_HOST, MQTT_PORT);
+  // The server is set in mqttConnect() once the host has been resolved: at this
+  // point an mDNS name may not have an address yet.
   client.setBufferSize(768);
   client.setCallback(onMessage);
 
@@ -1209,17 +1311,18 @@ void loop() {
       WiFi.disconnect(true, true);
       delay(100);
       int n = WiFi.scanNetworks(false, true); // sync, show hidden
-      Serial.println("[wifi] scan done");
       if (n == 0) {
         Serial.println("[wifi] scanned: no networks found");
-      
-} else if (n < 0) {
+      } else if (n < 0) {
         Serial.printf("[wifi] scanned: failed with code %d\n", n);
       } else {
         for (int i = 0; i < n; ++i) {
           Serial.printf("[wifi] scanned: \"%s\"\n", WiFi.SSID(i).c_str());
         }
       }
+      // Emitted last: the dashboard clears its "Scanning..." state on this line,
+      // so it must arrive after every result, not before.
+      Serial.println("[wifi] scan done");
     } else if (line.startsWith("[wifi] connect ")) {
       String payload = line.substring(15);
       payload.trim();
@@ -1266,6 +1369,22 @@ void loop() {
         Serial.printf("[wifi] received new credentials: %s\n", current_ssid.c_str());
         WiFi.disconnect();
         WiFi.begin(current_ssid.c_str(), current_pass.c_str());
+        // Report the outcome from loop(): without this the console says "received"
+        // and then nothing, so a wrong password is indistinguishable from success.
+        snprintf(gPendingSsid, sizeof(gPendingSsid), "%s", current_ssid.c_str());
+        snprintf(gPendingPass, sizeof(gPendingPass), "%s", current_pass.c_str());
+        gWifiJoinPending   = true;
+        gWifiJoinStartedMs = millis();
+      }
+    } else if (line.startsWith("[mqtt] host ")) {
+      String host = line.substring(12);
+      host.trim();
+      if (host.length() > 0 && host.length() < sizeof(gMqttHost)) {
+        client.disconnect();
+        saveBrokerProvisioning(host.c_str());
+        Serial.printf("[mqtt] broker set to %s:%d (saved)\n", gMqttHost, MQTT_PORT);
+      } else {
+        Serial.println("[mqtt] host rejected: empty or too long");
       }
     } else if (line.startsWith("[mqtt] sub ")) {
       int arrowIdx = line.indexOf(" -> ");
@@ -1299,6 +1418,26 @@ void loop() {
     if (currentDetected != lastPirDetectedState) {
       lastPirDetectedState = currentDetected;
       broadcastTrackingTelemetry(currentDetected);
+    }
+  }
+
+  // Collect the result of a USB-provisioned join. WiFi.begin() is asynchronous and
+  // the console is the only feedback channel the installer has.
+  if (gWifiJoinPending) {
+    if (WiFi.status() == WL_CONNECTED) {
+      gWifiJoinPending = false;
+      // Only persist credentials that demonstrably work, so a typo cannot leave the
+      // node preferring a network it can never join.
+      saveWifiProvisioning(gPendingSsid, gPendingPass);
+      MDNS.begin(CLIENT_ID);
+      gBrokerResolved = false; // new network, new address for the broker name
+      Serial.printf("[wifi] connected, ip=%s (saved)\n", WiFi.localIP().toString().c_str());
+      Serial.printf("[wifi] broker is \"%s\" -- use \"[mqtt] host <ip-or-name.local>\" to repoint it\n",
+                    gMqttHost);
+    } else if (millis() - gWifiJoinStartedMs > WIFI_CONNECT_TIMEOUT_MS) {
+      gWifiJoinPending = false;
+      Serial.printf("[wifi] join failed (status=%d) -- wrong password, or the network is out of range\n",
+                    (int)WiFi.status());
     }
   }
 
