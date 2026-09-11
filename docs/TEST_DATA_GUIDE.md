@@ -104,7 +104,7 @@ docker exec econ-mqtt-1 mosquitto_pub -t econ/telemetry/zone_1 -m '{"zone":"Leve
   dynamically — nothing should be constant/hard-coded.
 
 ## 6. Verify in the dashboard
-Start the preview (`.claude/launch.json` server `dashboard`, port 5188) and confirm via the preview
+Start the preview (`.claude/launch.json` server `dashboard`, port 5173) and confirm via the preview
 tools (never ask the user): console is error-free, the 3D model renders all floors, the topology
 shows the new zones/edges, and triggering a fault visibly reddens the targeted server room. Decode
 a WS frame to assert the metrics are live (see `BACKEND_ARCHITECTURE.md` §3).

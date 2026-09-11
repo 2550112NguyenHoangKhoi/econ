@@ -34,7 +34,7 @@ The Go engine is the **single brain**. (The Python `raspberry_backend/server.py`
 | **Core engine** | `econ/server/` | Go 1.22 | WS+HTTP `:8080` | MQTT broker, dashboard |
 | **MQTT broker** | `eclipse-mosquitto:2` (compose) | — | `:1883` | engine, edge nodes |
 | **TimescaleDB** | compose service `db` | — | `:5432` | engine `db.go` (history persist + `/api/history`) |
-| **Dashboard** | `econ/dashboard/` | React/Vite | dev `:5188` | engine WS+HTTP |
+| **Dashboard** | `econ/dashboard/` | React/Vite | dev `:5173` | engine WS+HTTP |
 | **ESP32 node** | `econ/edge/esp32/` / `esp32_node/` | C++/Arduino | — | MQTT broker |
 | **Pico node** | `econ/edge/pico/` | MicroPython (+ host `bridge.py`) | — | USB serial → MQTT broker (Pico W: WiFi direct) |
 | **YOLO tracker** | `econ/ai_modules/branch_a_occupancy/yolo_bytetrack/yolo_tracker.py` | Python | — | MQTT broker |
@@ -163,7 +163,7 @@ SimState  { timestamp:long; zones:[ZoneData]; vavs:[VavData]; ahus:[AhuData]; gl
   ```
   (Pin deps to Go 1.22-compatible versions — e.g. `paho.mqtt.golang v1.4.3`; v1.5+ needs Go 1.24.)
 - **Docker Desktop sometimes stops.** If `docker` errors with "cannot connect to the daemon", run `open -ga Docker`, wait ~30–60 s, retry.
-- **Dashboard:** preview via `.claude/launch.json` (server name `dashboard`, port 5188, `--prefix econ/dashboard`). Verify in the preview (console must be error-free; screenshot; `eval` to assert values), never by asking the user.
+- **Dashboard:** preview via `.claude/launch.json` (server name `dashboard`, port 5173, `--prefix econ/dashboard`). Verify in the preview (console must be error-free; screenshot; `eval` to assert values), never by asking the user.
 
 ### 6.1 Test the full loop WITHOUT hardware
 Mock the CV node with the broker's own clients:

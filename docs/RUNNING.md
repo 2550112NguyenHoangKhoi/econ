@@ -71,10 +71,10 @@ npm run dev
 1. Make sure your mobile phone is connected to the **same Wi-Fi network** as your computer.
 2. Look at the terminal where you ran `npm run dev`. Vite will output something like this:
    ```text
-   ➜  Local:   http://localhost:5188/
-   ➜  Network: http://192.168.x.x:5188/   <--- Use this one!
+   ➜  Local:   http://localhost:5173/
+   ➜  Network: http://192.168.x.x:5173/   <--- Use this one!
    ```
-3. Open Safari or Chrome on your phone, and type in that exact **Network URL** (e.g., `http://192.168.1.5:5188`).
+3. Open Safari or Chrome on your phone, and type in that exact **Network URL** (e.g., `http://192.168.1.5:5173`).
 
 On viewports ≤ 820 px the site automatically serves the live mobile **Impact screen**
 instead of the WebGL-heavy desktop stack: an autonomous-savings donut (streamed

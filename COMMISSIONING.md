@@ -55,7 +55,7 @@ cd econ/server && docker compose up -d && go run .
 cd econ/dashboard && npm ci && npm run dev
 ```
 
-Open http://localhost:5188. Paste the admin token from §0 into the dashboard when it asks —
+Open http://localhost:5173. Paste the admin token from §0 into the dashboard when it asks —
 telemetry streams without it, but every command is refused until you do.
 
 Then jump to §7 to verify. Everything below is the full path.
@@ -178,7 +178,7 @@ untrained — the engine degrades to its own statistical forecast and says so.
 cd econ/dashboard && npm ci && npm run dev
 ```
 
-**Test:** open http://localhost:5188.
+**Test:** open http://localhost:5173.
 
 **Pass:** the 3D building renders and the header shows a load figure.
 
@@ -192,12 +192,12 @@ its mobile UI rather than the desktop one.
 ipconfig getifaddr en0        # macOS: the address to type on the phone
 ```
 
-Then browse to `http://<that address>:5188`.
+Then browse to `http://<that address>:5173`.
 
 Two things make this work, and both are already in place:
 
 - **The dashboard derives the engine host from the page URL** (`src/api.js`), so a phone at
-  `http://192.168.1.20:5188` calls the API and WebSocket at `192.168.1.20:8080`. Hard-coding
+  `http://192.168.1.20:5173` calls the API and WebSocket at `192.168.1.20:8080`. Hard-coding
   `localhost` would break exactly here — on the phone, `localhost` is the phone.
 - **The Go engine binds all interfaces** (`:8080`) and sends permissive CORS.
 
