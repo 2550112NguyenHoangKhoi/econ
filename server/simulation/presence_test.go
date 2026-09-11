@@ -162,3 +162,72 @@ func TestConfirmedFlagDoesNotOutliveItsEvidence(t *testing.T) {
 		t.Fatal("co2Confirmed must be false when no slope is resolved")
 	}
 }
+
+// --- BelievedVacant: the predicate the setback and plug sweep actually gate on ---
+
+// The failure this exists for: an Rd-03 whose OT2 output latches HIGH and stays there.
+// Occupancy never drops, so a gate reading it alone never accumulates a vacant tick and
+// the whole savings mechanism is disabled with nothing in telemetry to say so.
+func TestStuckRadarWithDecayingCo2IsEventuallyBelievedVacant(t *testing.T) {
+	z := &ZoneSim{Occupancy: 1, Presence: &PresenceFusion{}}
+	now := time.Now()
+
+	// Radar asserts continuously. CO2 decays throughout: nobody is actually here.
+	now = drive(z.Presence, now, 900, true, func(i int) float64 { return 1400 - float64(i)*1.0 })
+	if z.Presence.State != PresenceDisputed {
+		t.Fatalf("beam held while CO2 decays -> disputed, got %q (slope %.2f)",
+			z.Presence.State, z.Presence.SlopePpmMin)
+	}
+	// The dwell is measured from when disputed was ENTERED, not from the end of the trace --
+	// the beam had already been asserting against a falling slope for minutes before the
+	// state flipped, and that time counts. Anchor the assertions to Since accordingly.
+	since := z.Presence.Since
+	if z.BelievedVacant(since) {
+		t.Fatal("the instant disputed is entered: must NOT yet be treated as vacant")
+	}
+	if z.BelievedVacant(since.Add(disputedActionDelay - time.Minute)) {
+		t.Fatal("one minute short of the dwell: must still not be vacant")
+	}
+	if !z.BelievedVacant(since.Add(disputedActionDelay + time.Second)) {
+		t.Fatal("disputed for the full dwell: should be believed vacant despite Occupancy=1")
+	}
+}
+
+// A real occupant must never be swept, however long they sit still.
+func TestCorroboratedOccupantIsNeverBelievedVacant(t *testing.T) {
+	z := &ZoneSim{Occupancy: 1, Presence: &PresenceFusion{}}
+	now := time.Now()
+	now = drive(z.Presence, now, 900, true, func(i int) float64 { return 700 + float64(i)*0.5 })
+	if z.Presence.State != PresenceOccupied {
+		t.Fatalf("radar + rising CO2 -> occupied, got %q", z.Presence.State)
+	}
+	if z.BelievedVacant(now.Add(time.Hour)) {
+		t.Fatal("an occupant corroborated by respiration must never be believed vacant")
+	}
+}
+
+// No CO2 sensor must leave behaviour exactly as it was: trust the presence sensor.
+func TestBelievedVacantFallsBackToRawSensorWithoutCo2(t *testing.T) {
+	z := &ZoneSim{Occupancy: 1}
+	if z.BelievedVacant(time.Now().Add(24 * time.Hour)) {
+		t.Fatal("no fusion at all: Occupancy>0 must mean not vacant")
+	}
+	z.Presence = &PresenceFusion{}
+	now := time.Now()
+	// Radar held, CO2 never resolves a slope (no samples fresh enough to matter).
+	for i := 0; i < 180; i++ {
+		z.Presence.Update(now, true, 0, false, time.Time{})
+		now = now.Add(5 * time.Second)
+	}
+	if z.BelievedVacant(now.Add(time.Hour)) {
+		t.Fatal("radar asserts and CO2 is unavailable: must not invent vacancy")
+	}
+}
+
+// The ordinary case still works: nothing asserts presence, so it is vacant immediately.
+func TestBelievedVacantWhenNothingAssertsPresence(t *testing.T) {
+	z := &ZoneSim{Occupancy: 0, Presence: &PresenceFusion{}}
+	if !z.BelievedVacant(time.Now()) {
+		t.Fatal("Occupancy=0 must be vacant with no dwell required")
+	}
+}

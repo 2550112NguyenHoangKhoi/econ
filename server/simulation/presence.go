@@ -42,13 +42,13 @@ type co2Sample struct {
 }
 
 const (
-	co2WindowSamples = 48              // ~4 min at the node's 5 s cadence, one per measurement
+	co2WindowSamples = 48 // ~4 min at the node's 5 s cadence, one per measurement
 	// Samples older than this are discarded. Without an age limit the window kept whatever
 	// it last held, so a zone whose CO2 sensor stopped reporting went on producing a
 	// confident slope from minutes-old data -- and a slope computed from a dead sensor is
 	// exactly the fabricated measurement this fusion exists to avoid.
 	co2MaxSampleAge = 6 * time.Minute
-	co2WindowMin     = 90 * time.Second // shortest span that yields a usable slope
+	co2WindowMin    = 90 * time.Second // shortest span that yields a usable slope
 	// One adult emits roughly 18 L/h of CO2. In a small unventilated office that is on the
 	// order of 10 ppm/min; with ventilation, a few. +/-1.5 ppm/min is comfortably outside
 	// sensor noise (the ACD1200 resolves 1 ppm) while still catching a single occupant.
@@ -253,6 +253,46 @@ func (p *PresenceFusion) Update(now time.Time, radarPresent bool, co2 float64, c
 		p.State = next
 		p.Since = now
 	}
+}
+
+// How long PresenceDisputed must persist before vacancy-driven actuation may act on it.
+//
+// Entering disputed already costs disputeAfter (6 min) of the beam asserting while CO2
+// measurably decays. This adds a second dwell on top, because the one way disputed can be
+// wrong is a real occupant in a room that is ventilating faster than they breathe -- a
+// window opened, or the AC catching up. That situation resolves within minutes as the decay
+// finishes; a stuck sensor does not resolve at all. Waiting distinguishes them at the cost
+// of a quarter hour of savings, which is the right side to err on when the alternative is
+// cutting power to an occupied desk.
+const disputedActionDelay = 10 * time.Minute
+
+// BelievedVacant reports whether this zone should be treated as empty for the purposes of
+// setback and the plug sweep.
+//
+// Raw Occupancy is not sufficient on its own, and this node is the proof: both Rd-03 heads
+// latched their OT2 output HIGH and held it for an entire session with the room empty. A
+// gate that reads only Occupancy > 0 therefore never accumulates a vacant tick, never arms
+// the sweep, and never sets back -- the whole savings mechanism silently disabled by one
+// stuck output, with nothing in the telemetry to say so.
+//
+// The fusion exists precisely to catch that: PresenceDisputed means the beam has asserted
+// for minutes while measured CO2 decays, which is evidence of absence that does not depend
+// on the beam being honest. Acting on it is the difference between computing that state and
+// using it.
+//
+// Note what this deliberately does NOT do: it never asserts vacancy from CO2 alone. With no
+// fusion yet, or any state other than disputed, the raw sensor is trusted as before. A
+// missing CO2 sensor leaves behaviour exactly as it was.
+func (z *ZoneSim) BelievedVacant(now time.Time) bool {
+	if z.Occupancy <= 0 {
+		return true
+	}
+	if z.Presence == nil {
+		return false
+	}
+	return z.Presence.State == PresenceDisputed &&
+		!z.Presence.Since.IsZero() &&
+		now.Sub(z.Presence.Since) >= disputedActionDelay
 }
 
 // Confirmed reports whether a human is corroborated by respiration, not merely by the beam.

@@ -98,18 +98,18 @@ type ZoneSim struct {
 	HwHumAt  time.Time // when HwHum arrived; zero = no humidity sensor has ever reported
 	HwCo2    float64   // last measured CO2 (ppm), valid while HwCo2At is fresh
 	// Measured replacements for values the model otherwise assumes.
-	HwSupplyC   float64 // AC discharge temperature (DS18B20) — supersedes supplyAirDesignC
-	HwSupplyAt  time.Time
-	HwAcW       float64 // air-conditioner power (SCT-013) — the real cooling drive term
-	HwAcAt      time.Time
-	HwLux       float64 // ambient illuminance (BH1750) — a real irradiance proxy
-	HwLuxAt     time.Time
-	HwCo2At     time.Time // when HwCo2 arrived; zero = no NDIR sensor has ever reported
+	HwSupplyC  float64 // AC discharge temperature (DS18B20) — supersedes supplyAirDesignC
+	HwSupplyAt time.Time
+	HwAcW      float64 // air-conditioner power (SCT-013) — the real cooling drive term
+	HwAcAt     time.Time
+	HwLux      float64 // ambient illuminance (BH1750) — a real irradiance proxy
+	HwLuxAt    time.Time
+	HwCo2At    time.Time // when HwCo2 arrived; zero = no NDIR sensor has ever reported
 
 	// Derived presence: the radar's assertion corroborated (or disputed) by respiration.
 	// Separate from Occupancy on purpose -- Occupancy stays exactly what the node measured.
-	Presence *PresenceFusion `json:"presence,omitempty"`
-	HwOnline    bool      // broker LWT verdict from econ/status/<topic>
+	Presence    *PresenceFusion `json:"presence,omitempty"`
+	HwOnline    bool            // broker LWT verdict from econ/status/<topic>
 	CameraEvent *string
 	PirState    *bool
 	IrState     *string
@@ -118,11 +118,19 @@ type ZoneSim struct {
 	// real floor area at build time; PlugShed flips when the after-hours sweep cuts the
 	// zone's switchable sockets. HwPlugW/HwPlugAt carry a live SCT-013 clamp reading,
 	// under the same per-field freshness rules as every other sensor.
-	PlugStandbyW          float64
-	PlugShed              bool
-	PlugVacantSince       time.Time // zero while occupied; set at the moment occupancy hits 0
-	HwPlugW               float64
-	HwPlugAt              time.Time
+	PlugStandbyW    float64
+	PlugShed        bool
+	PlugVacantSince time.Time // zero while occupied; set at the moment occupancy hits 0
+	HwPlugW         float64
+	HwPlugAt        time.Time
+	// Actuator state as reported back by the node, with its own arrival time.
+	NodePlugState         string
+	NodePlugAt            time.Time
+	NodeSetpointC         float64
+	NodeSetpointAt        time.Time
+	NodeLightsState       string
+	NodeLightsAt          time.Time
+	plugMismatchLogged    bool
 	HwStripW              float64
 	HwStripAt             time.Time
 	HwCircuitBreakerW     float64
@@ -794,8 +802,13 @@ type Measurement struct {
 	CameraEvent *string
 	PirState    *bool
 	IrState     *string
-	Mock        *bool // explicit mock payload flag
-	Simulated   *bool // explicit simulated payload flag
+	// What the node says it actually applied. The engine knows what it COMMANDED; only
+	// these say whether anything happened. Nil = firmware does not report it.
+	NodeSetpoint *float64
+	NodePlug     *string
+	NodeLights   *string
+	Mock         *bool // explicit mock payload flag
+	Simulated    *bool // explicit simulated payload flag
 }
 
 // IsMock reports whether the measurement represents mock, simulated, or synthetic data.
@@ -907,6 +920,18 @@ func (e *Engine) IngestTelemetry(zoneRef, topicSuffix string, m Measurement) err
 	if m.StripW != nil {
 		z.HwStripW = *m.StripW
 		z.HwStripAt = time.Now()
+	}
+	if m.NodePlug != nil {
+		z.NodePlugState = *m.NodePlug
+		z.NodePlugAt = time.Now()
+	}
+	if m.NodeSetpoint != nil {
+		z.NodeSetpointC = *m.NodeSetpoint
+		z.NodeSetpointAt = time.Now()
+	}
+	if m.NodeLights != nil {
+		z.NodeLightsState = *m.NodeLights
+		z.NodeLightsAt = time.Now()
 	}
 	// Measurements that displace an assumption in the model. Each carries its own
 	// arrival time for the same reason every other field does: a probe that falls out of
@@ -1091,6 +1116,7 @@ func (e *Engine) actuate() {
 }
 
 func (e *Engine) actuateWithDt(dt float64) {
+	actuateNow := time.Now()
 	if dt <= 0 {
 		dt = 0.033
 	}
@@ -1128,7 +1154,14 @@ func (e *Engine) actuateWithDt(dt float64) {
 			}
 			continue // Respect the human-in-the-loop manual override latch
 		}
-		if z.Occupancy <= 0 {
+		// BelievedVacant, not Occupancy: a presence sensor stuck HIGH would otherwise
+		// pin VacantTicks at zero forever and disable setback entirely, silently.
+		if z.BelievedVacant(actuateNow) {
+			if z.Occupancy > 0 && z.VacantTicks == 0 {
+				log.Printf("[presence] zone=%s radar asserts occupancy but CO2 has been "+
+					"decaying for %s — treating as vacant for setback", id,
+					actuateNow.Sub(z.Presence.Since).Round(time.Minute))
+			}
 			z.VacantTicks++
 		} else {
 			z.VacantTicks = 0
@@ -1148,7 +1181,7 @@ func (e *Engine) actuateWithDt(dt float64) {
 			}
 			continue
 		}
-		vacant := z.Occupancy <= 0 && z.VacantTicks >= vacancyDelayTicks
+		vacant := z.BelievedVacant(actuateNow) && z.VacantTicks >= vacancyDelayTicks
 
 		desiredLights := !vacant
 		desiredSp := z.BaseSetpoint

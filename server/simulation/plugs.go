@@ -26,8 +26,10 @@ package simulation
 // zone types (server rooms, mechanical) are never swept.
 //
 import (
+	"log"
 	"math"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -139,6 +141,29 @@ func (z *ZoneSim) plugNowW() (total, standby float64) {
 // plugTick runs the sweep for one engine tick. Called from Start's loop with e.mu
 // held. Savings integrate on wall-clock time (the sim's dt accelerates; avoided
 // kilowatt-hours must not).
+// plugShedContradicted reports whether the node is actively telling us the sockets it was
+// told to shed are still live.
+//
+// Rule 3 of this codebase is that a saving may not be claimed from a mechanism that does not
+// exist, and until now the plug sweep credited kWh purely from z.PlugShed -- the engine's
+// memory of having PUBLISHED a command. A relay wired active-low, a node offline, a coil
+// that never pulled in: all of them accrue exactly the same savings as a circuit that
+// actually opened, and nothing downstream can tell the difference.
+//
+// Deliberately asymmetric. It returns true ONLY on a fresh, positive contradiction. An
+// uninstrumented zone, a firmware too old to echo its plug state, or a node that has gone
+// quiet all leave accounting exactly as it was: those are modelled zones and are accounted
+// as such. What it refuses to do is keep counting when the hardware is on record saying no.
+func (z *ZoneSim) plugShedContradicted(now time.Time) bool {
+	if !z.PlugShed || z.NodePlugState == "" || z.NodePlugAt.IsZero() {
+		return false
+	}
+	if now.Sub(z.NodePlugAt) > hwStaleAfter {
+		return false // the node stopped reporting; silence is not a contradiction
+	}
+	return strings.EqualFold(z.NodePlugState, "ON")
+}
+
 func (e *Engine) plugTick(now time.Time) {
 	dt := now.Sub(e.lastPlugAt).Seconds()
 	e.lastPlugAt = now
@@ -150,7 +175,9 @@ func (e *Engine) plugTick(now time.Time) {
 
 	for _, z := range e.Zones {
 		// Vacancy dwell: real occupancy for instrumented zones, the sim's for the rest.
-		if z.Occupancy > 0 {
+		// Same reason as the setback gate: read believed vacancy, not the raw sensor, so a
+		// presence output stuck HIGH cannot hold the sweep disarmed indefinitely.
+		if !z.BelievedVacant(now) {
 			z.PlugVacantSince = time.Time{}
 		} else if z.PlugVacantSince.IsZero() {
 			z.PlugVacantSince = now
@@ -167,7 +194,7 @@ func (e *Engine) plugTick(now time.Time) {
 		// Vacancy dwell above still updates, so the sweep resumes with correct state the
 		// moment the latch expires.
 		if now.Before(z.OverrideUntil) {
-			if z.PlugShed {
+			if z.PlugShed && !z.plugShedContradicted(now) {
 				e.plugSavedKwh += z.PlugStandbyW * plugSwitchableFrac * dt / 3.6e6
 			}
 			continue
@@ -193,7 +220,16 @@ func (e *Engine) plugTick(now time.Time) {
 			}
 		}
 
-		if z.PlugShed {
+		if z.PlugShed && z.plugShedContradicted(now) {
+			// The node is on record saying the circuit is still live. Say so once per
+			// transition rather than every tick, and credit nothing.
+			if !z.plugMismatchLogged {
+				z.plugMismatchLogged = true
+				log.Printf("[plugs] node=%s commanded SHED but reports plug=%s — "+
+					"crediting no saving until it agrees", z.MqttTopic, z.NodePlugState)
+			}
+		} else if z.PlugShed {
+			z.plugMismatchLogged = false
 			// Conservative accounting: only the switchable standby the sweep actually
 			// turned off, never the active load (which vacancy removed by itself).
 			e.plugSavedKwh += z.PlugStandbyW * plugSwitchableFrac * dt / 3.6e6

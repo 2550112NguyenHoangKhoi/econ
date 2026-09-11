@@ -24,18 +24,18 @@ import (
 // genuinely measured temperature (DHT22 / RP2040 sensor); firmware running with
 // simulated placeholder sensors leaves it false so fake temps never pin the physics.
 type telemetryMsg struct {
-	Zone            string   `json:"zone"`
-	Occupancy       *int     `json:"occupancy"`
-	Occupancy2      *int     `json:"occupancy_2"`
+	Zone       string `json:"zone"`
+	Occupancy  *int   `json:"occupancy"`
+	Occupancy2 *int   `json:"occupancy_2"`
 	// Per-head presence-radar state. Occupancy is the OR of these; these say which head
 	// asserted it, so a head stuck high stays visible instead of hiding behind the OR.
-	Radar1          *int     `json:"radar1"`
-	Radar2          *int     `json:"radar2"`
+	Radar1 *int `json:"radar1"`
+	Radar2 *int `json:"radar2"`
 	// Measured target range in metres from each head's reporting stream. Omitted by the
 	// firmware when there is no target, when the stream stalls, or when the reported range
 	// falls outside the head's own configured gate window.
-	Radar1M         *float64 `json:"radar1_m"`
-	Radar2M         *float64 `json:"radar2_m"`
+	Radar1M *float64 `json:"radar1_m"`
+	Radar2M *float64 `json:"radar2_m"`
 	// Per-range-gate reflected energy, 0.7 m per gate, straight off the head's reporting
 	// stream. -1 marks a gate the module blanks in its near field. This is the only part of
 	// that stream that measures the room, so it is the only part carried through.
@@ -61,6 +61,14 @@ type telemetryMsg struct {
 	CameraEvent     *string  `json:"cameraEvent"`
 	PirState        *bool    `json:"pirState"`
 	IrState         *string  `json:"irState"`
+	// Actuator state as the NODE reports it, not as the engine believes it. These three
+	// were published by the firmware from the beginning and dropped here, which left the
+	// twin with no confirmation loop at all: it issued PLUG_OFF, credited itself the shed
+	// kWh, and never learned whether the relay obeyed. Pointers so "this firmware does not
+	// report it" stays distinct from "it reports OFF".
+	NodeSetpoint *float64 `json:"setpoint"`
+	NodePlug     *string  `json:"plug"`
+	NodeLights   *string  `json:"lights"`
 
 	// RawFallback signals that the microcontroller is under heavy CPU strain and has
 	// offloaded raw ADC samples to the backend for server-side DSP denoising.
@@ -242,6 +250,9 @@ func handleTelemetry(engine *simulation.Engine, topic string, payload []byte) {
 			Temp:            msg.Temperature,
 			Humidity:        msg.Humidity,
 			Co2:             msg.Co2,
+			NodeSetpoint:    msg.NodeSetpoint,
+			NodePlug:        msg.NodePlug,
+			NodeLights:      msg.NodeLights,
 			PlugW:           msg.PlugW,
 			StripW:          msg.StripW,
 			CircuitBreakerW: cb,
