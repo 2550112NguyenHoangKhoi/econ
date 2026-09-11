@@ -150,7 +150,13 @@ func buildingSwitchHandler(engine *simulation.Engine, stateStore *StateStore) ht
 			if err := stateStore.Save(); err != nil {
 				log.Printf("[model-switch] could not persist buildingModelType: %v", err)
 			}
-			BroadcastStateUpdate("buildingModelType", req.Model, nil)
+			// Fanned out asynchronously: this is a REQUEST handler, and the broadcast
+			// writes to every connected dashboard. Doing that inline made the reply to
+			// THIS caller wait on the slowest websocket peer — with stale sockets open
+			// the switch took 30 s while every other endpoint answered instantly. The
+			// switch is already committed above; telling the other clients is not
+			// something this caller should have to wait for.
+			go BroadcastStateUpdate("buildingModelType", req.Model, nil)
 		}
 
 		w.Header().Set("Content-Type", "application/json")

@@ -162,7 +162,9 @@ func modeHandler(engine *simulation.Engine, stateStore *StateStore) http.Handler
 				if err := stateStore.Save(); err != nil {
 					log.Printf("[mode] could not persist operationMode: %v", err)
 				}
-				BroadcastStateUpdate("operationMode", parsedMode.String(), nil)
+				// Detached for the same reason as the building switch: a request must
+				// not wait on the liveness of every connected dashboard.
+				go BroadcastStateUpdate("operationMode", parsedMode.String(), nil)
 			}
 
 			_ = json.NewEncoder(w).Encode(buildModeResponse(engine.Mode()))
