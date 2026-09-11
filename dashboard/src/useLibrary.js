@@ -125,6 +125,11 @@ export function useLibrary() {
       if (base == null || per == null) return null;
       return base + per * (occupancy || 0);
     },
+    // Illustrative carbon equivalences. Null until the library answers, for the same
+    // reason as every coefficient above: a panel that cannot source these must show
+    // nothing rather than a figure derived from a number typed into the panel itself.
+    treeKgCo2PerYear: lib?.carbonMarket?.treeSequestrationKgCo2PerYear ?? null,
+    vehicleKgCo2PerKm: lib?.carbonMarket?.vehicleKgCo2PerKm ?? null,
   }), [lib, physics, critical]);
 }
 

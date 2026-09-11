@@ -15,6 +15,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { useSustainability } from './useSustainability';
+import { useLibrary } from './useLibrary';
 import { API_BASE, getAdminToken } from './api';
 
 const S = {
@@ -147,6 +148,18 @@ export default function SustainabilityRecommendationsPanel({
   const plugW = Number(breakdown?.plugW) || 0;
   const stripW = Number(breakdown?.stripW) || 0;
   const acW = Number(breakdown?.acW) || 0;
+  // Provenance for each end use. The engine sums AC only from real clamps, while plug load
+  // falls back to the standby MODEL -- so a building with no AC clamp showed "HVAC: 0W" and
+  // 100% plugs, which reads as "the compressor is off" rather than "nothing is measuring
+  // it". These counts let the legend say which it is. See PowerBreakdownData.
+  const acMeteredZones = Number(breakdown?.acMeteredZones) || 0;
+  const stripMeteredZones = Number(breakdown?.stripMeteredZones) || 0;
+  const plugMeteredZones = Number(breakdown?.plugMeteredZones) || 0;
+  const plugModelledZones = Number(breakdown?.plugModelledZones) || 0;
+  // A figure nothing is measuring is rendered as absent, never as a zero reading.
+  const endUse = (watts, meteredZones, what) => meteredZones > 0
+    ? { text: `${watts.toFixed(0)}W`, dim: false, title: `${what}: measured by ${meteredZones} clamp${meteredZones === 1 ? '' : 's'}` }
+    : { text: 'not metered', dim: true, title: `${what}: no current clamp is reporting, so this end use is not measured. It is not a reading of zero.` };
   const instantaneousPowerW = Number(carbon?.instantaneousPowerW) || 0;
   const instantaneousEmissionRateKgPerHour = Number(carbon?.instantaneousEmissionRateKgPerHour) || 0;
   const gridEmissionFactorKgPerKwh = Number(carbon?.gridEmissionFactorKgPerKwh) || 0.5;
@@ -181,10 +194,31 @@ export default function SustainabilityRecommendationsPanel({
   const overallEfficiencyPercent = Number(space?.overallEfficiencyPercent) || 0;
   const zones = Array.isArray(space?.zones) ? space.zones : [];
 
-  // Environmental equivalent metrics
+  // Environmental equivalents.
+  //
+  // These two used to be computed on DIFFERENT bases and printed side by side: trees from
+  // the instantaneous draw extrapolated over a full year (x8760), km from cumulative
+  // emissions since boot. After a restart the panel therefore read "Cumulative 0.000
+  // kgCO2e" next to "Offset equivalent: 11696 trees/year" and "Vehicle footprint: 0 km" --
+  // three numbers about the same building that cannot all be describing the same thing.
+  //
+  // Both are now derived from the SAME quantity, and the label says which. A projection and
+  // a measurement are still both useful, but the reader has to be told which one they are
+  // looking at, so the projected figure carries "at this draw" and the measured one carries
+  // "so far".
+  //
+  // The coefficients come from the programme library rather than from literals here (they
+  // were 21.77 and 5.88), and are null until it answers -- in which case the equivalence is
+  // withheld rather than computed against a number this file made up.
+  const { treeKgCo2PerYear, vehicleKgCo2PerKm } = useLibrary();
   const annualKgCO2e = (instantaneousPowerW / 1000.0) * 8760 * gridEmissionFactorKgPerKwh;
-  const treesEquivalent = Math.max(0, Math.round(annualKgCO2e / 21.77)); // ~21.77 kgCO2/year per tree
-  const carKmEquivalent = Math.max(0, Math.round(cumulativeEmissionsKgCO2e * 5.88)); // ~170 g/km for average vehicle
+  const treesEquivalent = treeKgCo2PerYear > 0
+    ? Math.max(0, Math.round(annualKgCO2e / treeKgCo2PerYear))
+    : null;
+  // Same basis as the trees figure: what a year at the current draw would emit.
+  const carKmEquivalent = vehicleKgCo2PerKm > 0
+    ? Math.max(0, Math.round(annualKgCO2e / vehicleKgCo2PerKm))
+    : null;
 
   return (
     <div data-testid="sustainability-panel" style={S.container}>
@@ -331,15 +365,30 @@ export default function SustainabilityRecommendationsPanel({
             />
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '6px', fontSize: '10px' }}>
-            <span data-testid="breakdown-plug-w" style={{ color: '#38bdf8' }}>
-              ● Plugs: {plugW.toFixed(0)}W
-            </span>
-            <span data-testid="breakdown-strip-w" style={{ color: '#fbbf24' }}>
-              ● Strips: {stripW.toFixed(0)}W
-            </span>
-            <span data-testid="breakdown-ac-w" style={{ color: '#f43f5e' }}>
-              ● HVAC: {acW.toFixed(0)}W
-            </span>
+            {(() => {
+              // Plug load is the one end use with a model behind it, so it is labelled
+              // "modelled" rather than silently passing as a measurement.
+              const plugMeasured = plugMeteredZones > 0;
+              const plugTitle = plugMeasured
+                ? `Plug load: measured by ${plugMeteredZones} clamp${plugMeteredZones === 1 ? '' : 's'}`
+                  + (plugModelledZones > 0 ? `, plus ${plugModelledZones} zone${plugModelledZones === 1 ? '' : 's'} from the standby model` : '')
+                : `Plug load: no clamp is reporting — this is the standby MODEL for ${plugModelledZones} zone${plugModelledZones === 1 ? '' : 's'}, not a measurement.`;
+              const strip = endUse(stripW, stripMeteredZones, 'Power strips');
+              const ac = endUse(acW, acMeteredZones, 'HVAC compressor');
+              return (
+                <>
+                  <span data-testid="breakdown-plug-w" title={plugTitle} style={{ color: '#38bdf8', opacity: plugMeasured ? 1 : 0.65 }}>
+                    ● Plugs: {plugW.toFixed(0)}W{plugMeasured ? '' : ' (modelled)'}
+                  </span>
+                  <span data-testid="breakdown-strip-w" title={strip.title} style={{ color: '#fbbf24', opacity: strip.dim ? 0.55 : 1 }}>
+                    ● Strips: {strip.text}
+                  </span>
+                  <span data-testid="breakdown-ac-w" title={ac.title} style={{ color: '#f43f5e', opacity: ac.dim ? 0.55 : 1 }}>
+                    ● HVAC: {ac.text}
+                  </span>
+                </>
+              );
+            })()}
           </div>
         </div>
 
@@ -355,8 +404,12 @@ export default function SustainabilityRecommendationsPanel({
             color: 'var(--text-secondary, #cbd5e1)',
           }}
         >
-          <span>🌲 Offset equivalent: <b>{treesEquivalent} trees</b>/year</span>
-          <span>🚗 Vehicle footprint: <b>{carKmEquivalent} km</b> driven</span>
+          <span title="A projection: what a full year at the current draw would emit, expressed as the number of trees that would sequester it. Not a measurement of what this building has emitted.">
+            🌲 At this draw, a year needs <b>{treesEquivalent == null ? '—' : treesEquivalent.toLocaleString()} trees</b> to sequester
+          </span>
+          <span title="The same projected annual emissions, expressed as distance driven by an average car. Same basis as the tree figure beside it.">
+            🚗 equivalent to <b>{carKmEquivalent == null ? '—' : carKmEquivalent.toLocaleString()} km</b> driven
+          </span>
         </div>
       </div>
 

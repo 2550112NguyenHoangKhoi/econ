@@ -19,8 +19,12 @@ import (
 
 // Default configuration constants
 const (
-	defaultCarbonBudgetKg      = 50.0 // kgCO2e target budget
-	defaultCarbonMarketURL     = "https://api.coingecko.com/api/v3/simple/price?ids=toucan-protocol-base-carbon-tonne&vs_currencies=usd"
+	defaultCarbonBudgetKg  = 50.0 // kgCO2e target budget
+	defaultCarbonMarketURL = "https://api.coingecko.com/api/v3/simple/price?ids=toucan-protocol-base-carbon-tonne&vs_currencies=usd"
+	// defaultMarketFallbackPrice is the last-resort benchmark used only if the library
+	// cannot be read. The authoritative value, with its reasoning, is
+	// carbonMarket.fallbackSpotUsdPerTon in programme-library.json -- a market coefficient
+	// belongs there, not here (rule 2). See newCarbonMarketClient.
 	defaultMarketFallbackPrice = 12.50 // USD per metric ton
 	defaultMarketCacheTTL      = 10 * time.Minute
 	defaultHTTPTimeout         = 8 * time.Second
@@ -55,10 +59,31 @@ type CarbonAccountingData struct {
 	Breakdown                          PowerBreakdownData       `json:"breakdown"`
 }
 
+// PowerBreakdownData is the end-use disaggregation, with the provenance that makes it
+// readable.
+//
+// The watts alone were ambiguous in the one direction that matters. AcW sums only measured
+// clamps (z.HwAcW), so a building with no clamp fitted reported "HVAC: 0 W" -- while PlugW
+// falls back to the MODELLED standby when no clamp reports, so plugs showed the whole
+// building. The panel drew one bar at 100% plugs and 0 W HVAC on a building whose chillers
+// were running, which is CLAUDE.md rule 1 verbatim: "A fabricated zero on a current clamp
+// tells the twin the compressor is off."
+//
+// The measured/metered flags let a reader tell "measured, and it is zero" from "nothing is
+// measuring this", so the UI can render the second as "not metered" rather than as a fact
+// about the building.
 type PowerBreakdownData struct {
 	PlugW  float64 `json:"plugW"`
 	StripW float64 `json:"stripW"`
 	AcW    float64 `json:"acW"`
+	// Zones contributing a genuine clamp reading to each figure. Zero means the number
+	// above is not a measurement of that end use.
+	PlugMeteredZones  int `json:"plugMeteredZones"`
+	StripMeteredZones int `json:"stripMeteredZones"`
+	AcMeteredZones    int `json:"acMeteredZones"`
+	// PlugModelledZones counts zones whose plug figure came from the standby MODEL rather
+	// than a clamp -- the asymmetry that made the bar read as it did.
+	PlugModelledZones int `json:"plugModelledZones"`
 }
 
 type SpaceUtilizationData struct {
@@ -220,6 +245,15 @@ func CalculateOffsetRecommendation(cumulativeEmissionsKg float64, budgetKg float
 	return rec
 }
 
+// fallbackSpotPrice reads the benchmark from the programme library, falling back to the
+// compiled constant only if the library carries no value.
+func fallbackSpotPrice() float64 {
+	if p := simulation.CarbonMkt().FallbackSpotUsdPerTon; p > 0 {
+		return p
+	}
+	return defaultMarketFallbackPrice
+}
+
 // CarbonMarketClient queries live carbon market spot prices with in-memory caching and graceful fallback.
 type CarbonMarketClient struct {
 	mu            sync.RWMutex
@@ -243,7 +277,7 @@ func NewCarbonMarketClient(apiURL string, ttl time.Duration) *CarbonMarketClient
 		apiURL:        apiURL,
 		httpClient:    &http.Client{Timeout: defaultHTTPTimeout},
 		cacheTTL:      ttl,
-		fallbackPrice: defaultMarketFallbackPrice,
+		fallbackPrice: fallbackSpotPrice(),
 	}
 }
 
@@ -345,6 +379,24 @@ func (c *CarbonMarketClient) fetchPrice(targetURL string) (MarketQuote, error) {
 
 	if price <= 0 || math.IsNaN(price) || math.IsInf(price, 0) {
 		return MarketQuote{}, fmt.Errorf("invalid spot price: %v", price)
+	}
+
+	// A number that parsed is not yet a carbon price. The feed reads the Toucan BCT token,
+	// nominally one token per tonne of CO2 -- but the token has decoupled from the credit
+	// it represents, and CoinGecko answered $0.00106/tonne. That passed `price <= 0`, was
+	// stamped IsLive, and reached the panel as a LIVE market rate of "$0.00" (the UI
+	// formats to cents), then became the best price the offset cost was computed against.
+	// Any deficit would have been priced at nothing.
+	//
+	// So the quote is checked against the floor the library carries with its reasoning. A
+	// figure below it means the token has decoupled or the feed changed shape -- either
+	// way the twin does not know the price, and the fallback path says so with IsLive
+	// false rather than presenting a fabricated one. This is rule 1 on the market channel:
+	// an unavailable price must not travel as a measured one.
+	if floor := simulation.CarbonMkt().MinCredibleSpotUsdPerTon; floor > 0 && price < floor {
+		return MarketQuote{}, fmt.Errorf(
+			"quote $%.6f/ton is below the $%.2f credible floor -- the BCT token has decoupled from the credit it represents, so this is not a carbon price",
+			price, floor)
 	}
 
 	log.Printf("[carbon-market] live carbon spot price fetched: $%.2f/ton", price)
@@ -537,6 +589,7 @@ func (t *CarbonTracker) Snapshot(engine *simulation.Engine, now time.Time) Susta
 
 	// 1. Gather electrical telemetry across zones
 	var plugW, stripW, acW float64
+	var plugMetered, stripMetered, acMetered, plugModelled int
 	var equipList []equipMeasurement
 
 	zoneSnap := map[string]*simulation.ZoneSim{}
@@ -553,12 +606,16 @@ func (t *CarbonTracker) Snapshot(engine *simulation.Engine, now time.Time) Susta
 		for _, id := range zoneIds {
 			z := zoneSnap[id]
 
-			// Plug draw
+			// Plug draw. A clamp reading is a measurement; the standby figure is the
+			// model standing in for one, and the two are counted separately so the
+			// payload can say which the total is made of.
 			pW := 0.0
 			if z.HwPlugW > 0 {
 				pW = z.HwPlugW
+				plugMetered++
 			} else if z.PlugStandbyW > 0 {
 				pW = z.PlugStandbyW
+				plugModelled++
 			}
 			plugW += pW
 
@@ -566,13 +623,16 @@ func (t *CarbonTracker) Snapshot(engine *simulation.Engine, now time.Time) Susta
 			sW := 0.0
 			if z.HwStripW > 0 {
 				sW = z.HwStripW
+				stripMetered++
 			}
 			stripW += sW
 
-			// AC draw
+			// AC draw. Measured only -- there is deliberately no model fallback here, so
+			// the count is what tells a reader whether 0 W means "off" or "unmeasured".
 			aW := 0.0
 			if z.HwAcW > 0 {
 				aW = z.HwAcW
+				acMetered++
 			}
 			acW += aW
 
@@ -709,9 +769,13 @@ func (t *CarbonTracker) Snapshot(engine *simulation.Engine, now time.Time) Susta
 			InstantaneousEmissionRateKgPerHour: math.Round(instantaneousEmissionRate*1000.0) / 1000.0,
 			CumulativeEmissionsKgCO2e:          math.Round(t.cumulativeEmissionsKgCO2e*100.0) / 100.0,
 			Breakdown: PowerBreakdownData{
-				PlugW:  math.Round(plugW*10.0) / 10.0,
-				StripW: math.Round(stripW*10.0) / 10.0,
-				AcW:    math.Round(acW*10.0) / 10.0,
+				PlugW:             math.Round(plugW*10.0) / 10.0,
+				StripW:            math.Round(stripW*10.0) / 10.0,
+				AcW:               math.Round(acW*10.0) / 10.0,
+				PlugMeteredZones:  plugMetered,
+				StripMeteredZones: stripMetered,
+				AcMeteredZones:    acMetered,
+				PlugModelledZones: plugModelled,
 			},
 		},
 		SpaceUtilization: spaceData,

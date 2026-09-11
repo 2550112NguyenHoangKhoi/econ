@@ -602,5 +602,16 @@
       "multiplier": 1.0,
       "note": "A site outside every profile's bounds gets a flat multiplier and is reported as an unknown grid. Inventing a shape for a grid nobody has characterised would be a fabricated measurement; a flat 1.0 is visibly and safely wrong."
     }
+  },
+  "carbonMarket": {
+    "$comment": "Carbon offset market coefficients. Prices describe the market the twin quotes from, not the building, but they are coefficients with sources and they were Go literals in carbon.go -- the same drift rule 2 exists to stop.",
+    "minCredibleSpotUsdPerTon": 0.5,
+    "minCredibleSpotNote": "Floor below which a fetched quote is not treated as a carbon price at all. The live feed reads the Toucan BCT token, nominally 1 token = 1 tonne CO2, but the token has decoupled from the credit and CoinGecko returned $0.00106/tonne -- which the panel rendered as a LIVE '$0.00' market rate and used as the best price to offset against. Voluntary market floors have never been near this: even the cheapest retired nature-based credits clear well above $1/tCO2e. A quote under this floor means the token has decoupled or the feed changed shape, so it is reported as unavailable rather than as a price.",
+    "fallbackSpotUsdPerTon": 12.5,
+    "fallbackSpotNote": "Benchmark used when no live quote can be trusted. Representative voluntary-market clearing price for standard nature-based credits. Always reported with isLive=false so it is never mistaken for a fetch.",
+    "treeSequestrationKgCo2PerYear": 21.77,
+    "treeSequestrationNote": "Net CO2 a single urban tree sequesters per year, kg. Used only to express an emission figure in a form a non-specialist can picture; it never enters any calculation the engine acts on. Was a literal in SustainabilityRecommendationsPanel.jsx.",
+    "vehicleKgCo2PerKm": 0.17,
+    "vehicleKgCo2PerKmNote": "Tailpipe CO2 of an average passenger car, kg per km. Same purpose and same caveat as the tree figure. The panel carried its reciprocal (5.88 km/kg) as a literal; storing the emission factor rather than its inverse keeps it in the same units as every other emission coefficient here."
   }
 }

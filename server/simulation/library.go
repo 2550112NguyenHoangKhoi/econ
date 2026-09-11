@@ -146,7 +146,7 @@ type GridProfile struct {
 	TouBandMultiplier map[string]float64 `json:"touBandMultiplier"`
 	// Estimate is carried through to the API so a consumer can say so on screen. A
 	// modelled shape must never reach a dashboard looking like a measured one.
-	TouBandMultiplierEstimate bool `json:"touBandMultiplierEstimate"`
+	TouBandMultiplierEstimate bool   `json:"touBandMultiplierEstimate"`
 	CleanestBand              string `json:"cleanestBand"`
 }
 
@@ -159,14 +159,29 @@ type GridShape struct {
 	} `json:"unknownGrid"`
 }
 
+// CarbonMarket is what the offset quoting path is allowed to believe. MinCredibleSpot is
+// the floor below which a fetched figure is not a carbon price at all -- see the library
+// note; FallbackSpot is the labelled benchmark used when no live quote can be trusted.
+type CarbonMarket struct {
+	MinCredibleSpotUsdPerTon float64 `json:"minCredibleSpotUsdPerTon"`
+	FallbackSpotUsdPerTon    float64 `json:"fallbackSpotUsdPerTon"`
+	// Illustrative equivalences. They exist only to put an emission figure in a form a
+	// non-specialist can picture and never enter a calculation the engine acts on -- but
+	// they are still sourced coefficients, and they were literals in the sustainability
+	// panel, so they live here like every other one.
+	TreeSequestrationKgCo2PerYear float64 `json:"treeSequestrationKgCo2PerYear"`
+	VehicleKgCo2PerKm             float64 `json:"vehicleKgCo2PerKm"`
+}
+
 type libraryDoc struct {
-	Version     int                  `json:"version"`
-	Physics     Physics              `json:"physics"`
-	Occupancy   OccupancySchedule    `json:"occupancy"`
-	Storage     StorageSizing        `json:"storage"`
-	Grid        GridShape            `json:"grid"`
-	Programmes  map[string]Programme `json:"programmes"`
-	Calibration struct {
+	Version      int                  `json:"version"`
+	CarbonMarket CarbonMarket         `json:"carbonMarket"`
+	Physics      Physics              `json:"physics"`
+	Occupancy    OccupancySchedule    `json:"occupancy"`
+	Storage      StorageSizing        `json:"storage"`
+	Grid         GridShape            `json:"grid"`
+	Programmes   map[string]Programme `json:"programmes"`
+	Calibration  struct {
 		GridEmissionFactor float64 `json:"gridEmissionFactorTCo2PerMwh"`
 	} `json:"calibration"`
 }
@@ -220,6 +235,12 @@ func defaultLibrary() libraryDoc {
 		PowerFractionOfObservedPeak: 0.30,
 		HoursAtRatedPower:           2.0,
 		MinPowerMw:                  0.001,
+	}
+	d.CarbonMarket = CarbonMarket{
+		MinCredibleSpotUsdPerTon:      0.50,
+		FallbackSpotUsdPerTon:         12.50,
+		TreeSequestrationKgCo2PerYear: 21.77,
+		VehicleKgCo2PerKm:             0.170,
 	}
 	d.Calibration.GridEmissionFactor = 0.6766
 	// No built-in grid profiles, for the same reason there are no built-in occupancy
@@ -289,6 +310,11 @@ func loadLibrary() {
 	if doc.Occupancy.Profiles == nil {
 		doc.Occupancy.Profiles = map[string][]float64{}
 	}
+	baseCm := defaultLibrary().CarbonMarket
+	mergeF(&doc.CarbonMarket.MinCredibleSpotUsdPerTon, baseCm.MinCredibleSpotUsdPerTon)
+	mergeF(&doc.CarbonMarket.FallbackSpotUsdPerTon, baseCm.FallbackSpotUsdPerTon)
+	mergeF(&doc.CarbonMarket.TreeSequestrationKgCo2PerYear, baseCm.TreeSequestrationKgCo2PerYear)
+	mergeF(&doc.CarbonMarket.VehicleKgCo2PerKm, baseCm.VehicleKgCo2PerKm)
 	mergeF(&doc.Occupancy.JitterFraction, baseOcc.JitterFraction)
 	mergeF(&doc.Occupancy.ResampleMinutes, baseOcc.ResampleMinutes)
 	// A profile that is not 24 hours long cannot be indexed by hour. Drop it loudly
@@ -340,6 +366,9 @@ func Lib() *libraryDoc {
 
 // Phys is shorthand for the physics coefficients.
 func Phys() Physics { return Lib().Physics }
+
+// CarbonMkt returns the offset-market coefficients (floor and fallback benchmark).
+func CarbonMkt() CarbonMarket { return Lib().CarbonMarket }
 
 // ProgrammeFor looks up a zone type. An unknown type is not an error — a digitized
 // building may carry programmes the library has not been taught yet — so it returns the
@@ -454,10 +483,13 @@ type LibraryView struct {
 	// history. Without them a browser kept showing "the highest seen" from a run whose
 	// load was five times what the building now draws, on a bar labelled as this
 	// building's own observed peak.
-	BuildingId            string                     `json:"buildingId"`
-	OccupancyModelVersion int                        `json:"occupancyModelVersion"`
-	Physics               Physics                    `json:"physics"`
-	Programmes            map[string]ProgrammeFacing `json:"programmes"`
+	BuildingId            string  `json:"buildingId"`
+	OccupancyModelVersion int     `json:"occupancyModelVersion"`
+	Physics               Physics `json:"physics"`
+	// CarbonMarket carries the offset-quoting floor and the illustrative equivalences the
+	// sustainability panel renders, so the panel stops carrying them as literals.
+	CarbonMarket CarbonMarket               `json:"carbonMarket"`
+	Programmes   map[string]ProgrammeFacing `json:"programmes"`
 	// Critical is the flattened list of critical zone types — the single answer to "may
 	// this room be swept or set back?" that both the engine and the UI now read.
 	Critical []string `json:"critical"`
@@ -488,6 +520,7 @@ func Library(buildingId string) LibraryView {
 		BuildingId:            buildingId,
 		OccupancyModelVersion: OccupancyModelVersion,
 		Physics:               l.Physics,
+		CarbonMarket:          l.CarbonMarket,
 		Programmes:            make(map[string]ProgrammeFacing, len(l.Programmes)),
 		Critical:              CriticalTypes(),
 	}

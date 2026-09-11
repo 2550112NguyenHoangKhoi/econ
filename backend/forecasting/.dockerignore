@@ -1,0 +1,27 @@
+# Keep the build context to what the image actually needs.
+#
+# There was no .dockerignore here, so the whole directory was the context — including the
+# local venv/. Two costs: the daemon copies it on every build, and any touch to a file in
+# it invalidates the `COPY . .` layer and forces the train.py step to re-run.
+#
+# Nothing here is needed inside the image: the container installs its own dependencies from
+# requirements.txt, and train.py regenerates the weights and scaler during the build.
+
+# Local virtualenv — the container has its own site-packages.
+venv/
+.venv/
+
+# Python bytecode, rebuilt on import.
+__pycache__/
+*.pyc
+*.pyo
+
+# Secrets. The image must never carry these; the compose file injects the real values as
+# environment variables at run time (OPENWEATHER_API_KEY, WEATHER_LAT, WEATHER_LON).
+.env
+
+# Editor and OS noise.
+.DS_Store
+*.swp
+.idea/
+.vscode/
