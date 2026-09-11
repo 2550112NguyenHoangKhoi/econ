@@ -18,14 +18,14 @@ pin physically sits on the board changes.
 |---|---|---|---|---|
 | **21** | I²C SDA | SHT30 · ACD1200 (via level shifter) | `USE_SHT30` / `USE_CO2` | Shared bus |
 | **22** | I²C SCL | SHT30 · ACD1200 (via level shifter) | `USE_SHT30` / `USE_CO2` | Shared bus |
-| **23** | out | Lighting relay IN | *(default)* | Active HIGH |
-| **25** | out | Plug relay IN | `USE_PLUG` | Active HIGH, **boots energized** |
-| **19** | out | IR emitter driver (transistor base) | `USE_IR_AC` | ⚠️ **must not** move to GPIO22 |
-| **18** | in | Rd-03 `OT2` (pin 5) / LD2410C `OUT` | `USE_MMWAVE` | 3.3 V logic — direct, no shifter |
-| **5** | in | PIR HC-SR501 OUT | `USE_PIR` | 3.3 V logic |
+| **26** | out | **SRD-05VDC-SL-C** relay IN — switches the **power strip** | `USE_PLUG` | Firmware drives **active HIGH**, boots energized. ⚠️ Check your module's polarity — see §4 |
+| **25** | out | IR emitter driver (transistor base) | `USE_IR_AC` | ⚠️ **must not** move to GPIO22 |
+| **23** | out | Lighting relay IN (SSR CH1) | `RELAY_PIN` | **Not fitted on this node** — flag undefined, firmware skips it |
+| **13** | in | Rd-03 **#1** `OT2` (pin 5) | `USE_MMWAVE` | 3.3 V logic, no shifter. Full GPIO — both internal pulls, so an open wire is detectable |
+| **14** | in | Rd-03 **#2** `OT2` (pin 5) | `MMWAVE2_PIN` | 3.3 V logic. Full GPIO — both internal pulls |
 | **4** | in/out | DHT11/22 data | `USE_DHT` | Fallback only; 10 kΩ pull-up to 3V3 |
-| **34** | in (ADC1_CH6) | SCT-013 analog front end | `USE_PLUG` | **Input-only pin.** ADC1 — ADC2 is dead while WiFi is up |
-| **32** | in (touch T9) | bare pin or a jumper wire | *(demo default)* | Zero-wiring presence demo |
+| **33** | in (ADC1_CH5) | SCT-013 plug clamp — analog front end | `USE_PLUG` | ADC1 — ADC2 is dead while WiFi is up |
+| **32** | in (ADC1_CH4) | ACS712 strip sensor — analog front end | `USE_STRIP` | ADC1. Was a touch-pin demo; now a measured channel |
 | **2** | out | Onboard LED | *(always)* | MQTT link status |
 
 ### The three that replace an assumption with a measurement
@@ -39,8 +39,8 @@ compressor is off.
 
 | GPIO | Sensor | Build flag | Publishes | Replaces |
 |---|---|---|---|---|
-| **26** | DS18B20 in the AC's discharge louvre | `USE_SUPPLY_TEMP` | `supplyC` | The 12 °C constant the cooling regressor is referenced to. 1-Wire, 4.7 kΩ pull-up to 3V3; clear of I²C, the IR pin and both relays |
-| **35** | 2nd SCT-013 on the AC's own supply | `USE_AC_CLAMP` | `acW` | The **simulated** VAV flow in the cooling regressor. Input-only and on **ADC1** — ADC2 is dead while WiFi is up. Same burden/bias front end as GPIO34 |
+| **27** | DS18B20 in the AC's discharge louvre | `USE_SUPPLY_TEMP` | `supplyC` | *Not fitted on this node.* The 12 °C constant the cooling regressor is referenced to. 1-Wire, 4.7 kΩ pull-up to 3V3. ⚠️ **Earlier revisions of this guide put it on GPIO26, which is the plug relay output** — a 1-Wire bus on a driven output damages one or both. Use GPIO27 |
+| **35** | 2nd SCT-013 on the AC's own supply | `USE_AC_CLAMP` | `acW` | The **simulated** VAV flow in the cooling regressor. Input-only and on **ADC1** — ADC2 is dead while WiFi is up. Same burden/bias front end as GPIO33 |
 | **21/22** | BH1750 ambient light, `0x23` | `USE_LUX` | `lux` | The static solar multiplier, which has no time-of-day or cloud response. Shares the existing I²C bus, 3.3 V, no shifter |
 
 Wiring any of the three costs nothing if you have not bought it yet: leave the flag at 0
@@ -48,7 +48,7 @@ and the node behaves exactly as before.
 
 ### ⚠️ Three constraints that are not style preferences
 
-1. **The IR emitter is on GPIO19, never GPIO22.** GPIO22 is the I²C clock. `applyHvacSetpoint()`
+1. **The IR emitter is on GPIO25, never GPIO22.** GPIO22 is the I²C clock. `applyHvacSetpoint()`
    drives the IR pin, so sharing them makes every setpoint command hammer SCL and corrupt
    any SHT30/ACD1200 read in flight. Overriding I²C onto 19, 23 or 25 is a **compile error**,
    not a silent fault.
@@ -71,12 +71,12 @@ flowchart LR
   LS["Level shifter<br/>BSS138"] -- "I²C 3.3V" --> E
   CO2["ACD1200 NDIR<br/>CO₂ · 0x2A · 5V"] -- "I²C 5V" --> LS
   LUX["BH1750 lux<br/>0x23 · optional"] -- "I²C 3.3V" --> E
-  RAD["Rd-03 radar<br/>presence · 3.3V"] -- "GPIO18" --> E
-  DS["DS18B20 MKE-S15<br/>supply T · 5V · optional"] -- "GPIO26 1-Wire" --> E
+  RAD["Rd-03 radar ×2<br/>presence · 3.3V"] -- "GPIO34 / GPIO15" --> E
+  DS["DS18B20 MKE-S15<br/>supply T · 5V · NOT FITTED"] -- "GPIO27 1-Wire" --> E
   CT["SCT-013 plug clamp<br/>33R burden + bias"] -- "GPIO34 ADC1" --> E
-  E -- "GPIO23 → CH1" --> SSR["2-ch SSR G3MB-202P<br/>lights + socket"]
-  E -- "GPIO25 → CH2" --> SSR
-  E -- "GPIO19 → 1kΩ → 2N2222" --> IR["IR LED 940nm<br/>→ split AC"]
+  E -- "GPIO23 → CH1 (not fitted)" --> SSR["2-ch SSR G3MB-202P<br/>lights + socket"]
+  E -- "GPIO26" --> RLY["SRD-05VDC-SL-C relay<br/>→ power strip"]
+  E -- "GPIO25 → 1kΩ → 2N2222" --> IR["IR LED 940nm<br/>→ split AC"]
   E -- "WiFi / MQTT" --> BR["Mosquitto broker<br/>→ Go engine"]
 ```
 
@@ -99,7 +99,7 @@ device that is only present when that build flag is set.
  ═══╦═╩═══════╦══════════════╦═══════════════╦════════════ 5V RAIL   ══╧══ GND RAIL ══╗
     ║         ║              ║               ║                                        ║
  ESP32 VIN  SSR DC+   shifter AVCC    ACD1200 VCC [USE_CO2]  DS18B20 (MKE-S15)                           ║
-    ║                                  (+ PIR VCC [USE_PIR])                          ║
+    ║                                  (PIR not fitted — radars are on 3V3)           ║
     ▼                                                                                 ║
  ┌──────────┐   the narrow part of the whole design — see the budget in §1             ║
  │ AMS1117  │   ~500 mA usable, and the ESP32 itself takes half of it                  ║
@@ -129,16 +129,17 @@ device that is only present when that build flag is set.
 
    ── Actuator outputs (active HIGH) ───────────────────────────────────────────────
    GPIO23 ────────────────────► SSR CH1 ──► [A1─B1] in SERIES with LIVE ── luminaire
-   GPIO25 ────────────────────► SSR CH2 ──► [A2─B2] in SERIES with LIVE ── socket
+                                                          (CH1 not fitted on this node)
+   GPIO26 ────────────────────► SRD-05VDC-SL-C ──► COM/NO in SERIES with LIVE ── power strip
           └─ boots HIGH: fail-energized                        [USE_PLUG]
 
-   GPIO19 ──[R1 1k]──► B  2N2222      3V3 ──[R2 10R]──►│IR LED 940nm│──► C
+   GPIO25 ──[R1 1k]──► B  2N2222      3V3 ──[R2 10R]──►│IR LED 940nm│──► C
                           E ──► GND                                       [USE_IR_AC]
 
    ── Sensor inputs ────────────────────────────────────────────────────────────────
-   GPIO18 ◄──────────────────── Rd-03 OT2 (pin 5)      3.3 V logic   [USE_MMWAVE]
-   GPIO5  ◄──────────────────── PIR HC-SR501 OUT       3.3 V logic   [USE_PIR]
-   GPIO26 ◄────┬─────────────── DS18B20 DATA                      [USE_SUPPLY_TEMP]
+   GPIO13 ◄──────────────────── Rd-03 #1 OT2 (pin 5)   3.3 V logic   [USE_MMWAVE]
+   GPIO14 ◄──────────────────── Rd-03 #2 OT2 (pin 5)   3.3 V logic   [MMWAVE2_PIN]
+   GPIO27 ◄────┬─────────────── DS18B20 DATA        (not fitted)  [USE_SUPPLY_TEMP]
                └──[R6 4.7k]──► 3V3
    GPIO4  ◄────┬─────────────── DHT11/22 DATA                    [USE_DHT] fallback
                └──[R7 10k]───► 3V3
@@ -181,16 +182,17 @@ a **number**, identical on the 30-pin DevKit and the 38-pin NodeMCU-32S.
 | GND | pwr | GND | PSU −, SSR DC−, every sensor GND, both bias dividers | — |
 | GPIO21 | I²C SDA | SDA | SHT30 SDA (**yellow**) · BH1750 SDA · shifter **BSDA** | `USE_SHT30`/`USE_CO2`/`USE_LUX` |
 | GPIO22 | I²C SCL | SCL | SHT30 SCL (**blue**) · BH1750 SCL · shifter **BSCL** | same |
-| GPIO23 | out | — | SSR **CH1** (lighting) | *(default)* |
-| GPIO25 | out | — | SSR **CH2** (plug socket), boots HIGH | `USE_PLUG` |
-| GPIO19 | out | — | **R1 1 kΩ** → 2N2222 base | `USE_IR_AC` |
-| GPIO18 | in | — | Rd-03 **OT2** (pin 5) | `USE_MMWAVE` |
-| GPIO34 | ADC1 in | — | plug CT tip / bias node (input-only) | `USE_PLUG` |
+| GPIO26 | out | — | **SRD-05VDC-SL-C** coil driver IN — switches the power strip; boots HIGH | `USE_PLUG` |
+| GPIO25 | out | — | **R1 1 kΩ** → 2N2222 base (IR) | `USE_IR_AC` |
+| GPIO23 | out | — | SSR **CH1** (lighting) — *not fitted* | `RELAY_PIN` |
+| GPIO19 | — | — | **free** — nothing wired here | — |
+| GPIO13 | in | — | Rd-03 **#1 OT2** (pin 5) | `USE_MMWAVE` |
+| GPIO14 | in | — | Rd-03 **#2 OT2** (pin 5) | `MMWAVE2_PIN` |
+| GPIO33 | ADC1 in | — | plug CT tip / bias node (SCT-013) | `USE_PLUG` |
 | GPIO35 | ADC1 in | — | AC-clamp CT tip / bias node (input-only) | `USE_AC_CLAMP` |
-| GPIO26 | 1-Wire | — | DS18B20 DATA (+ **R6 4.7 kΩ** to 3V3) | `USE_SUPPLY_TEMP` |
+| GPIO27 | 1-Wire | — | DS18B20 DATA (+ **R6 4.7 kΩ** to 3V3) — *not fitted* | `USE_SUPPLY_TEMP` |
 | GPIO4 | in/out | — | DHT22/11 DATA (+ **R7 10 kΩ** to 3V3) | `USE_DHT` (fallback) |
-| GPIO5 | in | — | PIR HC-SR501 OUT | `USE_PIR` (optional) |
-| GPIO32 | touch T9 | — | bare jumper wire — zero-wiring presence demo | *(demo)* |
+| GPIO32 | ADC1 in | — | ACS712 strip sensor OUT (via 10k/10k divider) | `USE_STRIP` |
 | GPIO2 | out | — | onboard LED (MQTT link status) | *(always)* |
 
 > ADC note: GPIO34 and GPIO35 are **input-only** and both on **ADC1** — deliberate, because
@@ -242,7 +244,16 @@ the bare sensor — and three of them do — the module wins, because that is wh
   Two BSS138 FETs with their own 10 kΩ pull-ups — two channels, exactly enough for SDA+SCL.
   This is the only thing on the bus that is 5 V: the ACD1200 pulls I²C to 5 V and the ESP32
   is not 5 V tolerant.
-- **Rd-03 radar** `[USE_MMWAVE]`: VCC→3.0–3.6 V · GND→GND · **OT2 (pin 5)→GPIO18**. DIP-5,
+- **Rd-03 radar ×2** `[USE_MMWAVE + MMWAVE2_PIN]`: VCC→3.0–3.6 V · GND→GND ·
+  head **#1 OT2 (pin 5)→GPIO34**, head **#2 OT2 (pin 5)→GPIO15**. Firmware ORs the two into
+  `occupancy` and also publishes each head separately as `radar1`/`radar2`, so one head stuck
+  high stays visible instead of disappearing into the OR. Two pin cautions:
+  **GPIO34 is input-only with no internal pull-up or pull-down** — fine for OT2, which is a
+  push-pull output, but it means an open pin cannot be detected by pulling on it (the firmware
+  falls back to checking whether the reading is steady or noisy). **GPIO15 is a strapping pin
+  (MTDO)** with an internal pull-up, so an *unconnected* GPIO15 reads a convincing HIGH — which
+  is why the firmware pull-tests it at boot and prints `DRIVEN` vs `FLOATS BOTH WAYS`. Holding
+  GPIO15 low at reset only silences the ROM boot banner; it is otherwise safe. DIP-5,
   on-board antenna, ±60°, up to 5 m. 3.3 V throughout, no shifter; its UART (115200 default)
   is only for tuning gates and is unused here. ⚠️ **Ai-Thinker specify a supply able to
   deliver ≥ 200 mA** — see the power budget in §1, because that figure does not fit
@@ -252,13 +263,15 @@ the bare sensor — and three of them do — the module wins, because that is wh
   directly — no conversion maths. Shares the I²C bus, no shifter.
 - **DS18B20 (MKE-S15)** `[USE_SUPPLY_TEMP]`: ⚠️ **this module wants 5 VDC**, not 3V3 — the
   bare DS18B20 chip runs on 3.3 V but the MKE-S15 breakout around it is specified at 5 V,
-  with TTL 3.3/5 V signalling, so `DATA→GPIO26` is still safe for the ESP32. Ships with a
+  with TTL 3.3/5 V signalling, so `DATA→GPIO27` is still safe for the ESP32. Ships with a
   3-pin Domino connector and an XH2.54-to-Dupont cable, 1 m probe lead. The breakout carries
   its own conditioning, so **check for an onboard pull-up before adding R6 4.7 kΩ** —
   MKE S-series boards normally include it. Probe sits in the AC's discharge louvre.
-- **PIR HC-SR501** `[USE_PIR]`: VCC→**5 V** (3.8–5 V) · GND→GND · OUT→GPIO5 (3.3 V logic
-  out, no shifter). Draws **≤ 50 µA** — negligible, not the tens of mA often assumed. 360°
-  cone, up to 6 m, with on-board trim pots for hold time and sensitivity.
+- **PIR HC-SR501** `[USE_PIR]` — **not fitted on this node**, kept here for reference:
+  VCC→**5 V** (3.8–5 V) · GND→GND · OUT→any 3.3 V-logic input, no shifter. Draws **≤ 50 µA**.
+  360° cone, up to 6 m, trim pots for hold time and sensitivity. Superseded here by the two
+  Rd-03 heads: a PIR only sees *motion*, so a motionless occupant reads as an empty room,
+  whereas the radar holds its output high for a stationary person.
 - **SCT-013 / STC013 100 A** `[USE_PLUG]`: split core, **max conductor diameter 13 mm**,
   1.5 m lead, terminated in a **3.5 mm TRS jack**. The listing does not state the variant,
   but **the body is printed `100A/50mA`** — that is the `-000`, the current-output part, so
@@ -274,13 +287,37 @@ the bare sensor — and three of them do — the module wins, because that is wh
 
 ### Actuator — SSR G3MB-202P (HS0996)
 
-- **Input (low-voltage → ESP32):** DC+→**5 V** · DC−→GND · CH1←GPIO23 · CH2←GPIO25. Inputs are **TTL 3.3–5 V, high-level** — driven directly, no shifter, no transistor.
+- **Input (low-voltage → ESP32):** DC+→**5 V** · DC−→GND · CH1←GPIO23 *(not fitted)*. Inputs are **TTL 3.3–5 V, high-level** — driven directly, no shifter, no transistor.
+
+#### SRD-05VDC-SL-C on GPIO26 — the part actually fitted
+
+This node does **not** use the SSR for the switched circuit. GPIO26 drives a Songle
+**SRD-05VDC-SL-C** electromechanical relay module, and its contacts are in series with the
+**live conductor of the power strip** — the same strip the ACS712 on GPIO32 meters as `stripW`.
+
+- **Coil:** 5 V, ~70 Ω → **~71 mA** while energized. It belongs on the **5 V** rail, never 3V3.
+  Most modules break this out as `VCC` (logic) and `JD-VCC` (coil) with a jumper between them;
+  leaving the jumper fitted and feeding 5 V is the normal case.
+- **Contacts:** use **COM** and **NO** so the strip is dead when the coil is unpowered, unless
+  you deliberately want the opposite.
+- ⚠️ **Polarity is the thing to check.** These modules are commonly **active LOW** — the
+  opto/transistor input energizes the coil when the pin is pulled *low*. The firmware is
+  active HIGH (`digitalWrite(pin, on ? HIGH : LOW)` in `setPlug()`) and calls `setPlug(true)`
+  at boot for a fail-**energized** strip. On an active-low module both of those inverts: the
+  strip is **dead** at boot and every `PLUG_ON` cuts it instead.
+  **The test takes five seconds** — reset the board and watch the strip. Live at boot means
+  active HIGH and everything matches. Dead at boot means active LOW, and the firmware needs
+  its polarity flipped rather than the wiring.
+- ⚠️ **Naming mismatch, deliberate:** the firmware calls this the *plug* relay
+  (`PLUG_RELAY_PIN`, `setPlug()`, `PLUG_ON`/`PLUG_OFF`) but it physically switches the
+  **strip**. A `PLUG_OFF` from the engine therefore de-energizes the power strip. The clamp on
+  GPIO33 (`plugW`) and this relay are on **different circuits** — do not read one as the other.
 - **Output (mains, each pair in SERIES with LIVE):** A1–B1 → live ↔ luminaire; A2–B2 → live ↔ socket. **No COM/NO/NC.** Neutral stays common to both loads. Full detail and the 0.1–2 A / AC-only caveats are in [§4 Option B](#4-relays--lighting-and-sockets).
 
 ### IR AC driver `[USE_IR_AC]`
 
 ```
-   GPIO19 ──[ R1 1 kΩ ]──► B (base)
+   GPIO25 ──[ R1 1 kΩ ]──► B (base)
                                 2N2222 (NPN, TO-92)
    3V3 ──[ R2 10 Ω ]──►|IR LED 940nm|──► C (collector)
                         (anode)  (cathode)
@@ -373,7 +410,7 @@ rail mistake is exactly what a colour convention makes visible from across the d
 | **Black** | GND | Every ground, no exceptions |
 | **Yellow** | I²C SDA | GPIO21 |
 | **Green** | I²C SCL | GPIO22 |
-| **Blue** | Digital in (sensors → ESP32) | GPIO18, 5, 26, 4 |
+| **Blue** | Digital in (sensors → ESP32) | GPIO34, 15, 26, 4 |
 | **White** | Digital out (ESP32 → actuators) | GPIO23, 25, 19 |
 | **Purple** | Analog (CT tip, bias node) | GPIO34, 35 — keep these short |
 | **Brown/Live · Blue/N · G-Y/Earth** | Mains | Vietnamese/IEC convention. Never on the breadboard |
@@ -452,31 +489,40 @@ that actually bites).
 | Load | Current | Note |
 |---|---|---|
 | ESP32 module itself | **~250 mA** | Peak, during WiFi transmit bursts. Idle is ~40 mA |
-| **Rd-03 radar** | **≥ 200 mA** | ⚠️ Ai-Thinker's own figure — see the warning below |
+| **Rd-03 radar ×2** | **~95 mA** | Ai-Thinker's own bench report: **47.3 mA average per head** at 3.3 V. The ≥ 200 mA in the spec is a *source* requirement, not a draw — see below |
 | DS18B20 | — | On the **5 V** rail (MKE-S15 module), not this one |
 | SHT30 | ~1.5 mA | Peak while measuring; ~0.2 µA idle |
 | BH1750 | ~0.12 mA | |
 | 2 × bias dividers | ~0.33 mA | 3.3 V across 20 kΩ, each |
 | IR LED pulse | ~100 mA | **Bursty**, tens of ms per command, not continuous |
-| **Continuous total** | **≈ 452 mA** | ~90 % of the regulator |
-| **Worst-case coincident** | **≈ 552 mA** | WiFi TX *and* an IR burst at once — **over budget** |
+| **Continuous total** | **≈ 347 mA** | ~70 % of the regulator |
+| **Worst-case coincident** | **≈ 447 mA** | WiFi TX *and* an IR burst at once — inside budget, with little to spare |
 
-> ⚠️ **This is the one budget that does not close, and the Rd-03 is why.** Ai-Thinker
-> specify "power supply current ≥ 200 mA" for the Rd-03. Read strictly that is a requirement
-> on the *source* — headroom for its transmit peaks rather than a continuous draw, and
-> measured averages are commonly well below it — but it is the only figure the manufacturer
-> publishes, and designing under it is guessing. Taken at face value, a node with the radar
-> **and** the IR emitter fitted asks for ~552 mA from a regulator good for about 500 mA.
+> ✅ **This budget closes, and the resolution is documented rather than assumed.** Ai-Thinker
+> publish two different numbers for the Rd-03 and they measure different things:
+>
+> | Source | Figure | What it actually is |
+> |---|---|---|
+> | `Rd-03_V2 Specification V2.0.0`, §2 | "power supply current **≥ 200 mA**" | A requirement on the **source** — the rail must be *able* to deliver 200 mA, i.e. headroom for transmit peaks |
+> | `Rd-03_V2 Power Consumption Test Report`, 2025-03-14 (Keysight N6705C, 3.3 V, 25 °C) | **47.3 mA average**, human-presence detection | The actual **draw** |
+>
+> Two heads therefore average ~95 mA, not ~400 mA, and the 3V3 rail sits at roughly 70 % of
+> the regulator with both heads and the IR emitter fitted. The node has run both heads off
+> the onboard rail without a brownout, which agrees with the measured figure.
+>
+> This table has now been wrong in **both** directions: an early revision guessed ~70 mA from
+> a generic 24 GHz estimate, and a later one took the ≥ 200 mA source requirement as a draw
+> and declared the budget broken. The 47.3 mA above is the manufacturer's own instrumented
+> measurement, which is why it supersedes both.
 >
 > **What to do about it, cheapest first:**
-> 1. **Test for it.** Build the node, then watch the serial monitor during an IR command with
->    the radar attached. A brownout reboot mid-command is the symptom; if it never happens,
->    the radar's real average is comfortably under spec and you are fine.
-> 2. **Give the radar its own regulator.** A ~10.000₫ AMS1117-3.3 module fed from the **5 V**
->    rail takes the radar off the ESP32's regulator entirely and ends the question. Grounds
->    stay common. This is the fix if step 1 shows any instability.
-> 3. **Don't fit both on one node.** Radar on one board, IR on another; the engine merges
->    two boards on the same zone (§8) without any change.
+> **If you ever do see instability** (a brownout reboot during an IR command, or the radar's
+> own `supply interference alarm` reading "INTERFERENCE ACTIVE" in the boot log — though note
+> that register is **not implemented on the modules fitted here**, see §6):
+> 1. **Give the radars their own regulator.** A ~10.000₫ AMS1117-3.3 module fed from the **5 V**
+>    rail takes both heads off the ESP32's regulator entirely. Grounds stay common.
+> 2. **Split the node.** Radars on one board, IR on another; the engine merges two boards on
+>    the same zone (§8) without any change.
 >
 > The earlier version of this table put the Rd-03 at ~70 mA and concluded the rail had
 > comfortable headroom. That figure came from a generic 24 GHz-radar estimate, not from
@@ -486,7 +532,7 @@ that actually bites).
 
 | Load | Current |
 |---|---|
-| ESP32 + everything on its 3V3 rail (drawn through the regulator) | ~552 mA |
+| ESP32 + everything on its 3V3 rail (drawn through the regulator) | ~447 mA |
 | SSR, 2 channels × 20 mA | 40 mA |
 | ACD1200 NDIR (manufacturer: average < 45 mA) | ~45 mA |
 | DS18B20 MKE-S15 module | ~2 mA |
@@ -516,7 +562,7 @@ which is still comfortable.
 > only good for 500 mA total. Bench-test on a proper PSU before blaming the code.
 
 > The **Rd-03** is a 3.3 V part throughout, which is one fewer rail to think about. An
-> LD2410C, if you have one, wants 5 V but its `OUT` is 3.3 V logic and still feeds GPIO18
+> LD2410C, if you have one, wants 5 V but its `OUT` is 3.3 V logic and still feeds GPIO34/15
 > directly.
 
 ---
@@ -1003,9 +1049,10 @@ power against its real power, and you will bake that error into the constant.
 ## 6. Presence
 
 ```
-   Rd-03:     VCC → 3V3     GND → GND     OT2 (pin 5) → GPIO18   ← the stocked part
-   LD2410C:   VCC → 5 V     GND → GND     OUT → GPIO18           (3.3 V logic out)
-   HC-SR501:  VCC → 5 V     GND → GND     OUT → GPIO5
+   Rd-03 #1:  VCC → 3V3     GND → GND     OT2 (pin 5) → GPIO13   ← fitted  [USE_MMWAVE]
+   Rd-03 #2:  VCC → 3V3     GND → GND     OT2 (pin 5) → GPIO14   ← fitted  [MMWAVE2_PIN]
+   LD2410C:   VCC → 5 V     GND → GND     OUT → either pin       (3.3 V logic out)
+   HC-SR501:  VCC → 5 V     GND → GND     OUT → any 3.3V input   (not fitted)
 ```
 
 The **Ai-Thinker Rd-03** is the one to wire: the entire HLK-LD2410 family (2410B/C/S, 2420,
@@ -1025,15 +1072,128 @@ two to wire as well.
 Neither radar needs a level shifter. Their UART pins are only for tuning gates and
 thresholds and are unused here.
 
-> ⚠️ **Do not compile `USE_MMWAVE` without the radar actually attached.** The firmware sets
-> `pinMode(MMWAVE_PIN, INPUT)` — a plain input, with no pull-down. GPIO18 left floating picks
+> ⚠️ **Do not compile `USE_MMWAVE` / define `MMWAVE2_PIN` without that head actually attached.**
+> The firmware sets `pinMode(pin, INPUT)` — a plain input, no pull-down. A floating pin picks
 > up ambient noise and crosses the logic threshold at random, so the zone reports occupancy
-> that flickers on nothing. Because presence is OR-ed, one floating pin is enough to hold a
-> zone permanently "occupied", and the twin will dutifully cool an empty room all night.
-> Either wire the sensor, or leave the flag at 0. If you must bench-test with the flag on and
-> no sensor, tie GPIO18 to GND through a 10 kΩ resistor.
+> that flickers on nothing; on GPIO15, which has an internal pull-up, it does something worse
+> and reads a steady, convincing HIGH. Because presence is OR-ed, one bad pin is enough to
+> hold a zone permanently "occupied", and the twin will dutifully cool an empty room all
+> night. Either wire the head, or leave its flag at 0.
+>
+> The firmware pull-tests each head at boot and says which it found, so read the boot log
+> rather than trusting the level:
+>
+> ```
+> [mmwave] RD03-1 GPIO34 input-only; 64/64 high (steady -> driven)
+> [mmwave] RD03-2 GPIO15 pull test: pulldown=HIGH pullup=high -> DRIVEN (head connected)
+> ```
+>
+> `FLOATS BOTH WAYS` or `noisy -> OPEN` means nothing is on that pin. Note GPIO34–39 are
+> input-only with no internal pulls, so they cannot be pull-tested — there the evidence is
+> only that the reading is steady rather than noisy. If you must bench-test a flag with no
+> sensor, tie the pin to GND through a 10 kΩ resistor.
 
 > The radar needs roughly **30 s after power-up** to settle before its output means anything.
+
+> ⚠️ **Do not put OT2 on GPIO34-39 or GPIO15.** This cost a full day of misdiagnosis. GPIO34-39
+> are input-only with **no internal pulls**, so an open wire floats to an arbitrary level and
+> cannot be tested in software; GPIO15 carries an external pull-up on DevKit boards that holds
+> it HIGH even with the module unplugged. On those two pins a working head and a dead wire are
+> indistinguishable, and both were misread here — one as "never detects", the other as "always
+> detects". On GPIO13/14 the firmware's pull test is conclusive: holding HIGH against the
+> internal pull-down, or LOW against the pull-up, proves the module is driving the pin.
+
+#### Tuning a head that never reports "clear" `[USE_MMWAVE_UART]`
+
+OT2 is one bit. When a head sits high forever, OT2 cannot tell you why, because the reason is
+always one of two internal parameters — and both are reachable **only over UART**:
+
+| Parameter | Range | Why it pins presence high |
+|---|---|---|
+| **Maximum detection range gate** | 0–15, **0.7 m per gate** | Factory maximum 15 ≈ **10.5 m**. In a 4 m room the radar is looking *through the wall* and reporting the corridor as your occupancy |
+| **Target disappearance delay** | 0–65535 **seconds** | The head reports unmanned only after a full T seconds with nobody detected, and any detection restarts the timer. A large T is indistinguishable from a stuck pin |
+
+Ai-Thinker's configurator is a Windows `.exe`, so the firmware speaks the protocol itself
+(`src/rd03_uart.h`, from *Rd-03_V2 Serial communication protocol V1.0.0*).
+
+**Wiring — two jumpers per head, OT2 stays exactly as it is.** UART0 is the USB console, so
+the two heads take the ESP32's other two hardware UARTs. No software serial, so neither head's
+timing depends on the other:
+
+```
+   Rd-03 #1 (OT2 on GPIO34)          Rd-03 #2 (OT2 on GPIO15)
+     TX ──────────► GPIO16 (RX2)       TX ──────────► GPIO18 (RX1)
+     RX ◄────────── GPIO17 (TX2)       RX ◄────────── GPIO19 (TX1)
+    GND ─────────── already common     GND ─────────── already common
+    3V3 ─────────── already wired      3V3 ─────────── already wired
+```
+
+⚠️ **They cross.** Module TX → ESP32 *receive* pin. Swapped is the most common failure and it
+announces itself as `no ACK on open-command-mode` in the boot log.
+
+⚠️ **GPIO16/17/18/19 were camera D3–D6.** The camera is off in firmware, but if those jumpers
+are still on the OV7670 its data pins will fight the UART. Pull them before wiring the radars.
+
+⚠️ **Read the silkscreen, not the pin number — and do not trust the label on pad 3.** At least
+three pad orders are in the wild. The datasheet shows two; the modules actually fitted here are
+a third:
+
+| Pin | Datasheet A | Datasheet B | **Fitted here** |
+|---|---|---|---|
+| 1 | 3V3 | 3V3 | 3V3 |
+| 2 | GND | **OT2** | GND |
+| 3 | TX | GND | **`OT1`** |
+| 4 | RX | TX | RX |
+| 5 | **OT2** | RX | **OT2** |
+
+**Confirmed by the Rd-03 (V1) manual**, whose pin table reads 1=3V3, 2=GND, 3=**OT1 = UART_TX**, 4=RX = UART_RX, 5=**OT2** = detection output, high when sensing. The modules fitted here are Rd-03 **V1**, not V2 — which is why the V2 threshold and auto-threshold commands are all refused. The pad silkscreened `OT1` carries the UART TX. That is not a guess:
+GPIO16 was wired to it, and both heads returned correctly-framed ACKs with distinct parameter
+values, and a max-gate write changed the read-back from 12 to 5. So on this revision, wire the
+ESP32's RX pin to the pad marked `OT1`, and expect no pad marked `TX` at all.
+
+The 4-pad header on the *back* (3V3 / CLK / DIO / GND) is the SWD debug port for firmware
+upgrades, not UART. Logic is 3.3 V on both sides — no shifter, no divider.
+
+Build with `-DUSE_MMWAVE_UART=1 -DUSE_MMWAVE2_UART=1` (either flag alone works if you only
+wire one head). At boot the node prints what each head is actually set to:
+
+```
+[rd03:head1] range gates 0..15  (= 0.0..10.5 m, 0.7 m per gate)
+[rd03:head1] target disappearance delay 300 s  <-- long: presence will look permanently stuck
+[rd03:head1] supply interference alarm: not implemented on this module firmware (raw 0x0000FFFF, state=65535)
+[rd03:head2] range gates 0..15  (= 0.0..10.5 m, 0.7 m per gate)
+[rd03:head2] target disappearance delay 300 s  <-- long: presence will look permanently stuck
+```
+
+Each head has its own flash: a setting written to one says nothing about the other, so both
+are read out separately. A head that does not answer is reported as such — "head 2 did not
+ACK" is itself the diagnosis.
+
+To write new values, add `-DRD03_SET_MAX_GATE=6 -DRD03_SET_DELAY_S=30` (≈4.2 m, 30 s) — the
+node applies them to **every wired head**, saves to each module's flash, and prints the
+read-back. **Pick the gate from
+the room, not the datasheet:** a gate is 0.7 m, so measure the distance to the far wall and
+round *down*, or the radar keeps seeing past it. The settings persist in the module, so once a
+head is tuned you can drop the flags again.
+
+> If the boot log says `no ACK on open-command-mode`, TX and RX are swapped — they cross
+> (head TX → ESP32 RX). The module streams waveform data until it is put into command mode,
+> which is why the driver sends the open-command twice and discards the first reply.
+
+> **Two commands are absent from the firmware on the heads fitted here**, and both are
+> reported honestly rather than as errors:
+>
+> | Register / command | Behaviour on these modules | Meaning |
+> |---|---|---|
+> | `0x0005` supply interference alarm | reads back `0xFFFF` | Not implemented. It is **not** an interference alarm — a state of 65535 matches none of the three documented values. Where it *is* implemented, `INTERFERENCE ACTIVE` means the module's own 3V3 rail is dirty and the budget in §1 is worth revisiting |
+> | `0x00FD` save configuration | **no ACK frame at all** | Not implemented. Every other command ACKs normally, so this is a firmware revision difference, not a fault |
+>
+> ⚠️ **Because save is unavailable, the settings are volatile** — they live in the module's
+> RAM and are lost when *it* loses power. This is safe here only because the heads share the
+> ESP32's 3V3 rail: they power down together, and the node rewrites the parameters on every
+> boot. **Keep `-DRD03_SET_MAX_GATE` and `-DRD03_SET_DELAY_S` in `platformio.ini` permanently.**
+> Drop them and the heads silently revert to the factory 8.4 m on the next power cycle, with
+> nothing in the telemetry to say so.
 > A node that boots reporting "occupied" in an empty room and clears shortly after is doing
 > exactly what it should.
 
@@ -1146,7 +1306,7 @@ before you have any diagnostic to read.
 | **1** | Power rails only — **no devices yet** | Meter: 5 V rail **4.75–5.25 V**; 3V3 rail **3.20–3.40 V**; rail-to-rail GND continuity beeps |
 | **2** | SHT30 → I²C | Serial: `[i2c] bus up on SDA=GPIO21 SCL=GPIO22`. Warm it by hand → temp follows, `tempReal:true` |
 | **3** | Level shifter, **then** ACD1200 | Meter LV = 3.3 V and HV = 5 V *before* the ACD1200 goes in. Then wait out 120 s preheat → ppm appears |
-| **4** | Rd-03 → GPIO18 | Meter OT2: **0 V** still room, **3.3 V** when you move. Then check occupancy in telemetry |
+| **4** | Rd-03 ×2 → GPIO34 / GPIO15 | Meter each OT2: **0 V** empty room, **3.3 V** occupied — and unlike a PIR it stays high while you sit still. Boot log pull-tests both heads (`DRIVEN` vs `FLOATS BOTH WAYS`); telemetry carries `radar1`/`radar2` per head plus the ORed `occupancy` |
 | **5** | SSR — **low-voltage side only, no mains** | Channel LEDs follow `LIGHTS_ON`/`LIGHTS_OFF`. GPIO23 measures 3.3 V HIGH / 0 V LOW |
 | **6** | IR driver | Phone camera sees the LED flicker; serial prints `IR frame sent`; the AC's own display changes |
 | **7** | Bias divider — **CT not connected yet** | Meter GPIO34: **1.60–1.70 V**, steady. This is the stage most worth not skipping |
@@ -1162,11 +1322,12 @@ nothing actuated.
 |---|---|---|
 | 5 V rail | 4.75–5.25 V | Below 4.7 V: thin USB cable, or a PC port at its 500 mA limit |
 | 3V3 rail | 3.20–3.40 V | Sagging under load: a 5 V device is on the 3V3 rail (§1) |
-| **Bias node / GPIO34** | **1.60–1.70 V** | **0 V or drifting** = R4/R5 missing or mis-seated. This is the single most common analog fault |
+| **Bias node / GPIO33** (plug CT) | **1.60–1.70 V** | **0 V or drifting** = R4/R5 missing or mis-seated. This is the single most common analog fault |
+| **Bias node / GPIO32** (strip, ACS712) | **~1.65 V at zero current** | Reads ~3.1 V: the 10k/10k divider on the ACS712 output is missing — this has bitten twice |
 | Bias node, AC coupled | < 20 mV ripple | Noisy: C1 is too far from the node, or the IR driver is too close (see layout) |
-| GPIO23 | 0 V idle → 3.3 V on `LIGHTS_ON` | Never rises: wrong pin, or the flag isn't compiled in |
-| GPIO25 | **3.3 V at boot** | 0 V at boot: `USE_PLUG` not set — fail-energized is deliberate (§4) |
-| GPIO19 | 0 V idle, pulses on command | Steady 3.3 V: pin stuck; check nothing else drives it |
+| GPIO26 (plug relay) | **3.3 V at boot** | 0 V at boot: `USE_PLUG` not set — fail-energized is deliberate (§4) |
+| GPIO25 (IR) | 0 V idle, pulses on command | Steady 3.3 V: pin stuck; check nothing else drives it |
+| GPIO23 (lighting) | *not fitted* — no `RELAY_PIN` in the build | If you fit it: 0 V idle → 3.3 V on `LIGHTS_ON` |
 | SDA / SCL | ~3.3 V idle, both | 0 V: a device is holding the bus, or pull-ups are missing |
 | Shifter LV / HV | 3.3 V / 5 V | Swapped is the failure that damages the ESP32 — check before the ACD1200 goes in |
 | Rd-03 OT2 | 0 V vacant, 3.3 V occupied | Always 3.3 V: still in its power-on settling window, give it ~30 s |
@@ -1222,7 +1383,7 @@ Work down this list; each step proves the one below it is worth attempting.
 | `plugW` reads a plausible but wrong constant multiple | The CT may have an internal burden — measure across its leads (§ "Sensors & modules"); if a few tens of Ω, omit R3 |
 | `plugW` jitters with nothing plugged in | Bias node floating — R4/R5 missing or mis-seated. GPIO34/35 have **no internal pull-ups at all**; the divider is the only thing holding the pin |
 | `plugW` noisy but roughly right | C1 too far from the bias node, or the analog front end sitting next to the IR driver. See the layout section |
-| Occupancy stuck "occupied" in an empty room | `USE_MMWAVE` compiled with no radar attached — GPIO18 floats and self-triggers. Wire it, drop the flag, or pull GPIO18 down through 10 kΩ |
+| Occupancy stuck "occupied" in an empty room | First check the boot log's per-head pull test: `FLOATS BOTH WAYS` / `noisy -> OPEN` means the flag is compiled with nothing on that pin (GPIO15 in particular floats to a convincing HIGH on its internal pull-up). Wire it, drop the flag, or pull the pin down through 10 kΩ. If both heads report `DRIVEN`, the radar is probably right and you are: unlike a PIR it holds high for a **motionless** occupant. Cross-check `radar1`/`radar2` in telemetry against CO₂ — a falling CO₂ trend is a room actually emptying |
 | Occupancy "occupied" for ~30 s after boot, then clears | Expected — the radar's settling window |
 | `plugW` and `acW` disagree by ~4.5 % on the same load | `PLUG_MAINS_V` (230) ≠ `AC_MAINS_V` (220). Pin both explicitly |
 | Every reading sane but all watts off by one constant factor | Burden resistor is not the value `PLUG_CAL_A_PER_V` was built for — recompute as `2000 ÷ R` (§5) |

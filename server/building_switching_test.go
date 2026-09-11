@@ -1,6 +1,7 @@
 package main
 
 import (
+	"path/filepath"
 	"bytes"
 	"econ/schema/Telemetry"
 	"econ/simulation"
@@ -215,7 +216,8 @@ func TestBuildingDataAPIQueryParam(t *testing.T) {
 // dynamically reload the engine and respond with updated building state.
 func TestBuildingSwitchEndpoints(t *testing.T) {
 	engine := simulation.NewEngine()
-	switchHandler := buildingSwitchHandler(engine)
+	switchStore := NewStateStore(filepath.Join(t.TempDir(), "dashboard-state.json"), nil)
+	switchHandler := buildingSwitchHandler(engine, switchStore)
 
 	// 1. POST /api/building/switch with JSON {"model": "domestic-home"}
 	bodyHome := bytes.NewBufferString(`{"model":"domestic-home"}`)

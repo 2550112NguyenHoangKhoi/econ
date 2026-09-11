@@ -42,7 +42,9 @@ table GlobalData {
   plantCop: float;
   energySavedMw: float;
   bessDischargeMw: float = 0;  // appended: + discharging to grid, - charging (0 = no BESS)
-  bessSocPct: float = 0;       // appended: battery state of charge, 0..100
+  bessSocPct: float = 0;       // appended: battery state of charge, 0..100; -1 = NO PACK
+                               // FITTED. 0 is a state a real flat battery can be in, so
+                               // absence needs its own impossible value.
   avgCo2: float = 0;           // appended: building CO2 ppm, real sensors preferred over the
                                // occupancy estimate — the engine picks, so every client agrees
   // Plug-load management (APLC). Plug loads are the end use a conventional BMS neither

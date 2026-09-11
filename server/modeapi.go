@@ -86,7 +86,12 @@ func buildModeResponse(m simulation.OperationMode) modeResponse {
 }
 
 // modeHandler exposes GET and POST /api/mode for querying and toggling the engine operation mode.
-func modeHandler(engine *simulation.Engine) http.HandlerFunc {
+// modeHandler reads and switches the engine's operation mode. It takes the state store
+// for the same reason buildingSwitchHandler does: applyPersistentStateToEngine pushes the
+// PERSISTED operationMode back onto the engine on every set_state, so a mode changed here
+// and not written back left a stale toggle that silently reverted the engine the next
+// time any dashboard toggled anything at all.
+func modeHandler(engine *simulation.Engine, stateStore *StateStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if corsPreflight(w, r) {
 			return
@@ -149,6 +154,16 @@ func modeHandler(engine *simulation.Engine) http.HandlerFunc {
 
 			engine.SetMode(parsedMode)
 			log.Printf("[mode] Operation mode switched to %q (isReal=%v)", parsedMode.String(), engine.IsRealMode())
+
+			// Keep the persisted copy in step with the engine, and tell the other open
+			// dashboards. Without this the two disagree and the stale one wins.
+			if stateStore != nil {
+				stateStore.Set("operationMode", parsedMode.String())
+				if err := stateStore.Save(); err != nil {
+					log.Printf("[mode] could not persist operationMode: %v", err)
+				}
+				BroadcastStateUpdate("operationMode", parsedMode.String(), nil)
+			}
 
 			_ = json.NewEncoder(w).Encode(buildModeResponse(engine.Mode()))
 			return

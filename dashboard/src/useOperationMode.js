@@ -55,7 +55,19 @@ export function useOperationMode(pollMs = 10000) {
     }
   };
 
-  return { mode, isReal, loading, error, setMode, refresh: fetchMode };
+  // Adopt a mode that came FROM the engine (a state_sync replay on websocket connect, or
+  // another operator's change). setMode POSTs /api/mode, so using it to apply an incoming
+  // value made every reconnect WRITE the mode back — and the value being replayed is the
+  // persisted toggle, a separate copy from the engine's live mode. Whenever the two had
+  // drifted, reconnecting stamped the stale one over the real one, which is why returning
+  // to a tab could silently put the engine back into simulation.
+  const adoptMode = useCallback((targetMode) => {
+    if (targetMode !== 'simulation' && targetMode !== 'real') return;
+    setModeState(targetMode);
+    setIsReal(targetMode === 'real');
+  }, []);
+
+  return { mode, isReal, loading, error, setMode, adoptMode, refresh: fetchMode };
 }
 
 export default useOperationMode;

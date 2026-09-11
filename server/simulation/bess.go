@@ -121,21 +121,6 @@ func (b *Battery) SizeToBuilding(observedPeakMw float64) {
 // server's own timezone.
 var vnLoc = time.FixedZone("ICT", 7*3600)
 
-// touBand classifies a moment into an EVN tariff band, mirroring the frontend tariff.js
-// schedule (Decision 963/QĐ-BCT, effective 22 Apr 2026): peak 17:30–22:30 Mon–Sat;
-// off-peak 00:00–06:00 daily; normal otherwise (06:00–17:30 & 22:30–24:00).
-func touBand(t time.Time) string {
-	t = t.In(vnLoc)
-	mins := t.Hour()*60 + t.Minute()
-	if mins < 6*60 {
-		return "offpeak" // 00:00–06:00 daily
-	}
-	if t.Weekday() != time.Sunday && mins >= 17*60+30 && mins < 22*60+30 {
-		return "peak" // 17:30–22:30 Mon–Sat
-	}
-	return "normal"
-}
-
 // Dispatch advances the battery one step. dtSec is real elapsed seconds; loadMw is the site's
 // current electrical load (discharge is capped at what the building actually draws). TOU
 // arbitrage: discharge on peak, charge off-peak, hold on normal — with SoC and power limits.

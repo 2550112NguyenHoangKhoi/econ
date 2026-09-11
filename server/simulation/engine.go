@@ -105,6 +105,10 @@ type ZoneSim struct {
 	HwLux       float64 // ambient illuminance (BH1750) — a real irradiance proxy
 	HwLuxAt     time.Time
 	HwCo2At     time.Time // when HwCo2 arrived; zero = no NDIR sensor has ever reported
+
+	// Derived presence: the radar's assertion corroborated (or disputed) by respiration.
+	// Separate from Occupancy on purpose -- Occupancy stays exactly what the node measured.
+	Presence *PresenceFusion `json:"presence,omitempty"`
 	HwOnline    bool      // broker LWT verdict from econ/status/<topic>
 	CameraEvent *string
 	PirState    *bool
@@ -1660,7 +1664,10 @@ func (e *Engine) PreCoolStatus() (bool, time.Time) {
 // baselines.mu everywhere else; this path takes neither pair simultaneously).
 func (e *Engine) Recommendations(topN int) RecommendationReport {
 	e.mu.Lock()
+	realMode := e.mode == ModeReal
 	readings := make([]ZoneReading, 0, len(e.Zones))
+	caps := make(map[string]ZoneCapability, len(e.Zones))
+	var reach HardwareReach
 	for id, z := range e.Zones {
 		label := strings.TrimPrefix(id, "zone-")
 		zr := ZoneReading{
@@ -1672,6 +1679,40 @@ func (e *Engine) Recommendations(topN int) RecommendationReport {
 			zr.Co2Live = true
 		}
 		readings = append(readings, zr)
+		// What this zone's hardware can actually do, gathered in the same pass and under
+		// the same lock as the readings it will be used to judge. See capability.go.
+		zc := ZoneCapability{
+			NodeBound:      z.HwSource != "" || z.MqttTopic != "",
+			NodeOnline:     z.HwOnline,
+			AcControlKnown: z.HwAcRealSeen,
+			AcControlReal:  z.HwAcReal,
+			AcPowerLive:    z.acFresh(),
+			AcPowerW:       z.HwAcW,
+			IrState:        z.IrState,
+		}
+		caps[id] = zc
+
+		// The same facts, counted. Every increment is a measurement the zone has actually
+		// produced — nothing is assumed for a zone that has reported nothing.
+		reach.Zones++
+		if zc.NodeBound {
+			reach.NodesBound++
+			if zc.NodeOnline {
+				reach.NodesOnline++
+			}
+			switch {
+			case !zc.AcControlKnown:
+				reach.AcUnknown++
+			case zc.AcControlReal:
+				reach.AcControlled++
+			}
+		}
+		if zc.AcPowerLive {
+			reach.AcMetered++
+		}
+		if zr.Co2Live {
+			reach.Co2Sensed++
+		}
 	}
 	conds := e.roomConditions()
 	loadMw := e.lastLoadMw
@@ -1691,6 +1732,18 @@ func (e *Engine) Recommendations(topN int) RecommendationReport {
 		predictive = e.dynamics.PredictiveRecommendations(conds, now)
 		report.Model.RoomsIdentified, report.Model.RoomsLearning = e.dynamics.Coverage()
 	}
+	// In real mode the twin owns no actuators it was not wired to, so a recommendation is
+	// checked against the hardware that would have to carry it out before it is ranked:
+	// findings that rest on absent hardware are dropped, findings that are measured but
+	// cannot be acted on keep their evidence and lose their button. Filtering BEFORE the
+	// merge's topN means a withdrawn card promotes a real one instead of leaving a hole.
+	// Simulation mode is untouched: there, every modelled actuator responds.
+	if realMode {
+		report.Recommendations = applyActuationCapability(report.Recommendations, caps)
+		predictive = applyActuationCapability(predictive, caps)
+	}
+	report.Model.RealMode = realMode
+	report.Hardware = reach
 	return mergeRecommendations(report, predictive, topN)
 }
 
@@ -2064,6 +2117,11 @@ type HardwareNode struct {
 	CameraEvent      *string `json:"cameraEvent"`
 	IrState          *string `json:"irState"`
 	// [GEMINI IMPLEMENTATION END]
+
+	// Derived presence: the radar's assertion cross-checked against respiration. Carried
+	// beside Occupancy, never instead of it -- Occupancy remains the node's raw measurement,
+	// and this says whether CO2 agrees with it.
+	Presence *PresenceFusion `json:"presence,omitempty"`
 }
 
 // HardwareStatus snapshots every zone currently bound to a physical edge node, for the
@@ -2122,6 +2180,7 @@ func (e *Engine) HardwareStatus() []HardwareNode {
 			CameraEvent:      z.CameraEvent,
 			IrState:          z.IrState,
 			// [GEMINI IMPLEMENTATION END]
+			Presence: z.Presence,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ZoneId < out[j].ZoneId })
@@ -2334,11 +2393,27 @@ func (e *Engine) Start() {
 		// An undeclared pack is sized to this building first, from the peak it has actually
 		// been observed at — the same rule the fan follows. A site that declared its own
 		// nameplate is untouched by this.
+		// An UNDECLARED pack is a modelled asset, and a modelled asset must not run in
+		// real mode. The nameplate SizeToBuilding invents is a reasonable guess for a
+		// simulation and a fabrication on a live site: it made the dashboard report a
+		// state of charge, and grid power net of a discharge, for a battery nobody had
+		// installed — a modelled number travelling on a channel that reads as measured.
+		// A DECLARED pack (BESS_POWER_MW / BESS_CAPACITY_MWH) is a real asset the
+		// operator has stated, so it keeps dispatching in both modes.
 		now := time.Now()
-		if _, peakMw, n := e.observedLoadRange(); n > 0 {
-			e.Bess.SizeToBuilding(peakMw)
+		// e.mode read directly, NOT via IsRealMode(): this runs inside the e.mu critical
+		// section above and sync.Mutex is not reentrant, so the accessor would deadlock
+		// the tick loop on its first pass.
+		if e.mode != ModeReal || e.Bess.Declared {
+			if _, peakMw, n := e.observedLoadRange(); n > 0 {
+				e.Bess.SizeToBuilding(peakMw)
+			}
+			e.Bess.Dispatch(now.Sub(e.lastBessAt).Seconds(), e.lastLoadMw, TouBand(now))
+		} else {
+			// Report the absence rather than the last simulated value.
+			e.Bess.Enabled = false
+			e.Bess.DischargeMw = 0
 		}
-		e.Bess.Dispatch(now.Sub(e.lastBessAt).Seconds(), e.lastLoadMw, touBand(now))
 		e.lastBessAt = now
 		e.mu.Unlock()
 
@@ -2359,6 +2434,22 @@ func (e *Engine) tick(dt float64) {
 	for _, v := range e.Vavs {
 		if v.TargetZone != "" {
 			zoneToVav[v.TargetZone] = v
+		}
+	}
+
+	// Presence fusion, before the physics: radar says a body is there, CO2 says whether it
+	// is breathing. Wall-clock, not sim time -- respiration does not accelerate with dt.
+	// Only zones bound to a real node participate; a simulated zone has nothing to fuse.
+	{
+		now := time.Now()
+		for _, z := range e.Zones {
+			if z.MqttTopic == "" || !z.Live {
+				continue
+			}
+			if z.Presence == nil {
+				z.Presence = &PresenceFusion{}
+			}
+			z.Presence.Update(now, z.Occupancy > 0, z.HwCo2, z.co2Fresh(), z.HwCo2At)
 		}
 	}
 
@@ -2879,8 +2970,17 @@ func (e *Engine) broadcast() {
 	energySavedMW := (savedLightingW + savedThermalW/plantCop) / 1e6
 	// Feed the load to the BESS dispatcher (read next tick) and snapshot battery state.
 	e.lastLoadMw = buildingLoadMW
+	// A pack that is not there reports -1, not 0. Zero percent is a state a REAL battery
+	// can genuinely be in, so it cannot also mean "no battery" — and the dashboard was
+	// drawing a 59%-charged pack on a live site that has no storage at all, which is a
+	// modelled number travelling on a channel that reads as measured. Negative SoC is
+	// physically impossible, so it carries the absence unambiguously.
 	bessDischargeMW := e.Bess.DischargeMw
 	bessSocPct := e.Bess.Soc * 100.0
+	if !e.Bess.Enabled {
+		bessDischargeMW = 0
+		bessSocPct = -1
+	}
 
 	// System health = mean per-zone comfort (severity-weighted), per the report's discomfort
 	// model, minus a charge for zones actually in alarm. The mean alone is misleading at

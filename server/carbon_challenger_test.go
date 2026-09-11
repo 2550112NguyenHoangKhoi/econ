@@ -43,7 +43,7 @@ func TestChallengerCoreAssertionExact1000W1H(t *testing.T) {
 		},
 	}
 	tracker := newCarbonTracker(engine)
-	tracker.gridFactor = 0.5
+	tracker.gridFactorOverride = 0.5 // pin the factor: the default is now time-shaped
 
 	eKwh, cKg := tracker.RecordEnergy(powerW, dtSec)
 	if eKwh != 1.0 || cKg != 0.5 {

@@ -9,8 +9,9 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, field_validator
 
 from config import (INPUT_SIZE, HIDDEN_SIZE, NUM_LAYERS, OUTPUT_SIZE, SEQ_LEN,
-                    SENSOR_FEATURES, WEIGHTS_PATH, SCALER_PATH)
+                    SENSOR_FEATURES, WEIGHTS_PATH, SCALER_PATH, PROVENANCE_PATH)
 from data_loader import fetch_weather_features
+from provenance import load_provenance, lstm_info
 from model import PeakLoadLSTM
 from timesfm_forecaster import TIMESFM
 
@@ -31,12 +32,28 @@ model = PeakLoadLSTM(INPUT_SIZE, HIDDEN_SIZE, NUM_LAYERS, OUTPUT_SIZE)
 scaler = None
 MODEL_READY = False
 
+# Where this model's knowledge came from, as recorded by train.py at the moment it was
+# true (see config.PROVENANCE_PATH). None when the weights predate the record or were
+# produced elsewhere -- and that is reported as unknown, not filled in with a guess. The
+# weights file carries no such information itself, so an absent record is genuinely an
+# absence of knowledge about these weights.
+PROVENANCE = None
+
 if os.path.exists(WEIGHTS_PATH) and os.path.exists(SCALER_PATH):
     model.load_state_dict(torch.load(WEIGHTS_PATH, map_location="cpu"))
     model.eval()
     scaler = joblib.load(SCALER_PATH)
     MODEL_READY = True
-    logger.info("[startup] loaded trained model + scaler")
+    PROVENANCE = load_provenance(PROVENANCE_PATH)
+    if PROVENANCE is None:
+        logger.warning("[startup] loaded trained model + scaler, but NO provenance record: "
+                       "these weights cannot say what they were trained on. Re-run train.py "
+                       "to stamp them.")
+    else:
+        logger.info("[startup] loaded trained model + scaler (trained on %s, %s sequences, targets %s-%s MW)",
+                    PROVENANCE.get("source"), PROVENANCE.get("sequences"),
+                    (PROVENANCE.get("target_load_mw") or {}).get("min"),
+                    (PROVENANCE.get("target_load_mw") or {}).get("max"))
 else:
     logger.warning("[startup] WARNING: %s / %s not found — run train.py. /predict will return 503.",
                    WEIGHTS_PATH, SCALER_PATH)
@@ -84,12 +101,14 @@ def model_info():
     specialises on THIS building once train.py has real history to learn from; TimesFM is a
     pretrained foundation model that forecasts a series it has never seen, so it covers the
     cold start where the LSTM has nothing to offer."""
+    # trained_on reports what train.py RECORDED, not what this service would like to be
+    # true. It previously read "this building's own history (supervised)" unconditionally,
+    # which is the claim a consumer most needs to trust and the one this service was least
+    # able to check: train.py falls back to a synthetic physics generator whenever the
+    # building has not accumulated enough history, and nothing distinguished the two
+    # afterwards. See provenance.lstm_info, which is unit-tested on its own.
     return {
-        "lstm": {
-            "available": MODEL_READY,
-            "trained_on": "this building's own history (supervised)",
-            "reason": None if MODEL_READY else "not trained yet — run train.py",
-        },
+        "lstm": lstm_info(MODEL_READY, PROVENANCE),
         "timesfm": TIMESFM.info(),
     }
 

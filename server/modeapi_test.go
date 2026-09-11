@@ -18,7 +18,7 @@ func TestModeAPI_Get(t *testing.T) {
 	engine := simulation.NewEngine()
 	engine.SetMode(simulation.ModeSimulation)
 
-	handler := modeHandler(engine)
+	handler := modeHandler(engine, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/mode", nil)
 	rec := httptest.NewRecorder()
 
@@ -56,7 +56,7 @@ func TestModeAPI_Get(t *testing.T) {
 
 func TestModeAPI_PostFormats(t *testing.T) {
 	engine := simulation.NewEngine()
-	handler := modeHandler(engine)
+	handler := modeHandler(engine, nil)
 
 	cases := []struct {
 		name        string
@@ -218,7 +218,7 @@ func TestModeAPI_PostFormats(t *testing.T) {
 
 func TestModeAPI_CORSPreflight(t *testing.T) {
 	engine := simulation.NewEngine()
-	handler := modeHandler(engine)
+	handler := modeHandler(engine, nil)
 
 	req := httptest.NewRequest(http.MethodOptions, "/api/mode", nil)
 	rec := httptest.NewRecorder()
@@ -237,7 +237,7 @@ func TestModeAPI_CORSPreflight(t *testing.T) {
 }
 
 func TestModeAPI_NilEngine(t *testing.T) {
-	handler := modeHandler(nil)
+	handler := modeHandler(nil, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/mode", nil)
 	rec := httptest.NewRecorder()
 
@@ -250,7 +250,7 @@ func TestModeAPI_NilEngine(t *testing.T) {
 
 func TestModeAPI_SegregationIntegration(t *testing.T) {
 	engine := simulation.NewEngine()
-	handler := modeHandler(engine)
+	handler := modeHandler(engine, nil)
 
 	// Ensure there is at least one zone for ingestion
 	zoneId := "zone-office-a"

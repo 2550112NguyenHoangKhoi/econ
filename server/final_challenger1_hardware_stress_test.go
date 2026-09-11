@@ -427,7 +427,7 @@ func TestEmpiricalStress_15MinuteManualOverrideLatching(t *testing.T) {
 // Verifies thread safety, absence of deadlocks, and idempotence.
 func TestEmpiricalStress_RapidModeToggleThrashing(t *testing.T) {
 	engine, _, _ := setupStressEngine("zone-mode-thrash", "vav-mode-thrash")
-	h := modeHandler(engine)
+	h := modeHandler(engine, nil)
 
 	numToggles := 500
 	concurrency := 20
@@ -825,7 +825,7 @@ func TestEmpiricalStress_ElectricalDisaggregationInModeReal(t *testing.T) {
 func TestEmpiricalStress_HostileMaxPressureCrossSystem(t *testing.T) {
 	engine, z, v := setupStressEngine("zone-max-pressure", "vav-max-pressure")
 	cmdH := commandHandler(engine)
-	modeH := modeHandler(engine)
+	modeH := modeHandler(engine, nil)
 
 	var wg sync.WaitGroup
 	numRequests := 500

@@ -245,6 +245,30 @@ namespace {
 #endif  // ESP32 && !HOST_TEST
 // -------------------------------------------------------------------------------------
 
+
+// ---- LEDC compatibility ------------------------------------------------------------
+// Arduino core 3.x removed ledcSetup/ledcAttachPin/ledcDetachPin and changed ledcWrite to
+// take a PIN rather than a channel. This node's XCLK is generated through LEDC in ten
+// places, so the difference is wrapped here once instead of being #if'd at every call.
+#if defined(ESP32) && !defined(HOST_TEST)
+  #if ESP_ARDUINO_VERSION_MAJOR >= 3
+    static inline bool xclkStart(uint8_t pin, uint32_t freq) {
+      return ledcAttachChannel(pin, freq, 1, LEDC_CHANNEL_0);   // 1-bit duty resolution
+    }
+    static inline void xclkRun(uint8_t pin)  { ledcWrite(pin, 1); }
+    static inline void xclkStop(uint8_t pin) { ledcDetach(pin); }
+  #else
+    static inline bool xclkStart(uint8_t pin, uint32_t freq) {
+      bool ok = ledcSetup(LEDC_CHANNEL_0, freq, 1) != 0;
+      ledcAttachPin(pin, LEDC_CHANNEL_0);
+      return ok;
+    }
+    static inline void xclkRun(uint8_t pin)  { (void)pin; ledcWrite(LEDC_CHANNEL_0, 1); }
+    static inline void xclkStop(uint8_t pin) { ledcDetachPin(pin); }
+  #endif
+#endif
+// ------------------------------------------------------------------------------------
+
 bool OV7670Driver::init() {
 #if defined(ESP32) && !defined(HOST_TEST)
   // Probe the OV7670 on SCCB to see if it is physically present, so a missing camera falls
@@ -270,12 +294,11 @@ bool OV7670Driver::init() {
 #endif
   delay(5);
 
-  bool xclkUp = ledcSetup(LEDC_CHANNEL_0, 10000000, 1) != 0;
+  bool xclkUp = xclkStart(PIN_CAM_XCLK, 10000000);
   if (!xclkUp) {
     Serial.println("[camera] WARNING: could not start 10 MHz XCLK on LEDC; probe will be unreliable");
   }
-  ledcAttachPin(PIN_CAM_XCLK, LEDC_CHANNEL_0);
-  ledcWrite(LEDC_CHANNEL_0, 1);
+  xclkRun(PIN_CAM_XCLK);
   delay(10);                              // let the clock settle before releasing reset
 
 #if PIN_CAM_RESET >= 0
@@ -416,7 +439,7 @@ bool OV7670Driver::init() {
                   "for a jumper landing in the 3.3V rail row instead of its signal row.\n",
                   PIN_CAM_SIOD, sdaCanLow ? "ok" : "CANNOT GO LOW",
                   PIN_CAM_SIOC, sclCanLow ? "ok" : "CANNOT GO LOW");
-    ledcDetachPin(PIN_CAM_XCLK);
+    xclkStop(PIN_CAM_XCLK);
     Wire.end();
     Wire.begin(PIN_CAM_SIOD, PIN_CAM_SIOC, 100000);
     state_ = DRIVER_SIMULATION_MODE;
@@ -452,7 +475,7 @@ bool OV7670Driver::init() {
     Serial.println("[camera] a line held low shorts the whole bus — every device on it, the "
                    "SHT30 included, will go silent. Find the short to GND on that pin before "
                    "suspecting any sensor. Skipping the scan so the node still boots.");
-    ledcDetachPin(PIN_CAM_XCLK);
+    xclkStop(PIN_CAM_XCLK);
     Wire.end();                                        // hand the pins back to the I2C
     Wire.begin(PIN_CAM_SIOD, PIN_CAM_SIOC, 100000);    // peripheral so the SHT30 still works
     state_ = DRIVER_SIMULATION_MODE;
@@ -558,7 +581,7 @@ bool OV7670Driver::init() {
   }
 
   // Hand XCLK back before esp_camera_init: it configures this same LEDC timer/channel itself.
-  ledcDetachPin(PIN_CAM_XCLK);
+  xclkStop(PIN_CAM_XCLK);
 
   if (i2c_err != 0) {
     Serial.printf("[camera] OV7670 not found on SCCB (addr=0x%02X, err=%d, xclk=%s) -> Simulation Mode\n",
@@ -597,9 +620,8 @@ bool OV7670Driver::init() {
     // no internal oscillator, so without XCLK it cannot drive anything, and "nothing is
     // moving" then says nothing about the wiring or the part. A probe that cannot
     // distinguish a broken camera from a stopped clock is worse than no probe.
-    ledcSetup(LEDC_CHANNEL_0, 10000000, 1);
-    ledcAttachPin(PIN_CAM_XCLK, LEDC_CHANNEL_0);
-    ledcWrite(LEDC_CHANNEL_0, 1);
+    xclkStart(PIN_CAM_XCLK, 10000000);
+    xclkRun(PIN_CAM_XCLK);
     delay(50);                       // let the sensor start free-running before sampling
 
     for (int i = 0; i < nLines; i++) pinMode(lines[i].pin, INPUT);
@@ -613,7 +635,7 @@ bool OV7670Driver::init() {
       }
     }
 
-    ledcDetachPin(PIN_CAM_XCLK);     // hand it back; esp_camera_init reconfigures this channel
+    xclkStop(PIN_CAM_XCLK);     // hand it back; esp_camera_init reconfigures this channel
 
     int dead = 0;
     Serial.print("[camera] parallel bus activity (XCLK running):");

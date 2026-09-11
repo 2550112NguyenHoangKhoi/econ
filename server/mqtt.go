@@ -27,6 +27,20 @@ type telemetryMsg struct {
 	Zone            string   `json:"zone"`
 	Occupancy       *int     `json:"occupancy"`
 	Occupancy2      *int     `json:"occupancy_2"`
+	// Per-head presence-radar state. Occupancy is the OR of these; these say which head
+	// asserted it, so a head stuck high stays visible instead of hiding behind the OR.
+	Radar1          *int     `json:"radar1"`
+	Radar2          *int     `json:"radar2"`
+	// Measured target range in metres from each head's reporting stream. Omitted by the
+	// firmware when there is no target, when the stream stalls, or when the reported range
+	// falls outside the head's own configured gate window.
+	Radar1M         *float64 `json:"radar1_m"`
+	Radar2M         *float64 `json:"radar2_m"`
+	// Per-range-gate reflected energy, 0.7 m per gate, straight off the head's reporting
+	// stream. -1 marks a gate the module blanks in its near field. This is the only part of
+	// that stream that measures the room, so it is the only part carried through.
+	Radar1Gates     []int    `json:"radar1_gates"`
+	Radar2Gates     []int    `json:"radar2_gates"`
 	Temperature     *float64 `json:"temperature"`
 	Humidity        *float64 `json:"humidity"`
 	Co2             *float64 `json:"co2"`

@@ -52,7 +52,10 @@ export default function MobileAIScreen({
   const { precool, weather } = useOpsStatus();
   const { status: plugStatus } = usePlugs();
   // Learned anomaly recommendations — the same σ-scored model the desktop panel shows.
-  const { recommendations, model: recModel, forecast: recForecast } = useRecommendations();
+  // hardware/realMode carry what the engine can actually reach and whether it filtered
+  // this list against that. See useRecommendations — on a phone, where there is no room
+  // for a second panel, an unexplained empty list is the whole screen.
+  const { recommendations, model: recModel, forecast: recForecast, hardware: recHardware, realMode } = useRecommendations();
 
   // Forecast data from live compare endpoint with fallback to embedded recommendations payload
   const { timesfm, lstm: lstmCompare, series: tfmSeries, stepMinutes: compareStepMinutes,
@@ -418,6 +421,16 @@ export default function MobileAIScreen({
         </div>
       )}
 
+      {/* An empty list is ambiguous and the ambiguity matters more here than anywhere: in
+          real mode the engine withholds any recommendation whose actuator is not wired
+          (server/simulation/capability.go), so "nothing to show" can mean the building is
+          well OR that nothing is connected. Saying which is not decoration. */}
+      <RecommendationsEmptyState
+        count={recs.length}
+        hardware={recHardware}
+        realMode={realMode}
+      />
+
       <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
         {recs.map((r) => (
           <RecCard
@@ -429,9 +442,9 @@ export default function MobileAIScreen({
             matureAfter={recModel?.matureAfter}
             horizonMin={recModel?.horizonMin ?? 30}
             forecast={activeForecast}
-            limit={r.rec?.metric === 'temp'
-              ? (simData.zones?.[r.rec.zone]?.setpoint ?? 0) + 1
-              : r.rec?.metric === 'co2' ? 1000 : undefined}
+            // The engine's own evaluated ceiling, not one re-derived here. See the
+            // note beside the same prop in AiInsightsPanel.
+            limit={r.rec?.limit > 0 ? r.rec.limit : undefined}
           />
         ))}
       </div>
@@ -600,6 +613,47 @@ function RecCard({ rec, done, onEngage, model, matureAfter, limit, forecast }) {
 // same honesty as the desktop card: a room that has not been identified does not appear,
 // and a cooling authority fitted against the library's design supply temperature says so
 // rather than passing as a measured one.
+// RecommendationsEmptyState explains a blank list rather than leaving it blank.
+//
+// Nothing here is computed: every number is a count the engine sent, and if it sent none
+// the component says only what it can stand behind. A reassuring "all clear" over an engine
+// that is wired to nothing would be the most damaging sentence on this screen.
+function RecommendationsEmptyState({ count, hardware, realMode }) {
+  if (count > 0) return null;
+
+  let headline = 'Nothing flagged right now';
+  let detail = 'No signal is far enough from this building’s own learned normal to raise.';
+  let tone = 'rgba(255,255,255,0.4)';
+
+  if (realMode && hardware) {
+    if (hardware.nodesOnline === 0) {
+      headline = 'Nothing connected';
+      detail = hardware.nodesBound > 0
+        ? `${hardware.nodesBound} node${hardware.nodesBound === 1 ? ' is' : 's are'} bound but none is online. The engine is not measuring this building, so an empty list here says nothing about how it is running.`
+        : 'No edge node has ever reported. The engine is running physics alone — an empty list here says nothing about how the building is running.';
+      tone = 'var(--accent-yellow, #eab308)';
+    } else if (hardware.acControlled === 0 && hardware.acMetered === 0 && hardware.co2Sensed === 0) {
+      headline = 'Nothing this hardware can speak to';
+      detail = `${hardware.nodesOnline} node${hardware.nodesOnline === 1 ? '' : 's'} online, but no zone has AC control, an AC clamp or a CO₂ sensor — so there is nothing the engine could raise a grounded recommendation about.`;
+      tone = 'var(--accent-yellow, #eab308)';
+    } else {
+      detail = `Checked against the ${hardware.nodesOnline} node${hardware.nodesOnline === 1 ? '' : 's'} currently reporting. Recommendations are limited to what this hardware can actually carry out.`;
+    }
+  } else if (realMode) {
+    detail = 'No signal is far enough from normal to raise. The engine has not reported what hardware it can reach.';
+  }
+
+  return (
+    <div style={{
+      border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px',
+      padding: '14px', marginBottom: '12px', background: 'rgba(255,255,255,0.02)',
+    }}>
+      <div style={{ fontSize: '13px', fontWeight: 600, color: tone, marginBottom: '4px' }}>{headline}</div>
+      <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.45)', lineHeight: 1.5 }}>{detail}</div>
+    </div>
+  );
+}
+
 function RoomModelsMobile({ rooms = [], identified = 0, matureAfter, learning = 0, onFocusZone }) {
   const [open, setOpen] = useState(false);
   if (!rooms.length) {

@@ -69,7 +69,138 @@ char CLIENT_ID[32];                         // econ-esp32-<ZONE_TOPIC>
 // with the compile-time flags above as its defaults. ZONE_TOPIC deliberately stays
 // compile-time: it is this node's identity on the bus, the thing its retained LWT and
 // its command subscription are keyed on, so changing it at runtime would orphan both.
+#include <Preferences.h>
 #include "node_config.h"
+
+// ---------------------------------------------------------------------------------------
+// WiFi provisioning.
+//
+// Credentials used to live only in wifi_secrets.h, so moving the node to another network
+// meant editing a header and reflashing. These are stored in NVS instead: pick a network
+// from a scan by number, type the password once, and it survives reboots and reflashes.
+// The compile-time values in wifi_secrets.h remain the fallback for a node that has never
+// been provisioned.
+static Preferences gWifiPrefs;
+static String  gScanSsids[24];        // index -> SSID from the last scan
+static int     gScanCount = 0;
+
+static bool wifiLoadSaved(String* ssid, String* pass) {
+  if (!gWifiPrefs.begin("econwifi", true)) return false;
+  *ssid = gWifiPrefs.getString("ssid", "");
+  *pass = gWifiPrefs.getString("pass", "");
+  gWifiPrefs.end();
+  return ssid->length() > 0;
+}
+
+static void wifiSaveCredentials(const String& ssid, const String& pass) {
+  if (!gWifiPrefs.begin("econwifi", false)) {
+    Serial.println("[wifi] could not open NVS — credentials NOT saved");
+    return;
+  }
+  gWifiPrefs.putString("ssid", ssid);
+  gWifiPrefs.putString("pass", pass);
+  gWifiPrefs.end();
+  // Never echo the password, not even its length.
+  Serial.printf("[wifi] saved \"%s\" to NVS — will be used on every boot from now on\n",
+                ssid.c_str());
+}
+
+static void wifiForget() {
+  if (gWifiPrefs.begin("econwifi", false)) {
+    gWifiPrefs.clear();
+    gWifiPrefs.end();
+  }
+  Serial.println("[wifi] saved credentials cleared — reverting to wifi_secrets.h on next boot");
+}
+#ifndef USE_MMWAVE_UART
+  #define USE_MMWAVE_UART 0
+#endif
+#ifndef USE_MMWAVE2_UART
+  #define USE_MMWAVE2_UART 0
+#endif
+// Per-head liveness. Defaults to true: with no UART wired we cannot know, and refusing to
+// report a head we simply cannot interrogate would be worse than trusting OT2. Where the
+// UART *is* wired, a head that does not answer is known-dead and its OT2 must be ignored.
+#ifndef RD03_SET_MIN_GATE
+  #define RD03_SET_MIN_GATE 1         // exclude gate 0: the module's own near field
+#endif
+#ifndef RD03_SET_MAX_GATE
+  #define RD03_SET_MAX_GATE 15
+#endif
+static bool gRadarAlive[2] = { true, true };
+// Result of the boot-time OT2 pull test. On a clean GPIO (13/14) this is conclusive: a pin
+// that follows BOTH internal pulls has nothing driving it. That is the correct gate for
+// presence -- not UART liveness, which is a separate channel, and not blind trust, which
+// publishes a floating pin's pull-up as occupancy.
+static bool gOt2Driven[2] = { true, true };
+
+// Re-test whether an OT2 pin is driven. The Rd-03 needs ~30 s after power-up before its
+// output stage is live, and the boot probe runs long before that -- so a cold start reads an
+// un-driven pin, marks it OPEN, and the radar stays excluded until the next reboot even
+// though the head comes up fine seconds later. A one-shot verdict on a device with a warm-up
+// time is a latch, not a test. Returns true if something is driving the pin.
+static bool ot2PullTest(uint8_t pin) {
+  if (pin == 255) return false;
+  if (pin == 15 || pin >= 34) return true;      // untestable: external pull-up / no pulls
+  pinMode(pin, INPUT_PULLDOWN); delay(4);
+  const bool heldHigh = digitalRead(pin) == HIGH;
+  pinMode(pin, INPUT_PULLUP);   delay(4);
+  const bool heldLow  = digitalRead(pin) == LOW;
+  pinMode(pin, INPUT);
+  return heldHigh || heldLow;
+}
+// Live view from each head's reporting stream. OT2 is a boolean with a configurable hold;
+// this is the module's own verdict plus the range it measured, refreshed every frame.
+static bool     gRadarStream[2]   = { false, false };  // head is parked in reporting mode
+static uint8_t  gRadarDetect[2]   = { 0, 0 };
+static uint16_t gRadarDistCm[2]   = { 0, 0 };
+static uint32_t gRadarEnergy[2][16];                   // per-range-gate energy, 0.7 m per gate
+static int      gRadarGates[2]    = { 0, 0 };
+static uint32_t gRadarSeen[2]     = { 0, 0 };          // millis of last parsed frame
+// ---------------------------------------------------------------------------------------
+// Physical pin-contention guard.
+//
+// USE_CAMERA=0 stops the firmware driving the OV7670's pins, but it does NOT unplug the
+// sensor. If those jumpers are still on the board, the OV7670's data pins are OUTPUTS
+// sitting on the same nets we now use for the radars -- two drivers on one wire. The
+// symptoms are exactly what a "faulty" sensor looks like: corrupted UART frames, OT2 stuck
+// at a level nothing set, energy values that make no physical sense.
+//
+// Software cannot detect this, so it is asserted at compile time. If a collision below is
+// intentional because the camera wiring is genuinely gone, build with
+// -DCAMERA_WIRING_REMOVED=1 to acknowledge it.
+#if !defined(CAMERA_WIRING_REMOVED)
+  #include "camera/camera_config.h"
+  #define RD03_PIN_CLASH(a, b) ((a) >= 0 && (a) == (b))
+  #if USE_MMWAVE && (RD03_PIN_CLASH(PIN_CAM_D7, MMWAVE_PIN) || RD03_PIN_CLASH(PIN_CAM_RESET, MMWAVE_PIN))
+    #warning "RADAR HEAD 1 OT2 SHARES A PIN WITH AN OV7670 DATA LINE. Unplug the camera from that pin, or build with -DCAMERA_WIRING_REMOVED=1 once its jumpers are physically off."
+  #endif
+  #if USE_MMWAVE_UART
+    #warning "RADAR HEAD 1 UART (GPIO16/17) sits on OV7670 D3/D4. Those jumpers must be physically removed."
+  #endif
+  #if USE_MMWAVE2_UART
+    #warning "RADAR HEAD 2 UART (GPIO4/18) sits on OV7670 D0/D5. Those jumpers must be physically removed."
+  #endif
+#endif
+
+#if USE_MMWAVE_UART || USE_MMWAVE2_UART
+  #include "rd03_uart.h"
+  // Two heads, two hardware UARTs. UART0 is the USB console, so head 1 takes UART2 and
+  // head 2 takes UART1 -- both remapped onto pins the retired camera gave back. No
+  // software serial, so neither head's timing depends on the other.
+  #ifndef MMWAVE_UART_RX          // ESP32 pin that listens to head 1's TX
+    #define MMWAVE_UART_RX 16
+  #endif
+  #ifndef MMWAVE_UART_TX          // ESP32 pin that drives head 1's RX
+    #define MMWAVE_UART_TX 17
+  #endif
+  #ifndef MMWAVE2_UART_RX         // ESP32 pin that listens to head 2's TX
+    #define MMWAVE2_UART_RX 18
+  #endif
+  #ifndef MMWAVE2_UART_TX         // ESP32 pin that drives head 2's RX
+    #define MMWAVE2_UART_TX 19
+  #endif
+#endif
 #include "current_denoiser.h"
 // ZONE_LABEL is now gCfg.zoneLabel; this alias keeps the telemetry call site readable.
 #define ZONE_LABEL (gCfg.zoneLabel)
@@ -432,8 +563,13 @@ bool  hvacPowerOn    = true;
 // ---------------- WIFI ----------------
 void setupWifi() {
   WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASS);
-  Serial.printf("[wifi] connecting to %s", WIFI_SSID);
+  String savedSsid, savedPass;
+  const bool haveSaved = wifiLoadSaved(&savedSsid, &savedPass);
+  const char* useSsid = haveSaved ? savedSsid.c_str() : WIFI_SSID;
+  const char* usePass = haveSaved ? savedPass.c_str() : WIFI_PASS;
+  WiFi.begin(useSsid, usePass);
+  Serial.printf("[wifi] connecting to %s (%s)", useSsid,
+                haveSaved ? "saved in NVS" : "compiled default");
   while (WiFi.status() != WL_CONNECTED) { delay(400); Serial.print("."); }
   Serial.printf("\n[wifi] connected, ip=%s\n", WiFi.localIP().toString().c_str());
 }
@@ -711,10 +847,26 @@ static int sampleAdcWindow(uint8_t pin, int* buf, uint32_t* worstSlipUs) {
 #if USE_PLUG
 bool plugOn = true;  // fail-energized: sockets are live until the engine says otherwise
 
+// Relay modules come in both polarities and the difference is invisible in telemetry: the
+// logical state flips either way, only the contacts move the wrong direction. Opto-isolated
+// boards (the common SRD-05VDC-SL-C carrier among them) are usually ACTIVE LOW -- the coil
+// energizes when the input is pulled low. Build with -DPLUG_RELAY_ACTIVE_LOW=1 for those.
+#ifndef PLUG_RELAY_ACTIVE_LOW
+  #define PLUG_RELAY_ACTIVE_LOW 0
+#endif
+#if PLUG_RELAY_ACTIVE_LOW
+  #define PLUG_LEVEL(on) ((on) ? LOW : HIGH)
+#else
+  #define PLUG_LEVEL(on) ((on) ? HIGH : LOW)
+#endif
+
 void setPlug(bool on) {
   plugOn = on;
-  digitalWrite(gCfg.pinPlugRelay, on ? HIGH : LOW);
-  Serial.printf("[relay] plug circuit %s\n", on ? "ON" : "OFF");
+  digitalWrite(gCfg.pinPlugRelay, PLUG_LEVEL(on));
+  Serial.printf("[relay] plug circuit %s (GPIO%d driven %s, active-%s module)\n",
+                on ? "ON" : "OFF", gCfg.pinPlugRelay,
+                PLUG_LEVEL(on) == HIGH ? "HIGH" : "LOW",
+                PLUG_RELAY_ACTIVE_LOW ? "LOW" : "HIGH");
 }
 
 // Noise floor for THIS channel, measured on the node rather than assumed.
@@ -1079,9 +1231,16 @@ void handleCommand(const String& msg) {
           
           decode_type_t protocol = strToDecodeType(protoStr.c_str());
           uint64_t data = strtoull(dataStr.c_str(), NULL, 16);
-          uint16_t nbits = bitsStr.toInt();
-          
-          if (protocol != decode_type_t::UNKNOWN) {
+          const long nbitsRaw = bitsStr.toInt();
+          const uint16_t nbits = (uint16_t)nbitsRaw;
+
+          // toInt() returns 0 for non-numeric input, so garbage would otherwise be sent as a
+          // zero-bit frame and reported as success. Bound it to what the IR library can
+          // actually emit rather than passing an arbitrary count straight through.
+          if (nbitsRaw <= 0 || nbitsRaw > 512) {
+            Serial.printf("[ir] rejected bit count \"%s\" (parsed %ld; expected 1..512)\n",
+                          bitsStr.c_str(), nbitsRaw);
+          } else if (protocol != decode_type_t::UNKNOWN) {
             customIrSend.send(protocol, data, nbits);
             Serial.printf("[ir] sent %s: 0x%llx (%d bits)\n", protoStr.c_str(), (unsigned long long)data, nbits);
           } else {
@@ -1096,6 +1255,48 @@ void handleCommand(const String& msg) {
 #if USE_PLUG
     // After-hours sweep (APLC, plugs.go): the engine sheds the zone's non-critical
     // sockets on verified vacancy and restores them the instant presence returns.
+#if USE_MMWAVE_UART || USE_MMWAVE2_UART
+    // Runtime radar tuning. Every gate/delay/frame-filter change this session needed a
+    // reflash and a 90-second round trip; these make it a command. Applied to both heads,
+    // and re-read so the reply is the module's state rather than what we hoped it took.
+    else if (tok.startsWith("RADAR_GATES=") || tok.startsWith("RADAR_DELAY=") ||
+             tok.startsWith("RADAR_FRAMES=")) {
+      const int eq = tok.indexOf('=');
+      String val = tok.substring(eq + 1);
+      long a = -1, b = -1;
+      const int comma = val.indexOf(',');
+      if (comma >= 0) { a = val.substring(0, comma).toInt(); b = val.substring(comma + 1).toInt(); }
+      else            { a = val.toInt(); }
+
+      for (int h = 0; h < 2; h++) {
+        Stream* io = nullptr; const char* label = nullptr;
+  #if USE_MMWAVE_UART
+        if (h == 0) { io = &Serial2; label = "head1"; }
+  #endif
+  #if USE_MMWAVE2_UART
+        if (h == 1) { io = &Serial1; label = "head2"; }
+  #endif
+        if (!io || !gRadarAlive[h]) continue;
+        const bool wasStreaming = gRadarStream[h];
+        if (tok.startsWith("RADAR_GATES=") && a >= 0 && b >= 0) {
+          rd03::applyConfig(*io, label, (uint32_t)a, (uint32_t)b, (uint32_t)RD03_SET_DELAY_S);
+        } else if (tok.startsWith("RADAR_DELAY=") && a >= 0) {
+          rd03::applyConfig(*io, label, (uint32_t)RD03_SET_MIN_GATE,
+                            (uint32_t)RD03_SET_MAX_GATE, (uint32_t)a);
+        } else if (tok.startsWith("RADAR_FRAMES=")) {
+          rd03::frameFilters(*io, label, a, b);
+        }
+        rd03::dumpConfig(*io, label);
+        // applyConfig leaves the head in command mode's aftermath; restore the stream.
+        if (wasStreaming) gRadarStream[h] = rd03::enableReporting(*io, label);
+      }
+    }
+#endif
+    else if (tok == "REBOOT") {
+      Serial.println("[cmd] REBOOT requested — restarting node");
+      delay(200);
+      ESP.restart();
+    }
     else if (tok == "PLUG_ON")  setPlug(true);
     else if (tok == "PLUG_OFF") setPlug(false);
 #endif
@@ -1182,7 +1383,12 @@ void readAndPublish() {
 #if defined(__SIZEOF_POINTER__) && __SIZEOF_POINTER__ == 8
   StaticJsonDocument<1536> doc; // Scaled for 64-bit host test shims (32-byte slots)
 #else
-  StaticJsonDocument<768> doc;  // 768 bytes for physical 32-bit ESP32 hardware (16-byte slots)
+  // 2048, not 768. The per-gate radar arrays add two 16-element integer arrays; at 768 the
+  // document silently overflowed and ArduinoJson dropped them with no error anywhere -- the
+  // serial print showed the array because that happens before serialization, while the MQTT
+  // payload that actually left the node did not contain it. The overflow check below exists
+  // so that failure mode can never be silent again.
+  StaticJsonDocument<2048> doc; // physical 32-bit ESP32 hardware (16-byte slots)
 #endif
   doc["zone"]   = ZONE_LABEL;
   doc["source"] = "esp32";
@@ -1229,7 +1435,8 @@ void readAndPublish() {
 #if USE_CAMERA
   present = cameraDetector->isPersonDetected();
   #if USE_MMWAVE
-    if (digitalRead(gCfg.pinMmwave) == HIGH) present = true;
+    if (gOt2Driven[0] && gCfg.pinMmwave  != 255 && digitalRead(gCfg.pinMmwave)  == HIGH) present = true;
+    if (gOt2Driven[1] && gCfg.pinMmwave2 != 255 && digitalRead(gCfg.pinMmwave2) == HIGH) present = true;
   #endif
   occupancy = present ? (cameraDetector->getPersonCount() > 0 ? cameraDetector->getPersonCount() : 1) : 0;
   doc["confidence"] = round(cameraDetector->getConfidence() * 100) / 100.0;
@@ -1252,7 +1459,85 @@ void readAndPublish() {
   doc["confidence"] = present ? 1.0 : 0.0;
   doc["person_count"] = occupancy;
 #endif
+  // Occupancy is published only when at least one presence source is trustworthy.
+  //
+  // With both OT2 pins failing the wiring check there is nothing measuring the room, and a
+  // "0" here would state that the room is empty on the authority of two floating pins --
+  // a fabricated measurement on a channel the engine acts on. Omitting the field instead
+  // makes the gap visible: the engine sees no occupancy rather than a confident wrong one,
+  // and the inspector shows it as never-reported with the omitted count climbing.
+// NOTE: deliberately not gated on USE_TOUCH_PRESENCE. That macro is defined to 1
+// unconditionally further up this file, so including it here compiled the whole guard away
+// and occupancy kept being published from failed pins. The occupancy chain above selects
+// the mmwave/PIR branch ahead of touch anyway, so USE_MMWAVE || USE_PIR is the right test.
+#if (USE_MMWAVE || USE_PIR) && !USE_CAMERA
+  bool occupancyTrustworthy = false;
+  #if USE_MMWAVE
+    // Only a pin proven to be driven can make occupancy trustworthy. With both OT2 lines
+    // open, "occupancy: 1" would be the pins' own bias reported as a measurement.
+    if (gOt2Driven[0] && gCfg.pinMmwave  != 255) occupancyTrustworthy = true;
+    if (gOt2Driven[1] && gCfg.pinMmwave2 != 255) occupancyTrustworthy = true;
+  #endif
+  #if USE_PIR
+    occupancyTrustworthy = true;            // PIRs have no self-test; trust the wiring
+  #endif
+  if (occupancyTrustworthy) {
+    doc["occupancy"] = occupancy;
+  } else {
+    static uint32_t lastOccWarn = 0;
+    if (millis() - lastOccWarn > 30000) {
+      lastOccWarn = millis();
+      Serial.printf("[presence] occupancy OMITTED — no trustworthy presence source. "
+                    "Both radar OT2 pins failed the wiring check, so any value here would "
+                    "be the pins' pull-ups, not the room.\n");
+    }
+  }
+#else
   doc["occupancy"] = occupancy;
+#endif
+
+  // Per-head radar state alongside the fused occupancy. The engine consumes `occupancy`,
+  // which is the OR of the heads; these two say which head is asserting. Without them a
+  // head stuck high is indistinguishable from a genuinely occupied room downstream --
+  // the OR hides it, which is the failure this node already walked into once.
+#if USE_MMWAVE
+  // A head that is not answering is omitted rather than reported. Publishing its floating
+  // pin would put a fabricated presence on a measured channel; publishing a 0 would claim
+  // we measured "empty" when we measured nothing at all.
+  // OT2 is a direct pin read and does NOT depend on the UART. These were previously gated on
+  // gRadarAlive (set by the UART probe), so when head1's serial port went quiet its perfectly
+  // good presence pin was suppressed too and radar1 went stale for nine minutes. Two
+  // independent channels; only the UART-derived data below depends on the UART.
+  if (gOt2Driven[0] && gCfg.pinMmwave  != 255) doc["radar1"] = digitalRead(gCfg.pinMmwave)  == HIGH ? 1 : 0;
+  if (gOt2Driven[1] && gCfg.pinMmwave2 != 255) doc["radar2"] = digitalRead(gCfg.pinMmwave2) == HIGH ? 1 : 0;
+  // Per-range-gate energy. THIS is the real measurement in the reporting frame -- gates 2..15
+  // vary frame to frame with a physically sensible decay, and they move when the room moves.
+  // (Gates 0..1 read a constant 0xFFFF near-field blanking sentinel and are sent as -1 so the
+  // dashboard can mark them blanked instead of plotting a bar 65535 high.)
+  for (int h = 0; h < 2; h++) {
+    if (!gRadarStream[h] || millis() - gRadarSeen[h] > 3000 || gRadarGates[h] == 0) continue;
+    JsonArray arr = doc.createNestedArray(h == 0 ? "radar1_gates" : "radar2_gates");
+    for (int g = 0; g < gRadarGates[h]; g++) {
+      arr.add(gRadarEnergy[h][g] == 0xFFFF ? -1 : (int32_t)gRadarEnergy[h][g]);
+    }
+  }
+
+  // NO DISTANCE IS PUBLISHED. The reporting frame has a target-distance field, and on this
+  // module's firmware it does not measure anything: it tracks the configured minimum gate.
+  // Holding the room constant and changing only the config moved it deterministically --
+  //
+  //     min gate 0 -> 11 cm      min gate 1 -> 35 cm      min gate 3 -> 175 cm
+  //
+  // i.e. the centre of gate (minGate-1) every time. The `detected` byte is likewise stuck
+  // at 1 in every configuration. Publishing either would put a fabricated measurement on a
+  // channel that implies a real one, so both are dropped and OT2 -- which does track the
+  // room -- remains the presence source.
+  //
+  // What IS real in that frame is the per-gate energy array (gates 2..15 vary frame to
+  // frame with a sensible physical decay; gates 0..1 read a constant 0xFFFF near-field
+  // blanking sentinel). Deriving a range from it would need background subtraction against
+  // a learned per-gate baseline -- a real estimator, not a field read. Not built.
+#endif
 
   // --- CO2 ---
 #if USE_CO2
@@ -1332,9 +1617,23 @@ void readAndPublish() {
   doc["acReal"] = false;
 #endif
 
-  char buf[768];
-  size_t n = serializeJson(doc, buf);
-  client.publish(TELEMETRY_TOPIC, buf, n);
+  // Three separate limits have to agree or fields vanish without a word: the document's
+  // capacity, this serialisation buffer, and the MQTT client's buffer. They disagreed once
+  // (768/768/768 vs a payload that grew past it) and the radar gate arrays were dropped
+  // silently -- printed on serial, absent from the wire. Check and shout instead.
+  char buf[2048];
+  if (doc.overflowed()) {
+    Serial.printf("[mqtt] TELEMETRY DOC OVERFLOWED — fields were dropped from this payload. "
+                  "Raise StaticJsonDocument capacity.\n");
+  }
+  size_t n = serializeJson(doc, buf, sizeof(buf));
+  if (n == 0 || n >= sizeof(buf) - 1) {
+    Serial.printf("[mqtt] serialize produced %u bytes for a %u-byte buffer — payload truncated\n",
+                  (unsigned)n, (unsigned)sizeof(buf));
+  }
+  if (!client.publish(TELEMETRY_TOPIC, buf, n)) {
+    Serial.printf("[mqtt] publish REJECTED (%u bytes) — client buffer too small?\n", (unsigned)n);
+  }
   Serial.printf("[mqtt] pub %s -> %s\n", TELEMETRY_TOPIC, buf);
 }
 
@@ -1503,8 +1802,149 @@ void setup() {
   Serial.printf("[pir] dual PIR sensors initialized on GPIO%d and GPIO%d\n", gCfg.pinPir1, gCfg.pinPir2);
 #endif
 #if USE_MMWAVE
-  pinMode(gCfg.pinMmwave, INPUT);
-  Serial.printf("[mmwave] LD2410C presence on GPIO%d (holds for stationary occupants)\n", gCfg.pinMmwave);
+  // Two Rd-03_V2 heads. OT2 is push-pull, so it holds its level against the internal
+  // pull -- that is how a connected head is told apart from an open pin, which matters
+  // because an unconnected input reads HIGH on a pin with a pull-up (GPIO15/MTDO has
+  // one) and reads as random toggling on a bare pin, and BOTH look like presence.
+  // GPIO34-39 are input-only with no internal pulls, so there the evidence is instead
+  // that the reading is steady rather than noisy.
+  for (int i = 0; i < 2; i++) {
+    const uint8_t pin = (i == 0) ? gCfg.pinMmwave : gCfg.pinMmwave2;
+    if (pin == 255) continue;
+    if (pin >= 34) {
+      pinMode(pin, INPUT);
+      int hi = 0;
+      for (int k = 0; k < 64; k++) { hi += digitalRead(pin) == HIGH; delayMicroseconds(200); }
+      Serial.printf("[mmwave] RD03-%d GPIO%d input-only; %d/64 high (%s)\n", i + 1, pin, hi,
+                    (hi == 64 || hi == 0) ? "steady -> driven" : "noisy -> OPEN, nothing on this pin");
+    } else {
+      pinMode(pin, INPUT_PULLDOWN); delay(5);
+      const bool heldHigh = digitalRead(pin) == HIGH;
+      pinMode(pin, INPUT_PULLUP);   delay(5);
+      const bool heldLow  = digitalRead(pin) == LOW;
+      pinMode(pin, INPUT);
+      // Conclusive on a clean GPIO: holding HIGH against the internal pull-down, or LOW
+      // against the internal pull-up, means something is actively driving the pin.
+      //
+      // GPIO15 is the exception and must be called out, not quietly folded in: it is a
+      // strapping pin and DevKit boards fit an external pull-up far stronger than the
+      // internal pull-down, so it reads "driven high" even with the head unplugged. That
+      // caveat once led to the opposite of the truth being reported here, so the pin is
+      // named explicitly rather than the result being hedged for every pin.
+      const bool open_ = !heldHigh && !heldLow;
+      const bool untestable = (pin == 15) || (pin >= 34);
+      gOt2Driven[i] = untestable ? true : !open_;   // untestable pins get the benefit of the doubt
+      const char* verdict;
+      if (untestable)        verdict = (pin >= 34)
+                               ? "input-only pin, no internal pulls — NOT TESTABLE"
+                               : "GPIO15 has an external pull-up — NOT TESTABLE";
+      else if (heldHigh)     verdict = "DRIVEN HIGH by the module (OT2 connected, sensing)";
+      else if (heldLow)      verdict = "DRIVEN LOW by the module (OT2 connected, clear)";
+      else                   verdict = "FLOATS BOTH WAYS -- OPEN, nothing on this pin";
+      Serial.printf("[mmwave] RD03-%d GPIO%d pull test: pulldown=%s pullup=%s -> %s\n", i + 1, pin,
+                    heldHigh ? "HIGH" : "low", heldLow ? "LOW" : "high", verdict);
+    }
+  }
+  Serial.printf("[mmwave] 24GHz presence radar on GPIO%d%s, OT2 digital output (holds for "
+                "stationary occupants)\n", gCfg.pinMmwave,
+                gCfg.pinMmwave2 == 255 ? "" : " + a second head");
+#endif
+#if USE_MMWAVE_UART || USE_MMWAVE2_UART
+  // OT2 alone cannot explain a head that never clears; its range gate and disappearance
+  // delay can, and both live behind the UART. Read them out at boot so the numbers are
+  // on the console instead of being guessed at.
+  //
+  // Each head is configured independently: they are separate modules with their own flash,
+  // so a setting written to one says nothing about the other. Both are reported even when
+  // only one answers, because "head 2 did not ACK" is itself the diagnosis.
+  // Both heads stream continuously whenever they are not in command mode, and only one is
+  // being talked to at a time -- so the other one is filling its RX buffer with nobody
+  // reading. The default 256 bytes is about six frames; head 2 overruns it during head 1's
+  // sniff. Give each port room and drain it before use.
+  #if USE_MMWAVE_UART
+    Serial2.setRxBufferSize(2048);
+    Serial2.begin(115200, SERIAL_8N1, MMWAVE_UART_RX, MMWAVE_UART_TX);
+  #endif
+  #if USE_MMWAVE2_UART
+    Serial1.setRxBufferSize(2048);
+    Serial1.begin(115200, SERIAL_8N1, MMWAVE2_UART_RX, MMWAVE2_UART_TX);
+  #endif
+  delay(50);
+  for (int h = 0; h < 2; h++) {
+    Stream* io = nullptr;
+    const char* label = nullptr;
+    if (h == 0) {
+  #if USE_MMWAVE_UART
+      io = &Serial2; label = "head1";
+  #endif
+    } else {
+  #if USE_MMWAVE2_UART
+      io = &Serial1; label = "head2";
+  #endif
+    }
+    if (!io) continue;
+    const int headIndex = h;
+    // A UART whose buffer overran while we were busy with the other head can stay wedged.
+    // Re-initialising the port costs nothing here and removes that as a variable.
+    if (h == 0) {
+  #if USE_MMWAVE_UART
+      Serial2.end(); Serial2.setRxBufferSize(2048);
+      Serial2.begin(115200, SERIAL_8N1, MMWAVE_UART_RX, MMWAVE_UART_TX);
+  #endif
+    } else {
+  #if USE_MMWAVE2_UART
+      Serial1.end(); Serial1.setRxBufferSize(2048);
+      Serial1.begin(115200, SERIAL_8N1, MMWAVE2_UART_RX, MMWAVE2_UART_TX);
+  #endif
+    }
+    delay(50);
+    while (io->available()) (void)io->read();
+    gRadarAlive[headIndex] = rd03::dumpConfig(*io, label);
+    if (!gRadarAlive[headIndex]) {
+      Serial.printf("[mmwave] %s is NOT ANSWERING — treating it as absent. Its OT2 pin will be "
+                    "IGNORED for occupancy and omitted from telemetry, because an unpowered "
+                    "head leaves that pin floating and a floating pin reads as PRESENT.\n", label);
+    }
+  #if defined(RD03_SET_MAX_GATE) && defined(RD03_SET_DELAY_S)
+    rd03::applyConfig(*io, label, (uint32_t)RD03_SET_MIN_GATE, (uint32_t)RD03_SET_MAX_GATE,
+                      (uint32_t)RD03_SET_DELAY_S);
+    rd03::dumpConfig(*io, label);
+  #endif
+  #ifdef RD03_SNIFF_S
+    rd03::sniff(*io, label, (uint32_t)RD03_SNIFF_S);
+  #endif
+  #ifdef RD03_FRAME_FILTERS
+    if (gRadarAlive[headIndex]) {
+      #ifndef RD03_FRAMES_DETECT
+        #define RD03_FRAMES_DETECT -1
+      #endif
+      #ifndef RD03_FRAMES_VANISH
+        #define RD03_FRAMES_VANISH -1
+      #endif
+      rd03::frameFilters(*io, label, RD03_FRAMES_DETECT, RD03_FRAMES_VANISH);
+    }
+  #endif
+  #ifdef RD03_DUMP_THRESHOLDS
+    if (gRadarAlive[headIndex]) {
+      // Grab one live frame's energy profile first, so thresholds and energy are compared
+      // against each other rather than against a remembered number.
+      uint32_t e[32] = {0}; int gcount = 0;
+      if (rd03::enableReporting(*io, label)) {
+        uint8_t det = 0; uint16_t dist = 0;
+        for (int tries = 0; tries < 40; tries++) {
+          if (rd03::readReportFrame(*io, &det, &dist, e, 32, &gcount, 500)) break;
+        }
+      }
+      rd03::dumpThresholds(*io, label, e, gcount);
+    }
+  #endif
+    // Leave the head streaming. The reporting frame carries the module's own detection flag
+    // and the range it measured, which is strictly more than OT2's single bit -- and it is
+    // a real measurement, so the dashboard can show a distance instead of implying one.
+    if (gRadarAlive[headIndex]) {
+      gRadarStream[headIndex] = rd03::enableReporting(*io, label);
+    }
+  }
 #endif
 #if USE_CO2
   #if CO2_ABC_OFF
@@ -1638,12 +2078,33 @@ void setup() {
   snprintf(CONFIG_STATE_TOPIC, sizeof(CONFIG_STATE_TOPIC), "econ/config/%s/state", ZONE_TOPIC);
   snprintf(CLIENT_ID,          sizeof(CLIENT_ID),          "econ-esp32-%s",       ZONE_TOPIC);
 
+  // snprintf truncates instead of failing, so a long ZONE_TOPIC would silently produce a
+  // topic nobody is subscribed to. Check every one rather than discover it as "the node
+  // publishes but the engine never sees it".
+  {
+    struct { const char* name; const char* val; size_t cap; } topics[] = {
+      { "TELEMETRY", TELEMETRY_TOPIC,    sizeof(TELEMETRY_TOPIC) },
+      { "COMMAND",   COMMAND_TOPIC,      sizeof(COMMAND_TOPIC) },
+      { "STATUS",    STATUS_TOPIC,       sizeof(STATUS_TOPIC) },
+      { "CONFIG",    CONFIG_TOPIC,       sizeof(CONFIG_TOPIC) },
+      { "CFGSTATE",  CONFIG_STATE_TOPIC, sizeof(CONFIG_STATE_TOPIC) },
+      { "CLIENTID",  CLIENT_ID,          sizeof(CLIENT_ID) },
+    };
+    for (auto& t : topics) {
+      if (strlen(t.val) >= t.cap - 1) {
+        Serial.printf("[mqtt] FATAL: %s topic TRUNCATED at %u chars (\"%s\") — zone name is "
+                      "too long. This node would talk on the wrong topic.\n",
+                      t.name, (unsigned)t.cap, t.val);
+      }
+    }
+  }
+
   setupWifi();
 #if USE_CAMERA
   streamServer.begin();
 #endif
   client.setServer(MQTT_HOST, MQTT_PORT);
-  client.setBufferSize(768);
+  client.setBufferSize(2048);   // must be >= the telemetry StaticJsonDocument, see publish()
   client.setCallback(onMessage);
 
 #if USE_CAMERA
@@ -1709,9 +2170,23 @@ void loop() {
 } else if (n < 0) {
         Serial.printf("[wifi] scanned: failed with code %d\n", n);
       } else {
-        for (int i = 0; i < n; ++i) {
-          Serial.printf("[wifi] scanned: \"%s\"\n", WiFi.SSID(i).c_str());
+        gScanCount = (n < (int)(sizeof(gScanSsids) / sizeof(gScanSsids[0])))
+                     ? n : (int)(sizeof(gScanSsids) / sizeof(gScanSsids[0]));
+        Serial.println("[wifi]  #   signal  security  SSID");
+        for (int i = 0; i < gScanCount; ++i) {
+          gScanSsids[i] = WiFi.SSID(i);
+          const int rssi = WiFi.RSSI(i);
+          const bool open_ = WiFi.encryptionType(i) == WIFI_AUTH_OPEN;
+          // Four bars is roughly -55 dBm or better; one bar is below -80.
+          const int bars = rssi >= -55 ? 4 : rssi >= -65 ? 3 : rssi >= -75 ? 2 : 1;
+          char sig[5] = "....";
+          for (int b = 0; b < bars; b++) sig[b] = '#';
+          Serial.printf("[wifi] %2d   %s %4d  %-8s  %s\n", i, sig, rssi,
+                        open_ ? "open" : "locked", gScanSsids[i].c_str());
         }
+        Serial.println("[wifi] connect with:  [wifi] connect <#> <password>");
+        Serial.println("[wifi]   (an open network needs no password; "
+                       "\"[wifi] forget\" clears the saved one)");
       }
     } else if (line.startsWith("[wifi] connect ")) {
       String payload = line.substring(15);
@@ -1755,11 +2230,50 @@ void loop() {
       current_ssid = parseNextToken();
       current_pass = parseNextToken();
 
+      // A bare number selects from the last scan, so only the password has to be typed.
+      // Anything else is still accepted as a literal SSID.
+      bool numeric = current_ssid.length() > 0;
+      for (unsigned k = 0; k < current_ssid.length(); k++) {
+        if (!isDigit(current_ssid.charAt(k))) { numeric = false; break; }
+      }
+      if (numeric) {
+        const int idx = current_ssid.toInt();
+        if (idx < 0 || idx >= gScanCount) {
+          Serial.printf("[wifi] no network #%d in the last scan (run \"[wifi] scan\" first; "
+                        "%d found)\n", idx, gScanCount);
+          current_ssid = "";
+        } else {
+          current_ssid = gScanSsids[idx];
+          Serial.printf("[wifi] #%d selected: \"%s\"\n", idx, current_ssid.c_str());
+        }
+      }
+
       if (current_ssid.length() > 0) {
-        Serial.printf("[wifi] received new credentials: %s\n", current_ssid.c_str());
+        Serial.printf("[wifi] connecting to \"%s\"...\n", current_ssid.c_str());
         WiFi.disconnect();
         WiFi.begin(current_ssid.c_str(), current_pass.c_str());
+
+        // Only persist credentials that actually work -- saving on request would happily
+        // store a typo and brick the node's connectivity on the next boot.
+        const uint32_t until = millis() + 15000;
+        while (WiFi.status() != WL_CONNECTED && (int32_t)(millis() - until) < 0) delay(250);
+        if (WiFi.status() == WL_CONNECTED) {
+          Serial.printf("[wifi] connected, ip=%s\n", WiFi.localIP().toString().c_str());
+          wifiSaveCredentials(current_ssid, current_pass);
+        } else {
+          Serial.println("[wifi] FAILED to connect within 15s — nothing saved, "
+                         "the previous network is still what boots");
+        }
       }
+    } else if (line == "[wifi] forget") {
+      wifiForget();
+    } else if (line == "[wifi] status") {
+      String ss, pp;
+      const bool saved = wifiLoadSaved(&ss, &pp);
+      Serial.printf("[wifi] status: %s, ssid=\"%s\", ip=%s, rssi=%d, saved-in-nvs=%s\n",
+                    WiFi.status() == WL_CONNECTED ? "connected" : "NOT connected",
+                    WiFi.SSID().c_str(), WiFi.localIP().toString().c_str(), (int)WiFi.RSSI(),
+                    saved ? ss.c_str() : "(none)");
     } else if (line.startsWith("[mqtt] sub ")) {
       int arrowIdx = line.indexOf(" -> ");
       if (arrowIdx > 0) {
@@ -1769,6 +2283,113 @@ void loop() {
       }
     }
   }
+
+#ifdef RD03_PIN_PROBE
+  // One-shot detailed comparison of the two OT2 pins. The pass/fail pull test says GPIO14 is
+  // open while the wire is known good, so print the raw behaviour of both pins side by side
+  // rather than trusting a verdict that has already been wrong.
+  {
+    static uint32_t lastProbe = 0;
+    if (millis() - lastProbe > 5000) {
+      lastProbe = millis();
+      const uint8_t pins[2] = { gCfg.pinMmwave, gCfg.pinMmwave2 };
+      for (int i = 0; i < 2; i++) {
+        const uint8_t pin = pins[i];
+        if (pin == 255) continue;
+        int floatHi = 0, upHi = 0, downHi = 0;
+        pinMode(pin, INPUT);          delay(5);
+        for (int k = 0; k < 32; k++) { floatHi += digitalRead(pin); delayMicroseconds(300); }
+        pinMode(pin, INPUT_PULLUP);   delay(5);
+        for (int k = 0; k < 32; k++) { upHi   += digitalRead(pin); delayMicroseconds(300); }
+        pinMode(pin, INPUT_PULLDOWN); delay(5);
+        for (int k = 0; k < 32; k++) { downHi += digitalRead(pin); delayMicroseconds(300); }
+        pinMode(pin, INPUT);
+        Serial.printf("[pinprobe] RD03-%d GPIO%-2u  float=%2d/32  pullup=%2d/32  pulldown=%2d/32  -> %s\n",
+                      i + 1, (unsigned)pin, floatHi, upHi, downHi,
+                      (downHi >= 30) ? "driven HIGH"
+                    : (upHi <= 2)    ? "driven LOW"
+                    : (upHi >= 30 && downHi <= 2) ? "OPEN (follows both pulls)"
+                                                  : "AMBIGUOUS — weak drive or noise");
+      }
+    }
+  }
+#endif
+
+#if USE_MMWAVE_UART || USE_MMWAVE2_UART
+  // Drain whatever the heads have sent since the last pass. Non-blocking: if a whole frame
+  // is not already buffered we simply try again next loop, so this never stalls control.
+  for (int h = 0; h < 2; h++) {
+    // OT2 first, and deliberately BEFORE the UART-liveness gate below. The presence pin and
+    // the serial port are independent channels; a head that missed its UART probe at boot can
+    // still be driving OT2 correctly, and testing the pin only for "alive" heads turned one
+    // cold-start miss into permanently absent presence.
+    {
+      const uint8_t otPin = (h == 0) ? gCfg.pinMmwave : gCfg.pinMmwave2;
+      static uint32_t lastPull[2] = { 0, 0 };
+      if (!gOt2Driven[h] && otPin != 255 && millis() - lastPull[h] > 10000) {
+        lastPull[h] = millis();
+        if (ot2PullTest(otPin)) {
+          gOt2Driven[h] = true;
+          Serial.printf("[mmwave] RD03-%d OT2 on GPIO%u is now DRIVEN — head warmed up, "
+                        "presence restored\n", h + 1, (unsigned)otPin);
+        }
+      }
+    }
+
+    // Not gated on gRadarStream any more: a head that fell out of reporting mode has that
+    // flag false, and skipping it here is exactly what made the drop-out permanent.
+    Stream* io = nullptr;
+  #if USE_MMWAVE_UART
+    if (h == 0) io = &Serial2;
+  #endif
+  #if USE_MMWAVE2_UART
+    if (h == 1) io = &Serial1;
+  #endif
+    if (!gRadarAlive[h]) {
+      // Retry the UART probe rather than treating one cold-start miss as permanent absence.
+      static uint32_t lastProbe[2] = { 0, 0 };
+      if (io && millis() - lastProbe[h] > 30000) {
+        lastProbe[h] = millis();
+        if (rd03::openCommandMode(*io)) {
+          rd03::closeCommandMode(*io);
+          gRadarAlive[h] = true;
+          gRadarStream[h] = rd03::enableReporting(*io, h == 0 ? "head1" : "head2");
+          Serial.printf("[mmwave] head%d is answering again — rejoined\n", h + 1);
+        }
+      }
+      continue;
+    }
+    if (!io) continue;
+    // A head that did not answer at boot is retried, for the same reason: the UART probe runs
+    // before the module has finished warming up, and "did not answer once, 40 seconds after
+    // power-on" is not the same as "absent".
+    // Re-arm a head that has gone quiet. Reporting mode is entered once at boot, so any
+    // event that knocks a module out of it -- a command-mode round trip, a glitch on the
+    // rail, the module's own watchdog -- silently ended the energy stream until the next
+    // reflash. The live view then showed data frozen minutes in the past.
+    if (millis() - gRadarSeen[h] > 15000) {
+      static uint32_t lastRearm[2] = { 0, 0 };
+      if (millis() - lastRearm[h] > 20000) {
+        lastRearm[h] = millis();
+        Serial.printf("[rd03] head%d silent for >15s — re-arming reporting mode\n", h + 1);
+        gRadarStream[h] = rd03::enableReporting(*io, h == 0 ? "head1" : "head2");
+        if (gRadarStream[h]) gRadarSeen[h] = millis();
+      }
+    }
+
+    uint8_t det = 0; uint16_t dist = 0; uint32_t energy[32] = {0}; int gates = 0;
+    while (io->available() >= 45) {
+      // A short, non-zero timeout: the bytes are already buffered (checked above), but the
+      // parser still needs a deadline in the future or its read loops exit immediately.
+      if (!rd03::readReportFrame(*io, &det, &dist, energy, 32, &gates, 25)) break;
+      gRadarDetect[h] = det;
+      gRadarDistCm[h] = dist;
+      gRadarSeen[h]   = millis();
+      gRadarGates[h]  = (gates < 16) ? gates : 16;
+      for (int g = 0; g < gRadarGates[h]; g++) gRadarEnergy[h][g] = energy[g];
+    }
+  }
+#endif
 
   // Non-blocking dual PIR motion sensor polling & immediate transition dispatch
   static unsigned long lastPirPollTime = 0;
@@ -1784,8 +2405,68 @@ void loop() {
     bool currentDetected = false;
 #endif
 #if USE_MMWAVE
-    if (digitalRead(gCfg.pinMmwave) == HIGH) currentDetected = true;
+    bool mw1 = gOt2Driven[0] && (gCfg.pinMmwave  != 255) && (digitalRead(gCfg.pinMmwave)  == HIGH);
+    bool mw2 = gOt2Driven[1] && (gCfg.pinMmwave2 != 255) && (digitalRead(gCfg.pinMmwave2) == HIGH);
+    if (mw1 || mw2) currentDetected = true;
 #endif
+
+    // Edge-triggered per-pin logging. The 3-second summary below can miss a transition
+    // entirely, and a transition is the ONLY evidence that separates "pin faithfully
+    // following a module that is latched ON" from "pin stuck because nothing drives it".
+    // Both read as a constant level; only a change proves the wire carries a signal.
+    {
+      // The UART-vs-pin cross-check that used to live here has been REMOVED.
+      //
+      // It excluded a head whose OT2 pin disagreed with the module's own reporting-mode
+      // `detected` flag, on the assumption that the flag was the reliable reference. It is
+      // not: on this firmware that flag is latched at 1 permanently, exactly like the
+      // distance field, and neither tracks the room. So the check condemned the pin --
+      // which was reporting the empty room CORRECTLY as 0 -- and suppressed a healthy
+      // channel for nine minutes while the dashboard showed a stale "presence".
+      //
+      // A test is only as good as its reference signal. There is no trustworthy second
+      // opinion available on this hardware, so OT2 is taken at face value; the boot-time
+      // pull test already proves the pin is driven, which is the part that can be checked.
+
+      static int lastMw1 = -1, lastMw2 = -1;
+      const int now1 = (gCfg.pinMmwave  != 255) ? digitalRead(gCfg.pinMmwave)  : -1;
+      const int now2 = (gCfg.pinMmwave2 != 255) ? digitalRead(gCfg.pinMmwave2) : -1;
+      if (now1 != lastMw1) {
+        Serial.printf("[edge] GPIO%d (RD03-1 OT2) %d -> %d  @%lums  *** PIN IS ALIVE ***\n",
+                      gCfg.pinMmwave, lastMw1, now1, (unsigned long)millis());
+        lastMw1 = now1;
+      }
+      if (now2 != lastMw2) {
+        Serial.printf("[edge] GPIO%d (RD03-2 OT2) %d -> %d  @%lums  *** PIN IS ALIVE ***\n",
+                      gCfg.pinMmwave2, lastMw2, now2, (unsigned long)millis());
+        lastMw2 = now2;
+      }
+    }
+
+    // Report each source separately, not just the OR of them.
+    //
+    // Three sensors feed one boolean here, so a single one stuck high makes the other two
+    // invisible: occupancy reads 1 forever and nothing in the telemetry says why. That is
+    // exactly the state this node reached — occupancy pinned at 1 while CO2 fell from 1575
+    // to 1386 ppm, which is a room emptying. Printing the raw pins turns "something is
+    // stuck" into "this one is stuck".
+    {
+      static unsigned long lastPresenceDump = 0;
+      if (millis() - lastPresenceDump > 3000) {
+        lastPresenceDump = millis();
+#if USE_PIR
+        Serial.printf("[presence] PIR1(GPIO%d)=%d PIR2(GPIO%d)=%d ", gCfg.pinPir1, pir1 ? 1 : 0,
+                      gCfg.pinPir2, pir2 ? 1 : 0);
+#endif
+#if USE_MMWAVE
+        Serial.printf("[presence] RD03-1(GPIO%d)=%d RD03-2(GPIO%d)=%d -> occupancy %d\n",
+                      gCfg.pinMmwave, mw1 ? 1 : 0, gCfg.pinMmwave2, mw2 ? 1 : 0,
+                      currentDetected ? 1 : 0);
+#else
+        Serial.printf("[presence] -> occupancy %d\n", currentDetected ? 1 : 0);
+#endif
+      }
+    }
 
     // Immediate telemetry burst on occupancy transition (<200ms latency)
     globalDebouncedPresence = currentDetected;

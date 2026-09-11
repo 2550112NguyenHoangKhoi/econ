@@ -19,13 +19,12 @@ import (
 
 // Default configuration constants
 const (
-	defaultGridEmissionFactor     = 0.5   // kgCO2e / kWh
-	defaultCarbonBudgetKg         = 50.0  // kgCO2e target budget
-	defaultCarbonMarketURL        = "https://api.coingecko.com/api/v3/simple/price?ids=toucan-protocol-base-carbon-tonne&vs_currencies=usd"
-	defaultMarketFallbackPrice    = 12.50 // USD per metric ton
-	defaultMarketCacheTTL         = 10 * time.Minute
-	defaultHTTPTimeout            = 8 * time.Second
-	sustainabilityStatePath       = "./data/sustainability-state.json"
+	defaultCarbonBudgetKg      = 50.0 // kgCO2e target budget
+	defaultCarbonMarketURL     = "https://api.coingecko.com/api/v3/simple/price?ids=toucan-protocol-base-carbon-tonne&vs_currencies=usd"
+	defaultMarketFallbackPrice = 12.50 // USD per metric ton
+	defaultMarketCacheTTL      = 10 * time.Minute
+	defaultHTTPTimeout         = 8 * time.Second
+	sustainabilityStatePath    = "./data/sustainability-state.json"
 
 	// Predictive maintenance diagnostic thresholds
 	powerStripRatedWatts          = 2000.0 // W
@@ -45,11 +44,15 @@ type SustainabilityPayload struct {
 }
 
 type CarbonAccountingData struct {
-	GridEmissionFactorKgPerKwh         float64            `json:"gridEmissionFactorKgPerKwh"`
-	InstantaneousPowerW                float64            `json:"instantaneousPowerW"`
-	InstantaneousEmissionRateKgPerHour float64            `json:"instantaneousEmissionRateKgPerHour"`
-	CumulativeEmissionsKgCO2e          float64            `json:"cumulativeEmissionsKgCO2e"`
-	Breakdown                          PowerBreakdownData `json:"breakdown"`
+	GridEmissionFactorKgPerKwh float64 `json:"gridEmissionFactorKgPerKwh"`
+	// Grid says WHICH grid that factor belongs to, which tariff band it was read in, and
+	// whether its time shape is an estimate. Without this the dashboard cannot tell a
+	// measured intensity from a modelled one, and would present both the same way.
+	Grid                               simulation.GridIntensity `json:"grid"`
+	InstantaneousPowerW                float64                  `json:"instantaneousPowerW"`
+	InstantaneousEmissionRateKgPerHour float64                  `json:"instantaneousEmissionRateKgPerHour"`
+	CumulativeEmissionsKgCO2e          float64                  `json:"cumulativeEmissionsKgCO2e"`
+	Breakdown                          PowerBreakdownData       `json:"breakdown"`
 }
 
 type PowerBreakdownData struct {
@@ -114,9 +117,9 @@ type MarketQuote struct {
 
 // sustainabilityState represents the persisted state across server restarts.
 type sustainabilityState struct {
-	BuildingId             string             `json:"buildingId"`
-	CumulativeEmissionsKg  float64            `json:"cumulativeEmissionsKg"`
-	EquipmentRuntimeHours  map[string]float64 `json:"equipmentRuntimeHours"`
+	BuildingId            string             `json:"buildingId"`
+	CumulativeEmissionsKg float64            `json:"cumulativeEmissionsKg"`
+	EquipmentRuntimeHours map[string]float64 `json:"equipmentRuntimeHours"`
 }
 
 // CalculateScope2Emissions translates electrical energy into kgCO2e using the exact integration formula:
@@ -401,9 +404,11 @@ func parseMarketPrice(body []byte) (float64, error) {
 
 // CarbonTracker manages operational Scope 2 carbon accounting, space utilization, and equipment diagnostics.
 type CarbonTracker struct {
-	mu                        sync.Mutex
-	engine                    *simulation.Engine
-	gridFactor                float64
+	mu     sync.Mutex
+	engine *simulation.Engine
+	// gridFactorOverride is a flat kgCO2e/kWh from GRID_EMISSION_FACTOR; 0 means "use the
+	// library anchor shaped by time of day" (gridFactorAt below).
+	gridFactorOverride        float64
 	carbonBudgetKg            float64
 	cumulativeEmissionsKgCO2e float64
 	lastTickAt                time.Time
@@ -414,10 +419,17 @@ type CarbonTracker struct {
 
 // newCarbonTracker initializes a new CarbonTracker instance with environment configuration.
 func newCarbonTracker(engine *simulation.Engine) *CarbonTracker {
-	gridFactor := defaultGridEmissionFactor
+	// A site that has metered its own supply contract sets GRID_EMISSION_FACTOR and that
+	// flat number wins. Everyone else gets the library's sourced annual factor, shaped
+	// across the tariff day by the grid profile resolved from the site's coordinates.
+	//
+	// This used to be a hardcoded 0.5 kgCO2e/kWh. The library already carried a sourced
+	// 0.6766 for the Vietnamese grid and nothing read it, so every emission this engine
+	// has ever reported was 26% low.
+	gridFactorOverride := 0.0
 	if gfStr := os.Getenv("GRID_EMISSION_FACTOR"); gfStr != "" {
 		if gf, err := strconv.ParseFloat(gfStr, 64); err == nil && gf > 0 {
-			gridFactor = gf
+			gridFactorOverride = gf
 		}
 	}
 
@@ -430,7 +442,7 @@ func newCarbonTracker(engine *simulation.Engine) *CarbonTracker {
 
 	return &CarbonTracker{
 		engine:                engine,
-		gridFactor:            gridFactor,
+		gridFactorOverride:    gridFactorOverride,
 		carbonBudgetKg:        carbonBudget,
 		marketClient:          NewCarbonMarketClient("", defaultMarketCacheTTL),
 		equipmentRuntimeHours: make(map[string]float64),
@@ -460,11 +472,23 @@ func (t *CarbonTracker) SetEquipmentRuntimeHours(equipId string, hours float64) 
 	t.equipmentRuntimeHours[equipId] = hours
 }
 
+// gridFactorAt is the carbon intensity to bill an instant's energy at: the operator's
+// flat override when one is set, otherwise the time-shaped grid intensity for right now.
+// Energy consumed in the evening peak is charged at the peak rate, which is what makes
+// shifting load into the solar hours show up as avoided carbon rather than only as
+// avoided cost.
+func (t *CarbonTracker) gridFactorAt(now time.Time) float64 {
+	if t.gridFactorOverride > 0 {
+		return t.gridFactorOverride
+	}
+	return simulation.GridFactorAt(now)
+}
+
 // RecordEnergy integrates energy and carbon emissions for a given load and duration.
 func (t *CarbonTracker) RecordEnergy(powerW float64, dtSec float64) (energyKwh float64, kgCO2e float64) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	energyKwh, kgCO2e = CalculateScope2Emissions(powerW, dtSec, t.gridFactor)
+	energyKwh, kgCO2e = CalculateScope2Emissions(powerW, dtSec, t.gridFactorAt(time.Now()))
 	t.cumulativeEmissionsKgCO2e += kgCO2e
 	return energyKwh, kgCO2e
 }
@@ -484,6 +508,20 @@ func (t *CarbonTracker) Snapshot(engine *simulation.Engine, now time.Time) Susta
 
 	if now.IsZero() {
 		now = time.Now()
+	}
+
+	// One grid reading for the whole snapshot, so the energy booked below and the rate
+	// shown on screen are billed at the same instant's intensity.
+	gridNow := simulation.GridIntensityAt(now)
+	if t.gridFactorOverride > 0 {
+		gridNow = simulation.GridIntensity{
+			KgCo2ePerKwh:       t.gridFactorOverride,
+			AnnualKgCo2ePerKwh: t.gridFactorOverride,
+			GridName:           "operator override (GRID_EMISSION_FACTOR)",
+			TouBand:            simulation.TouBand(now),
+			Multiplier:         1.0,
+			Resolved:           true,
+		}
 	}
 
 	dtSec := 0.0
@@ -557,11 +595,11 @@ func (t *CarbonTracker) Snapshot(engine *simulation.Engine, now time.Time) Susta
 
 	totalPowerW := plugW + stripW + acW
 	if dtSec > 0 && totalPowerW > 0 && (engine == nil || engine.IsRealMode()) {
-		_, carbonKg := CalculateScope2Emissions(totalPowerW, dtSec, t.gridFactor)
+		_, carbonKg := CalculateScope2Emissions(totalPowerW, dtSec, gridNow.KgCo2ePerKwh)
 		t.cumulativeEmissionsKgCO2e += carbonKg
 	}
 
-	instantaneousEmissionRate := (totalPowerW / 1000.0) * t.gridFactor
+	instantaneousEmissionRate := (totalPowerW / 1000.0) * gridNow.KgCo2ePerKwh
 
 	// 2. Predictive maintenance diagnostics
 	warnings := make([]MaintenanceAlert, 0)
@@ -661,7 +699,8 @@ func (t *CarbonTracker) Snapshot(engine *simulation.Engine, now time.Time) Susta
 	return SustainabilityPayload{
 		Timestamp: now.UTC().Format(time.RFC3339),
 		CarbonAccounting: CarbonAccountingData{
-			GridEmissionFactorKgPerKwh:         t.gridFactor,
+			GridEmissionFactorKgPerKwh:         gridNow.KgCo2ePerKwh,
+			Grid:                               gridNow,
 			InstantaneousPowerW:                math.Round(totalPowerW*10.0) / 10.0,
 			InstantaneousEmissionRateKgPerHour: math.Round(instantaneousEmissionRate*1000.0) / 1000.0,
 			CumulativeEmissionsKgCO2e:          math.Round(t.cumulativeEmissionsKgCO2e*100.0) / 100.0,

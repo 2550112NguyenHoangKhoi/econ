@@ -19,6 +19,9 @@ source produced them.
 
 Run:  python train.py            # writes model_weights.pth + scaler.pkl
 """
+import datetime as _dt
+import json
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -26,7 +29,7 @@ import joblib
 from sklearn.preprocessing import StandardScaler
 
 from config import (FEATURES, INPUT_SIZE, HIDDEN_SIZE, NUM_LAYERS, OUTPUT_SIZE,
-                    SEQ_LEN, WEIGHTS_PATH, SCALER_PATH)
+                    SEQ_LEN, WEIGHTS_PATH, SCALER_PATH, PROVENANCE_PATH)
 from data_loader import load_training_sequences
 from model import PeakLoadLSTM
 
@@ -127,8 +130,35 @@ def main():
 
     torch.save(model.state_dict(), WEIGHTS_PATH)
     joblib.dump(scaler, SCALER_PATH)
+
+    # Record where this model's knowledge actually came from, beside the weights it came
+    # with. This function is the only place that knows, and it used to print the answer and
+    # discard it, leaving /model/info to assert "this building's own history" for weights
+    # that might have been fitted to the synthetic generator instead -- a claim about
+    # provenance that nothing had checked.
+    #
+    # The target range is recorded with it because it is what makes a mismatch legible: a
+    # model whose training targets ran 0.8-2.75 MW, serving a building that draws 4.5 kW,
+    # is not wrong by a little, and the two numbers side by side say so immediately.
+    provenance = {
+        "source": source,
+        "real_data": real is not None,
+        "sequences": int(len(X)),
+        "trained_at": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
+        "target_load_mw": {
+            "min": round(float(y.min()), 4),
+            "max": round(float(y.max()), 4),
+            "mean": round(float(y.mean()), 4),
+        },
+        "seq_len": SEQ_LEN,
+        "features": list(FEATURES),
+    }
+    with open(PROVENANCE_PATH, "w") as fh:
+        json.dump(provenance, fh, indent=2)
+
     print(f"[train] saved weights -> {WEIGHTS_PATH}")
     print(f"[train] saved scaler  -> {SCALER_PATH}")
+    print(f"[train] saved provenance -> {PROVENANCE_PATH}")
     print(f"[train] target load range: {y.min():.2f}..{y.max():.2f} MW  (mean {y.mean():.2f})")
 
 

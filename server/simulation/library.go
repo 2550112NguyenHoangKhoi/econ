@@ -82,6 +82,12 @@ type Physics struct {
 	// to and the operating point the fan curve is scaled to reach.
 	SupplyAirDesignAch  float64 `json:"supplyAirDesignAch"`
 	AhuDesignPressurePa float64 `json:"ahuDesignPressurePa"`
+	// AcRunningThresholdW is the clamp reading above which a room's air conditioner is
+	// judged to be RUNNING rather than merely energised. It is what lets the twin say "the
+	// compressor is on" from a measurement instead of from an assumption, and it describes
+	// the equipment, so it belongs here rather than as a literal in the recommendation
+	// pass that reads it.
+	AcRunningThresholdW float64 `json:"acRunningThresholdW"`
 }
 
 // OccupancySchedule is how many people the engine puts in a room, and when.
@@ -126,11 +132,39 @@ type StorageSizing struct {
 	MinPowerMw                  float64 `json:"minPowerMw"`
 }
 
+// GridProfile is one published electricity grid: where it applies, and how its carbon
+// intensity moves across the tariff day. The ANNUAL LEVEL is not here — it is
+// Calibration.GridEmissionFactor — so there is exactly one copy of that number.
+type GridProfile struct {
+	Name   string `json:"name"`
+	Bounds struct {
+		LatMin float64 `json:"latMin"`
+		LatMax float64 `json:"latMax"`
+		LonMin float64 `json:"lonMin"`
+		LonMax float64 `json:"lonMax"`
+	} `json:"bounds"`
+	TouBandMultiplier map[string]float64 `json:"touBandMultiplier"`
+	// Estimate is carried through to the API so a consumer can say so on screen. A
+	// modelled shape must never reach a dashboard looking like a measured one.
+	TouBandMultiplierEstimate bool `json:"touBandMultiplierEstimate"`
+	CleanestBand              string `json:"cleanestBand"`
+}
+
+// GridShape is the library's grid section: which grids are characterised, and what to do
+// with a site that sits outside all of them.
+type GridShape struct {
+	Profiles    map[string]GridProfile `json:"profiles"`
+	UnknownGrid struct {
+		Multiplier float64 `json:"multiplier"`
+	} `json:"unknownGrid"`
+}
+
 type libraryDoc struct {
 	Version     int                  `json:"version"`
 	Physics     Physics              `json:"physics"`
 	Occupancy   OccupancySchedule    `json:"occupancy"`
 	Storage     StorageSizing        `json:"storage"`
+	Grid        GridShape            `json:"grid"`
 	Programmes  map[string]Programme `json:"programmes"`
 	Calibration struct {
 		GridEmissionFactor float64 `json:"gridEmissionFactorTCo2PerMwh"`
@@ -171,6 +205,7 @@ func defaultLibrary() libraryDoc {
 		Co2PpmPerOccupantSteady:    15.0,
 		SupplyAirDesignAch:         6.0,
 		AhuDesignPressurePa:        480.0,
+		AcRunningThresholdW:        50.0,
 	}
 	d.Programmes = map[string]Programme{}
 	// No built-in profiles: a stripped deployment gets a building with nobody in it,
@@ -187,6 +222,11 @@ func defaultLibrary() libraryDoc {
 		MinPowerMw:                  0.001,
 	}
 	d.Calibration.GridEmissionFactor = 0.6766
+	// No built-in grid profiles, for the same reason there are no built-in occupancy
+	// profiles: a stripped deployment should report "grid not characterised" and use a
+	// flat shape, not silently inherit Vietnam's dispatch curve.
+	d.Grid = GridShape{Profiles: map[string]GridProfile{}}
+	d.Grid.UnknownGrid.Multiplier = 1.0
 	return d
 }
 
@@ -243,6 +283,7 @@ func loadLibrary() {
 	mergeF(&p.Co2PpmPerOccupantSteady, base.Co2PpmPerOccupantSteady)
 	mergeF(&p.SupplyAirDesignAch, base.SupplyAirDesignAch)
 	mergeF(&p.AhuDesignPressurePa, base.AhuDesignPressurePa)
+	mergeF(&p.AcRunningThresholdW, base.AcRunningThresholdW)
 	doc.Physics = p
 	baseOcc := defaultLibrary().Occupancy
 	if doc.Occupancy.Profiles == nil {
@@ -263,6 +304,12 @@ func loadLibrary() {
 	mergeF(&doc.Storage.PowerFractionOfObservedPeak, baseStore.PowerFractionOfObservedPeak)
 	mergeF(&doc.Storage.HoursAtRatedPower, baseStore.HoursAtRatedPower)
 	mergeF(&doc.Storage.MinPowerMw, baseStore.MinPowerMw)
+	if doc.Grid.Profiles == nil {
+		doc.Grid.Profiles = map[string]GridProfile{}
+	}
+	if doc.Grid.UnknownGrid.Multiplier == 0 {
+		doc.Grid.UnknownGrid.Multiplier = 1.0
+	}
 	if doc.Calibration.GridEmissionFactor == 0 {
 		doc.Calibration.GridEmissionFactor = 0.6766
 	}
@@ -379,6 +426,9 @@ func OccupancyFractionAt(zoneType string, hour int) float64 {
 // GridEmissionFactor is tCO2 per MWh for the local grid, used to turn avoided energy
 // into avoided carbon without that factor being retyped at every call site.
 func GridEmissionFactor() float64 { return Lib().Calibration.GridEmissionFactor }
+
+// GridShapeLib returns the grid profiles and the unknown-grid fallback.
+func GridShapeLib() GridShape { return Lib().Grid }
 
 // --- read surface for the dashboard -----------------------------------------
 

@@ -91,7 +91,13 @@ func ontologyDataHandler(engine *simulation.Engine) http.HandlerFunc {
 
 // buildingSwitchHandler dynamically switches the running building model in the simulation engine.
 // Accepts JSON {"model": "multi-level" | "domestic-home"} or query param ?model=...
-func buildingSwitchHandler(engine *simulation.Engine) http.HandlerFunc {
+// buildingSwitchHandler reloads the engine onto another building model. It takes the
+// state store because the switch is not complete until the PERSISTED toggle agrees:
+// state_sync replays stateStore's toggles to every websocket that connects, so a switch
+// that moved the engine but left buildingModelType at its old value made the engine tell
+// each new client to switch back — which the dashboard obeyed, reverting the operator's
+// choice on every reconnect and every panel that remounts a socket.
+func buildingSwitchHandler(engine *simulation.Engine, stateStore *StateStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if corsPreflight(w, r) {
 			return
@@ -134,6 +140,18 @@ func buildingSwitchHandler(engine *simulation.Engine) http.HandlerFunc {
 
 		log.Printf("[model-switch] switched active building to %q (id=%s, %d zones, %d vavs)",
 			req.Model, engine.BuildingId(), len(engine.Zones), len(engine.Vavs))
+
+		// Persist the choice and tell every other open dashboard, so the engine's own
+		// state_sync now agrees with the building it actually has loaded. Broadcast with
+		// no exclusion: the client that asked for the switch has already applied it
+		// locally and ignores an update that matches what it is showing.
+		if stateStore != nil {
+			stateStore.Set("buildingModelType", req.Model)
+			if err := stateStore.Save(); err != nil {
+				log.Printf("[model-switch] could not persist buildingModelType: %v", err)
+			}
+			BroadcastStateUpdate("buildingModelType", req.Model, nil)
+		}
 
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Access-Control-Allow-Origin", "*")

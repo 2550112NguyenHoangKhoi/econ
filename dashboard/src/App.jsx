@@ -24,7 +24,7 @@ import { useLibrary } from './useLibrary';
 import { FOOTPRINT } from './floorGeometry';
 import { rateNow, money, touPeriodLabel, touPeriod } from './tariff';
 import { SimState } from './telemetry';
-import { useDigitalTwin, FAULT_ZONES, DEFAULT_FAULT_TARGET } from './useDigitalTwin';
+import { useDigitalTwin, buildFaultZones, DEFAULT_FAULT_TARGET } from './useDigitalTwin';
 import AirflowWindow from './AirflowWindow';
 import StreamStatus from './StreamStatus';
 import CanvasErrorBoundary from './CanvasErrorBoundary';
@@ -333,7 +333,7 @@ function App() {
   const [isLeftPanelOpen, setIsLeftPanelOpen] = useState(true);
   const [leftPanelSize, setLeftPanelSize] = useState({ w: 380 });
   const [showWindSim, setShowWindSim] = useState(true);
-  const { mode: operationMode, isReal: isRealMode, setMode: setOperationMode } = useOperationMode();
+  const { mode: operationMode, isReal: isRealMode, setMode: setOperationMode, adoptMode: adoptOperationMode } = useOperationMode();
   const activeFloorAsset = useMemo(
     () => getActiveFloorAsset(currentBuilding, activeFloor),
     [currentBuilding, activeFloor]
@@ -538,6 +538,7 @@ function App() {
     activeScenario,
     autoPilot,
     setAutoPilot,
+    adoptAutoPilot,
     faultTarget,
     setFaultTarget,
     loadHistory,
@@ -568,15 +569,18 @@ function App() {
       setIsLeftPanelOpen(!!updates.isLeftPanelOpen);
     }
     if (typeof updates.autoPilot === 'boolean') {
-      setAutoPilot(updates.autoPilot);
+      // These updates arrive FROM the engine, so adopt them locally rather than sending
+      // them back as a command — see adoptAutoPilot in useDigitalTwin.
+      adoptAutoPilot(updates.autoPilot);
     }
-    if (updates.operationMode && typeof setOperationMode === 'function') {
-      setOperationMode(updates.operationMode);
+    if (updates.operationMode && typeof adoptOperationMode === 'function') {
+      // Adopted, not re-POSTed — see adoptMode in useOperationMode.
+      adoptOperationMode(updates.operationMode);
     }
     if (updates.buildingModelType && updates.buildingModelType !== getBuildingModelType()) {
       handleToggleBuildingModel(updates.buildingModelType);
     }
-  }, [setAutoPilot, setOperationMode]);
+  }, [adoptAutoPilot, adoptOperationMode]);
 
   const {
     toggles: persistentToggles,
@@ -608,11 +612,14 @@ function App() {
     updateToggle('isLeftPanelOpen', isLeftPanelOpen);
   }, [isLeftPanelOpen, updateToggle]);
 
-  useEffect(() => {
-    if (typeof autoPilot === 'boolean') {
-      updateToggle('autoPilot', autoPilot);
-    }
-  }, [autoPilot, updateToggle]);
+  // autoPilot is deliberately NOT mirrored through the persistence channel. It is the one
+  // toggle with its own authoritative control path: the engine's {action:"autopilot"}
+  // handler already calls stateStore.Set + Save and broadcasts the result, so mirroring it
+  // here as a set_state would make the dashboard a SECOND writer of a value the engine
+  // already owns. That second writer raced the telemetry stream's "engine is
+  // authoritative" adoption: a frame computed just before the toggle re-adopted the old
+  // value, the mirror wrote it straight back, and a single operator click rang the
+  // engine's autopilot on/off five times before settling.
 
   useEffect(() => {
     if (operationMode) {
@@ -625,6 +632,18 @@ function App() {
       updateToggle('buildingModelType', buildingModelType);
     }
   }, [buildingModelType, updateToggle]);
+
+  // The fault-injection picker follows the active building. Keyed on buildingModelType so
+  // switching the 3D asset rebuilds it instead of leaving the previous building's rooms on
+  // offer, and re-pointed when the current target is not a zone of the new building —
+  // otherwise <select> holds a value none of its options carry and renders blank.
+  const faultZones = useMemo(() => buildFaultZones(getBuilding()), [buildingModelType]);
+
+  useEffect(() => {
+    if (faultZones.length && !faultZones.some(z => z.id === faultTarget)) {
+      setFaultTarget(faultZones[0].id);
+    }
+  }, [faultZones, faultTarget, setFaultTarget]);
 
   const executeRemediation = () => {
     const target = faultTarget || (failingZone?.id && failingZone.id !== 'Unknown Zone' ? failingZone.id : DEFAULT_FAULT_TARGET);
@@ -1617,7 +1636,7 @@ function App() {
             onChange={(e) => setFaultTarget(e.target.value)}
             style={{ background: 'transparent', color: 'var(--text-secondary)', border: 'none', padding: '0.5rem', outline: 'none', fontFamily: 'Inter', fontSize: '12px', cursor: 'pointer' }}
           >
-            {FAULT_ZONES.map(z => (
+            {faultZones.map(z => (
               <option key={z.id} value={z.id}>{z.label}</option>
             ))}
           </select>

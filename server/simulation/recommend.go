@@ -67,6 +67,15 @@ type Recommendation struct {
 	EtaSec      float64 `json:"etaSec"`      // seconds until the predicted breach (0 = n/a)
 	Predicted   float64 `json:"predicted"`   // value at the prediction horizon
 	Equilibrium float64 `json:"equilibrium"` // value the room settles at if nothing changes
+
+	// Limit is the ceiling this finding was actually measured against — the room's own
+	// setpoint plus the comfort margin for a thermal call, the CO2 guideline for a
+	// ventilation one. It is sent because the dashboard was re-deriving it: a literal
+	// 1000 for CO2 and setpoint+1 for temperature, typed into a .jsx file, which is both
+	// a building coefficient living outside the library and a second copy free to drift
+	// from the one the engine evaluated. The line drawn on the chart must be the line the
+	// prediction was made against. 0 = this finding has no threshold.
+	Limit float64 `json:"limit"`
 }
 
 // ForecastGraphData defines the forecast graph payload embedded in RecommendationReport.
@@ -105,8 +114,31 @@ type RecommendationReport struct {
 		RoomsIdentified int `json:"roomsIdentified"`
 		RoomsLearning   int `json:"roomsLearning"`
 		HorizonMin      int `json:"horizonMin"`
+		// RealMode says whether the actuation-capability gate (capability.go) was applied
+		// to this report. It is what lets the panel explain a short list correctly: in
+		// real mode a missing card can mean "nothing is wrong" OR "nothing is wired", and
+		// those read identically unless the payload says which regime produced them.
+		RealMode bool `json:"realMode"`
 	} `json:"model"`
+
+	// Hardware is what the twin can actually reach, counted over the zones it models.
+	// Reported alongside the recommendations because in real mode the two are the same
+	// story: an engine that can command two rooms out of thirteen is not an engine with
+	// little to say, it is an engine wired to two rooms.
+	Hardware HardwareReach      `json:"hardware"`
 	Forecast *ForecastGraphData `json:"forecast,omitempty"`
+}
+
+// HardwareReach counts, over every zone the engine models, how far its commands actually
+// carry. Zones is the denominator every other figure is read against.
+type HardwareReach struct {
+	Zones        int `json:"zones"`        // zones the engine models
+	NodesBound   int `json:"nodesBound"`   // ...with a physical node ever bound
+	NodesOnline  int `json:"nodesOnline"`  // ...whose node the broker believes is alive
+	AcControlled int `json:"acControlled"` // ...whose node confirms its IR reaches an AC
+	AcUnknown    int `json:"acUnknown"`    // ...bound, but never reported whether it does
+	AcMetered    int `json:"acMetered"`    // ...with a live clamp on the AC circuit
+	Co2Sensed    int `json:"co2Sensed"`    // ...with a live NDIR sensor
 }
 
 // hourLabel renders which learned bucket answered: a clock hour ("14:00") or the
@@ -173,6 +205,7 @@ func (b *Baselines) Recommend(readings []ZoneReading, loadMw float64, now time.T
 					Message: fmt.Sprintf("%s reads %.0f ppm (comfort guideline ≤ %.0f ppm). This zone's baseline is still learning (%d/%d samples), so this is the recognized-standard check, not a learned anomaly. Purge the zone.",
 						zr.Label, zr.Co2, spec.standardHi, sc.count, baselineMature),
 					Value: zr.Co2, Unit: "ppm", Samples: sc.count, Action: spec.action,
+					Limit: spec.standardHi,
 					Score: 2.0 + (zr.Co2/spec.standardHi - 1.0),
 				})
 			}
@@ -343,6 +376,7 @@ func (d *Dynamics) PredictiveRecommendations(conds []RoomCondition, now time.Tim
 						label, atFull.Equilibrium, atFull.Equilibrium-c.Setpoint, c.Setpoint,
 						zd.Thermal.N, atFull.TauMin),
 					Value: c.Temp, Unit: "°C", Equilibrium: atFull.Equilibrium,
+					Limit:   limit,
 					Samples: zd.Thermal.N, Action: "cool",
 					Score: 5.0 + (atFull.Equilibrium - c.Setpoint),
 				})
@@ -368,6 +402,7 @@ func (d *Dynamics) PredictiveRecommendations(conds []RoomCondition, now time.Tim
 						look.TauMin, zd.Thermal.N, c.FlowRatio*100, c.Occupancy),
 					Value: c.Temp, Unit: "°C", Predicted: look.Predicted,
 					Equilibrium: look.Equilibrium, EtaSec: look.SecsToLimit,
+					Limit:   limit,
 					Samples: zd.Thermal.N, Action: "cool",
 					Score: 4.0 + 4.0*(1.0-look.SecsToLimit/predictHorizonSec),
 				})
@@ -398,6 +433,7 @@ func (d *Dynamics) PredictiveRecommendations(conds []RoomCondition, now time.Tim
 							etaLabel(eta), look.AchPerHour, zd.Co2.N),
 						Value: c.Co2, Unit: "ppm", Predicted: look.Predicted,
 						Equilibrium: look.Equilibrium, EtaSec: eta,
+						Limit:   limit,
 						Samples: zd.Co2.N, Action: "purge",
 						Score: 4.0 + 4.0*(1.0-eta/predictHorizonSec),
 					})

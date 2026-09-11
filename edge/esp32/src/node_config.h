@@ -163,6 +163,7 @@ struct NodeConfig {
   uint8_t  pinPir1;
   uint8_t  pinPir2;
   uint8_t  pinMmwave;
+  uint8_t  pinMmwave2;            // second RD-03 head; 255 when only one is fitted
   uint8_t  pinDht;
   
   uint32_t cfgRev;                // bumped on every accepted change; published in telemetry
@@ -259,6 +260,12 @@ inline NodeConfig cfgDefaults() {
     c.pinMmwave = MMWAVE_PIN;
   #else
     c.pinMmwave = 255;
+  #endif
+  
+  #ifdef MMWAVE2_PIN
+    c.pinMmwave2 = MMWAVE2_PIN;
+  #else
+    c.pinMmwave2 = 255;
   #endif
   
   #ifdef DHT_PIN
@@ -420,6 +427,7 @@ inline bool cfgApplyJson(const JsonDocument& doc, bool& outReset, bool& outHardw
   if (doc.containsKey("pinPir1"))          next.pinPir1          = doc["pinPir1"];
   if (doc.containsKey("pinPir2"))          next.pinPir2          = doc["pinPir2"];
   if (doc.containsKey("pinMmwave"))        next.pinMmwave        = doc["pinMmwave"];
+  if (doc.containsKey("pinMmwave2"))       next.pinMmwave2       = doc["pinMmwave2"];
   if (doc.containsKey("pinDht"))           next.pinDht           = doc["pinDht"];
 
   if (!cfgValidate(next)) return false;               // gCfgLastError already set
@@ -434,7 +442,8 @@ inline bool cfgApplyJson(const JsonDocument& doc, bool& outReset, bool& outHardw
       next.pinPlugAdc != gCfg.pinPlugAdc || next.pinAcClampAdc != gCfg.pinAcClampAdc ||
       next.pinSupplyTemp != gCfg.pinSupplyTemp || next.pinI2cSda != gCfg.pinI2cSda ||
       next.pinI2cScl != gCfg.pinI2cScl || next.pinPir1 != gCfg.pinPir1 ||
-      next.pinPir2 != gCfg.pinPir2 || next.pinMmwave != gCfg.pinMmwave || next.pinDht != gCfg.pinDht) {
+      next.pinPir2 != gCfg.pinPir2 || next.pinMmwave != gCfg.pinMmwave ||
+      next.pinMmwave2 != gCfg.pinMmwave2 || next.pinDht != gCfg.pinDht) {
     outHardwareChanged = true;
   }
 
@@ -493,6 +502,7 @@ inline void cfgSerializeState(JsonDocument& out) {
   out["pinPir1"]          = gCfg.pinPir1;
   out["pinPir2"]          = gCfg.pinPir2;
   out["pinMmwave"]        = gCfg.pinMmwave;
+  out["pinMmwave2"]       = gCfg.pinMmwave2;
   out["pinDht"]           = gCfg.pinDht;
 
   JsonArray ov = out.createNestedArray("overrides");
@@ -523,6 +533,7 @@ inline void cfgSerializeState(JsonDocument& out) {
   if (gCfg.pinPir1          != d.pinPir1)          ov.add("pinPir1");
   if (gCfg.pinPir2          != d.pinPir2)          ov.add("pinPir2");
   if (gCfg.pinMmwave        != d.pinMmwave)        ov.add("pinMmwave");
+  if (gCfg.pinMmwave2       != d.pinMmwave2)       ov.add("pinMmwave2");
   if (gCfg.pinDht           != d.pinDht)           ov.add("pinDht");
 
   if (gCfgLastError[0]) out["lastError"] = gCfgLastError;

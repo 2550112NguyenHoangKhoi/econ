@@ -56,6 +56,13 @@ type device struct {
 	// What the firmware claims about its own honesty. These mirror the payload flags and
 	// are the fastest way to see that a node is publishing modelled numbers: a board with
 	// tempReal=false is working correctly and still must not be trusted as evidence.
+	// Latest per-gate radar energy profiles, with the time they arrived. Not a fieldStat:
+	// these are vectors, not scalars, and averaging or min/maxing them would be meaningless.
+	// Kept as the last reading only — this feeds a live view, not a history.
+	Radar1Gates   []int     `json:"radar1Gates,omitempty"`
+	Radar2Gates   []int     `json:"radar2Gates,omitempty"`
+	RadarGatesAt  time.Time `json:"radarGatesAt,omitempty"`
+
 	TempReal bool `json:"tempReal"`
 	AcReal   bool `json:"acReal"`
 	AcKnown  bool `json:"acKnown"`
@@ -175,6 +182,25 @@ func (r *deviceRegistry) observe(topicSuffix string, msg telemetryMsg, raw []byt
 		track("occupancy_2", &occ2)
 	} else {
 		track("occupancy_2", nil)
+	}
+	if msg.Radar1 != nil {
+		r1 := float64(*msg.Radar1)
+		track("radar1", &r1)
+	} else {
+		track("radar1", nil)
+	}
+	if msg.Radar2 != nil {
+		r2 := float64(*msg.Radar2)
+		track("radar2", &r2)
+	} else {
+		track("radar2", nil)
+	}
+	track("radar1_m", msg.Radar1M)
+	track("radar2_m", msg.Radar2M)
+	if len(msg.Radar1Gates) > 0 || len(msg.Radar2Gates) > 0 {
+		dev.Radar1Gates = msg.Radar1Gates
+		dev.Radar2Gates = msg.Radar2Gates
+		dev.RadarGatesAt = time.Now()
 	}
 }
 

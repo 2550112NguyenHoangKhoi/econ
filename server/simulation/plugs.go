@@ -156,6 +156,23 @@ func (e *Engine) plugTick(now time.Time) {
 			z.PlugVacantSince = now
 		}
 
+		// A manual command latches for 15 minutes -- PublishCommand sets OverrideUntil
+		// precisely "so the optimizer respects the human veto". Every other actuation path
+		// checks it (engine.go, HVAC and lighting); this one did not, and the omission made
+		// the socket control look broken rather than overridden: a manual PLUG_OFF flipped
+		// z.PlugShed, this sweep saw shouldShed=false for an occupied room, decided the
+		// state had changed, and published PLUG_ON in the same tick. The relay switched off
+		// and back on within milliseconds, every time.
+		//
+		// Vacancy dwell above still updates, so the sweep resumes with correct state the
+		// moment the latch expires.
+		if now.Before(z.OverrideUntil) {
+			if z.PlugShed {
+				e.plugSavedKwh += z.PlugStandbyW * plugSwitchableFrac * dt / 3.6e6
+			}
+			continue
+		}
+
 		shouldShed := armed &&
 			!isZoneCritical(z.Type) &&
 			!e.Plug.critical(z.Type) &&

@@ -26,10 +26,6 @@ func main() {
 	// 1. Serve building data (supports ?model=home|office|domestic-home|multi-level)
 	http.HandleFunc("/api/building-data", buildingDataHandler(engine))
 
-	// 1b. Dynamic building model switching endpoints
-	http.HandleFunc("/api/building/switch", buildingSwitchHandler(engine))
-	http.HandleFunc("/api/model/switch", buildingSwitchHandler(engine))
-
 	// 2. Serve Brick Ontology Data (supports ?model=home|office)
 	http.HandleFunc("/api/ontology", ontologyDataHandler(engine))
 
@@ -65,6 +61,12 @@ func main() {
 	http.HandleFunc("/api/state", stateHandler(engine, stateStore))
 	go statePersistLoop(stateStore)
 
+	// Dynamic building model switching. Registered here rather than beside the other
+	// building routes because the handler needs the state store: switching the engine
+	// without also updating the persisted buildingModelType leaves state_sync telling
+	// every new client to switch back.
+	http.HandleFunc("/api/building/switch", buildingSwitchHandler(engine, stateStore))
+	http.HandleFunc("/api/model/switch", buildingSwitchHandler(engine, stateStore))
 
 	// Generic per-zone, per-metric time series (TimescaleDB). The read path for
 	// everything the engine persists beyond the two hardcoded history charts — most
@@ -107,8 +109,6 @@ func main() {
 
 	// 4b. Hardware Inspector Manual Commands: allows direct human overrides from the device view.
 	http.HandleFunc("/api/command", commandHandler(engine))
-
-
 
 	// 4c. TEMPORARY bring-up module (devices.go): the raw MQTT view one level below
 	// /api/hardware — every node seen, per-field freshness, dropout log, and the
@@ -187,7 +187,7 @@ func main() {
 
 	// 13. Operation Mode REST API (modeapi.go): GET/POST /api/mode to query or switch
 	// between Simulation Mode and Real Mode.
-	http.HandleFunc("/api/mode", modeHandler(engine))
+	http.HandleFunc("/api/mode", modeHandler(engine, stateStore))
 
 	// Connect to the MQTT broker: ingest real occupancy from the CV/edge layer and
 	// publish actuation commands to the ESP32. Non-blocking; the sim runs regardless.
@@ -416,6 +416,15 @@ func isSupportedCommand(cmd string) bool {
 		strings.HasPrefix(upper, "DAMPER=") ||
 		strings.HasPrefix(upper, "VAV_SET:") ||
 		strings.HasPrefix(upper, "CPU_STRAIN:") ||
+		// Runtime radar tuning and node restart. Without these, changing a range gate or a
+		// frame filter means editing build flags and reflashing, which is a 90-second round
+		// trip for a one-byte parameter.
+		strings.HasPrefix(upper, "RADAR_GATES=") ||
+		strings.HasPrefix(upper, "RADAR_DELAY=") ||
+		strings.HasPrefix(upper, "RADAR_FRAMES=") ||
+		upper == "REBOOT" ||
+		strings.HasPrefix(upper, "PROTOCOL=") ||
+		upper == "CAMERA_TRIGGER" ||
 		strings.HasPrefix(upper, "CONFIG:") {
 		return true
 	}

@@ -133,7 +133,9 @@
       "A room identified from its own measured data supersedes it.",
       "Applied to partition area, not floor area -- floor-area coupling cancels against a",
       "floor-area capacitance and hands every core zone an identical time constant."
-    ]
+    ],
+    "acRunningThresholdW": 50.0,
+    "acRunningThresholdWNote": "Clamp watts above which a room's air conditioner is judged to be RUNNING rather than merely energised. A residential split-system compressor draws hundreds of watts to a few kW while cooling; standby electronics (IR receiver, control board, crankcase heater off) sit in the single-digit to low-tens range, so 50 W separates the two with margin on both sides. It is read only to decide whether a turn-off recommendation has evidence behind it, never to size a load. Re-measure per site with the SCT-013 on a known-idle machine."
   },
   "planning": {
     "$comment": "Area bands a space planner uses, m2. Drives programme assignment from geometry.",
@@ -557,5 +559,48 @@
     "These densities are ENGINEERING ESTIMATES for this dwelling type, not measured values and",
     "not code minima. They are priors for the RLS identification to supersede (rule 4), and",
     "they are the first numbers to replace once the PZEM is actually metering the house."
-  ]
+  ],
+  "grid": {
+    "$comment": [
+      "Time shape of the grid carbon intensity, and which published grid this site draws from.",
+      "",
+      "The ANNUAL ANCHOR is calibration.gridEmissionFactorTCo2PerMwh and is deliberately NOT",
+      "repeated here. This engine already shipped two disagreeing copies of that number - a",
+      "sourced 0.6766 in this library and an unsourced 0.5 hardcoded in carbon.go - and the",
+      "carbon tracker read the lower one, understating every reported emission by 26%. One",
+      "number, one place.",
+      "",
+      "The three band multipliers below are ESTIMATES, not measurements. Vietnam does not",
+      "publish an hourly grid factor, so the shape is reasoned from dispatch: midday carries",
+      "the country's large solar fleet and is the cleanest hour; the evening peak has no solar",
+      "and runs the dirtiest marginal units; overnight is coal baseload in between. Anyone",
+      "holding the real hourly series should replace these and delete this paragraph."
+    ],
+    "anchorRef": "calibration.gridEmissionFactorTCo2PerMwh",
+    "profiles": {
+      "EVN-VN": {
+        "name": "Vietnam national grid (EVN)",
+        "bounds": {
+          "latMin": 8.0,
+          "latMax": 23.6,
+          "lonMin": 102.1,
+          "lonMax": 109.6
+        },
+        "boundsNote": "Bounding box of Vietnam. EVN operates one synchronous national system, so a site anywhere in the box draws on the same published factor; the three regional dispatch centres do not publish separate ones.",
+        "touBandMultiplier": {
+          "offpeak": 1.05,
+          "normal": 0.9,
+          "peak": 1.22
+        },
+        "touBandMultiplierEstimate": true,
+        "touBandMultiplierNote": "ESTIMATE. Bands follow EVN's retail time-of-use clock (offpeak 00:00-06:00 daily; peak 17:30-22:30 Mon-Sat; normal otherwise) - the same bands the BESS already arbitrages against, so cost and carbon finally read the same clock. Time-weighted mean of the three is 0.995, so the annual anchor is preserved to within 0.5% and only its SHAPE is added. Load-weighting would sit slightly higher, since peak hours carry more load than their share of the week.",
+        "cleanestBand": "normal",
+        "cleanestBandNote": "Counter-intuitive, and load-shifting depends on it: in Vietnam the cleanest kWh is midday, not overnight. Pre-cooling into the solar hours therefore cuts carbon even when it does not cut kWh."
+      }
+    },
+    "unknownGrid": {
+      "multiplier": 1.0,
+      "note": "A site outside every profile's bounds gets a flat multiplier and is reported as an unknown grid. Inventing a shape for a grid nobody has characterised would be a fabricated measurement; a flat 1.0 is visibly and safely wrong."
+    }
+  }
 }

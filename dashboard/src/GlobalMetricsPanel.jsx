@@ -375,7 +375,9 @@ export default function GlobalMetricsPanel({ simData, globalMetrics, loadHistory
           })()}
 
           {/* BESS Card */}
-          {simData.bessSocPct != null && (() => {
+          {/* -1 means no pack is fitted (see telemetry.fbs). A real battery can read 0%,
+              so only a negative SoC can stand for absence. */}
+          {simData.bessSocPct != null && simData.bessSocPct >= 0 && (() => {
             const dischMw = simData.bessDischargeMw || 0;
             const soc = simData.bessSocPct || 0;
             const charging = dischMw < -0.001;

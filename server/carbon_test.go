@@ -27,7 +27,7 @@ func TestCarbonCalculationExact1000W1H(t *testing.T) {
 
 	// Tracker integration consistency check
 	tracker := newCarbonTracker(nil)
-	tracker.gridFactor = 0.5
+	tracker.gridFactorOverride = 0.5 // pin the factor: the default is now time-shaped
 	eKwh, cKg := tracker.RecordEnergy(powerW, dtSec)
 	if eKwh != 1.0 || cKg != 0.5 {
 		t.Fatalf("tracker.RecordEnergy: expected (1.0, 0.5), got (%f, %f)", eKwh, cKg)

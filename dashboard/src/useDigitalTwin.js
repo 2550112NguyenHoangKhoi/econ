@@ -1,15 +1,20 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import * as flatbuffers from 'flatbuffers';
 import { SimState } from './telemetry';
-import { getBuilding, getAllKnownBuildings, subscribeBuildingChange } from './buildingStore';
+import { getBuilding, subscribeBuildingChange } from './buildingStore';
 import { API_BASE, WS_URL, getAdminToken } from './api';
 
 // Data-driven fault targets: derive the selectable zones from all known buildings so any
 // model switch or regenerated building-data.json "just works" (no hard-coded zoneIds to re-wire).
-export const FAULT_ZONES = (() => {
+export function buildFaultZones(building = getBuilding()) {
   const zones = [];
-  const known = getAllKnownBuildings();
-  known.forEach(b => (b?.floors || []).forEach(f => (f?.zones || []).forEach(z => zones.push({ ...z, level: f.level }))));
+  // Scoped to the ACTIVE building, not every known one. Deriving from all of them meant
+  // the preference filter below was applied across the union: the tower contributes 30
+  // plant/comms rooms, so `servers` was never empty, and the domestic home's zones — which
+  // include no plant rooms at all — were filtered out of a list that was supposed to
+  // degrade to "every zone" for exactly that case. Switching the 3D asset then left the
+  // fault-injection picker offering fifteen storeys of a building no longer on screen.
+  (building?.floors || []).forEach(f => (f?.zones || []).forEach(z => zones.push({ ...z, level: f.level })));
   // Zone TYPE names are minted by the digitizer and have changed over the project's life
   // (`server-room` became `comms-room`; `mechanical` became `plant-room`). Matching an
   // exact legacy string here meant the fault-target list silently fell back to "every
@@ -20,7 +25,12 @@ export const FAULT_ZONES = (() => {
   const servers = zones.filter(z => isPlant(z.zoneType));
   const pick = (servers.length ? servers : zones).slice();
   return pick.map(z => ({ id: z.zoneId, label: `L${z.level} ${z.name.replace(/ Level \d+$/, '')}`, type: z.zoneType }));
-})();
+}
+
+// Snapshot for the building present at module-eval time (see buildingStore's two-stage
+// boot). Anything that must survive a model switch has to call buildFaultZones() again —
+// this constant cannot, by construction, follow one.
+export const FAULT_ZONES = buildFaultZones();
 export const DEFAULT_FAULT_TARGET = FAULT_ZONES[0]?.id || '';
 
 export const getInitialSimData = (targetBuilding = getBuilding()) => {
@@ -221,11 +231,30 @@ export function useDigitalTwin(onUpdate) {
   // stream (below), so a rejected or externally-changed state self-corrects.
   const setAutoPilot = (next) => {
     const val = typeof next === 'function' ? next(autoPilotRef.current) : next;
+    // Re-sending a value we already hold is never a real operator intent, and it is how
+    // this page used to talk to itself. The engine echoes every accepted command back as
+    // a state_update; BroadcastStateUpdate excludes the socket that sent it, but this
+    // dashboard keeps a SECOND socket open (useStatePersistence), so the echo always
+    // lands — and re-issuing it from there closed a loop that wrote to the control plane,
+    // and to disk via stateStore.Save, forever, at a rate that climbed with every open
+    // tab. A toggle that changes nothing now sends nothing.
+    if (val === autoPilotRef.current) return;
     autoPilotRef.current = val;
     setAutoPilotState(val);
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ action: 'autopilot', value: val }));
     }
+  };
+
+  // Adopt an Auto-Pilot value that came FROM the engine — the state_sync sent on connect,
+  // or another operator's change relayed as a state_update. Local state only: the engine
+  // is already in this state, so answering it with a command is the loop described above.
+  // This is the same "engine is authoritative" rule the telemetry stream applies below.
+  const adoptAutoPilot = (val) => {
+    const next = !!val;
+    if (next === autoPilotRef.current) return;
+    autoPilotRef.current = next;
+    setAutoPilotState(next);
   };
 
   useEffect(() => {
@@ -460,6 +489,7 @@ export function useDigitalTwin(onUpdate) {
     activeScenario,
     autoPilot,
     setAutoPilot,
+    adoptAutoPilot,
     faultTarget,
     setFaultTarget,
     loadHistory,
