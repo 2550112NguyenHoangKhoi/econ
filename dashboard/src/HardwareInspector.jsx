@@ -158,37 +158,30 @@ const DEFAULT_HARDWARE_LIBRARY = [
 
 
 function DeviceControls({ targetZone = 'zone-office-a', targetDevice = '' }) {
-  const [pinOverrides, setPinOverrides] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('econ_gpio_overrides') || '{}'); } catch { return {}; }
-  });
-  const [editingPin, setEditingPin] = useState(null);
+  // No pin overrides. They were read from localStorage and layered over the real table, so a
+  // remap someone typed months ago -- one that never reached a node, because nothing consumed
+  // those messages -- kept displaying as this node's pinout on that browser alone. A stale
+  // illusion in one person's local storage is worse than no control at all.
+  const hwLibrary = DEFAULT_HARDWARE_LIBRARY;
 
-  const hwLibrary = DEFAULT_HARDWARE_LIBRARY.map(item => ({
-    ...item,
-    pin: pinOverrides[item.id] || item.pin,
-  }));
-
-  const savePinConfig = (id, newPin) => {
-    const next = { ...pinOverrides, [id]: newPin };
-    setPinOverrides(next);
-    localStorage.setItem('econ_gpio_overrides', JSON.stringify(next));
-    setEditingPin(null);
-    // Push the pin remap to the edge node via the command API
-    const token = typeof getAdminToken === 'function' ? getAdminToken() : '';
-    const headers = { 'Content-Type': 'application/json' };
-    if (token) headers['X-Admin-Token'] = token;
-    fetch(`${API_BASE}/api/command`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ zone: targetZone || 'all', command: `CONFIG:PIN_REMAP:${id}=${newPin}` }),
-    }).catch(() => {});
-  };
-
-  const resetPins = () => {
-    setPinOverrides({});
-    localStorage.removeItem('econ_gpio_overrides');
-    setEditingPin(null);
-  };
+  // GPIO assignments are build-time. This table reports them; it cannot change them.
+  //
+  // It used to be click-to-edit, and the edit could never land. It POSTed
+  // `CONFIG:PIN_REMAP:<dashboard-id>=<pin>`. The CONFIG: route itself is real -- engine.go
+  // strips the prefix and republishes the remainder to econ/config/<topic>, which the node
+  // subscribes to -- but handleConfig() deserialises that payload as JSON keyed by firmware
+  // field name (pinIrAc, pinPlugRelay). `PIN_REMAP:ir_blaster=25` is neither JSON nor a
+  // firmware field name, so the node rejected it as malformed and said so on its config
+  // state topic. Nothing in this component read that reply: the POST returned 200 because
+  // the engine accepted the command, `.catch(() => {})` discarded transport errors, and
+  // localStorage was updated regardless -- so the cell redrew with a pin the node had
+  // explicitly refused.
+  //
+  // Making it work is not simply a matter of the right topic either. IRac and IRsend capture
+  // their pin in the constructor and expose no way to move it, so the IR row in particular
+  // cannot be remapped at runtime by any message -- main.cpp warns about exactly that when a
+  // configured pinIrAc disagrees with the compiled one. Changing a pin means editing
+  // platformio.ini and reflashing. The honest control is no control.
   const [protocol, setProtocol] = useState('COOLIX');
   const [hexCode, setHexCode] = useState('0xB27BE0');
   const [bits, setBits] = useState('32');
@@ -290,15 +283,15 @@ function DeviceControls({ targetZone = 'zone-office-a', targetDevice = '' }) {
             <div style={{ fontSize: 12, fontWeight: 700, color: '#f3f4f6' }}>
               ESP32 Edge Node Hardware Library (edge/esp32/src/main.cpp)
             </div>
-            <button onClick={resetPins} style={{ fontSize: 10, padding: '3px 8px', background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.4)', color: '#fca5a5', borderRadius: 4, cursor: 'pointer' }}>
-              Reset GPIO Defaults
-            </button>
+            <span style={{ fontSize: 10, color: '#6b7280' }}>
+              build-time — set in <code style={{ color: '#9ca3af' }}>platformio.ini</code>
+            </span>
           </div>
           <table style={S.table}>
             <thead>
               <tr>
                 <th style={S.th}>Device</th>
-                <th style={S.th}>GPIO Pin <span style={{ color: '#60a5fa', fontSize: 9 }}>(click to edit)</span></th>
+                <th style={S.th}>GPIO Pin</th>
                 <th style={S.th}>Protocol / Bus</th>
                 <th style={S.th}>Build Flag</th>
                 <th style={S.th}>Function</th>
@@ -308,18 +301,8 @@ function DeviceControls({ targetZone = 'zone-office-a', targetDevice = '' }) {
               {hwLibrary.map((item) => (
                 <tr key={item.id}>
                   <td style={{ ...S.td, fontWeight: 600, color: '#e5e7eb' }}>{item.device}</td>
-                  <td style={{ ...S.td, color: '#60a5fa', cursor: 'pointer' }} onClick={() => setEditingPin(item.id)}>
-                    {editingPin === item.id ? (
-                      <input
-                        autoFocus
-                        defaultValue={item.pin}
-                        style={{ background: '#0f172a', border: '1px solid #3b82f6', color: '#60a5fa', padding: '2px 6px', borderRadius: 3, fontSize: 11, width: '100%', fontFamily: 'monospace' }}
-                        onBlur={(e) => savePinConfig(item.id, e.target.value)}
-                        onKeyDown={(e) => { if (e.key === 'Enter') savePinConfig(item.id, e.target.value); if (e.key === 'Escape') setEditingPin(null); }}
-                      />
-                    ) : (
-                      <code style={{ cursor: 'pointer' }}>{item.pin}{pinOverrides[item.id] ? ' ✎' : ''}</code>
-                    )}
+                  <td style={{ ...S.td, color: '#60a5fa' }}>
+                    <code>{item.pin}</code>
                   </td>
                   <td style={S.td}>{item.bus}</td>
                   <td style={S.td}><code style={{ color: '#f59e0b' }}>{item.flag}</code></td>
@@ -1705,7 +1688,12 @@ function ConfigTab() {
         body: JSON.stringify({ command: `CONFIG:${cmd}`, zone: 'all' })
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      setStatus({ msg: 'Command sent successfully', ok: true });
+      // Say what is actually known. A 200 means the ENGINE accepted it and republished it to
+      // econ/config/<node>; the node validates independently and can still reject the payload
+      // as malformed JSON or an out-of-range value, which it reports on its config state
+      // topic. Nothing here reads that reply yet, so claiming success outright would assert
+      // an outcome this component never observed.
+      setStatus({ msg: 'Published to the node — check its config state for whether it applied', ok: true });
       setCmd('');
     } catch (err) {
       setStatus({ msg: err.message, ok: false });
@@ -1715,7 +1703,11 @@ function ConfigTab() {
   return (
     <div style={S.card}>
       <h2 style={{marginTop: 0, color: '#f59e0b'}}>HARDWARE CONFIGURATION</h2>
-      <p style={S.dim}>Broadcast configuration to all listening hardware nodes via <code>POST /api/command</code>.</p>
+      <p style={S.dim}>
+        Broadcast configuration to all listening hardware nodes via <code>POST /api/command</code>.
+        The engine strips the <code>CONFIG:</code> prefix and republishes to <code>econ/config/&lt;node&gt;</code>,
+        where the firmware parses it as JSON keyed by field name and validates each value before applying it.
+      </p>
       <form onSubmit={sendCmd} style={{ display: 'flex', gap: 8, marginTop: 12 }}>
         <input style={S.input} value={cmd} onChange={e => setCmd(e.target.value)} placeholder='e.g. {"relayActiveLow": true}' />
         <button type="submit" style={{...S.btn(true), padding: '6px 14px'}}>Send JSON Config</button>
