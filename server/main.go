@@ -412,6 +412,7 @@ func isSupportedCommand(cmd string) bool {
 		strings.HasPrefix(upper, "SETPOINT=") ||
 		strings.HasPrefix(upper, "HVAC_SET:") ||
 		strings.HasPrefix(upper, "IR_SEND:") ||
+		upper == "IR_CARRIER" ||
 		upper == "PLUG_ON" || upper == "PLUG_OFF" ||
 		strings.HasPrefix(upper, "DAMPER=") ||
 		strings.HasPrefix(upper, "VAV_SET:") ||

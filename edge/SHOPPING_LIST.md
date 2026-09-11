@@ -73,7 +73,7 @@ machine. Build **D** is what the plug-load case study (26.4% of office energy) n
 | 11b | *(mechanical, out of stock)* [2-ch opto relay High/Low](https://hshop.vn/module-2-relay-voi-opto-coch-ly-koch-h-l-5vdc) `HS0998C` | 1 | same | Dry contacts (COM/NO/NC), 10 A, switches AC **or** DC. Cheaper and no minimum-load quirk — buy it instead **when the 5 VDC variant restocks** (both it and `HS0997` were *Hết hàng* on 23 Jul 2026). Jumper to HIGH, coils on 5 V. | ✓ 35.000₫ |
 | 12 | **IR LED 940 nm, 5 mm** | 1–2 | `-DUSE_IR_AC=1` | Drives the split unit. Two in series widens coverage in a large room | 5–10k |
 | 13 | **NPN transistor** 2N2222 / S8050 / PN2222 | 1 | with #12 | **Required.** A GPIO sources ~12 mA; an IR LED wants ~100 mA of pulse current for useful range. Straight off the pin you get about a metre | 3–5k |
-| 14 | Resistors: **1 kΩ** (transistor base), **10 Ω** ¼ W (LED current) | 1 ea | with #12 | See the driver circuit in WIRING.md, and [§4a](#4a-resistors--which-caka-sku-actually-has-the-values) for which caka SKU to buy | ~1k ea |
+| 14 | Resistors: **2 × 1 kΩ** (transistor base, wired in parallel = 500 Ω), **15 Ω** ¼ W (LED current) | 1 ea | with #12 | See the driver circuit in WIRING.md, and [§4a](#4a-resistors--which-caka-sku-actually-has-the-values) for which caka SKU to buy | ~1k ea |
 
 > ⚠️ **hshop does not stock items 12–14, and this pass confirmed it.** Searches for a 940 nm
 > emitter, a discrete NPN and a ¼ W resistor assortment all come back with nothing usable —

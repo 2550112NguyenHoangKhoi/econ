@@ -697,9 +697,59 @@ void setupWifi() {
   // blaster — the last link in that chain was missing.
   decode_type_t gIrProtocol = decode_type_t::IR_AC_PROTOCOL;
 
-  IRac ac(gCfg.pinIrAc);
-  IRsend customIrSend(gCfg.pinIrAc);       // Generic IR sender for fans, TVs, etc.
+  // Both of these capture their pin ONCE, in the constructor, and IRsend gives no way to
+  // move it afterwards. They must therefore be built from a constant, not from gCfg:
+  // gCfg is an inline variable whose dynamic initializer runs at static-init time, and
+  // relying on it being ordered before these two objects in the same translation unit is
+  // leaning on a corner of the standard (inline variables are only *partially* ordered)
+  // for no benefit. kIrPin is constant-initialized, so there is no ordering question.
+  //
+  // The consequence, stated plainly because the config surface implies otherwise: the
+  // blaster is bound to the compiled IR_PIN. Setting pinIrAc over MQTT changes what the
+  // logs and /api report without moving a single pulse. setup() checks for that and says so.
+  #ifdef IR_PIN
+    static const uint8_t kIrPin = IR_PIN;
+  #else
+    static const uint8_t kIrPin = 25;
+  #endif
+  IRac ac(kIrPin);
+  IRsend customIrSend(kIrPin);             // Generic IR sender for fans, TVs, etc.
   bool irAcReady = false;            // protocol compiled AND supported by the library
+
+  // How many times each state frame is transmitted.
+  //
+  // Range is not the only thing that loses a frame. At the far end of the link the
+  // receiver is deciding on a handful of microwatts against whatever else in the room is
+  // radiating at 940 nm -- sunlight through a window, a fluorescent ballast, another
+  // handset -- and one corrupted burst is the whole command gone, silently. There is no
+  // acknowledgement on this link: the firmware cannot tell a frame that landed from one
+  // that did not, and the twin goes on believing it set a setpoint it never set.
+  //
+  // Repeating is safe here specifically because these are absolute-state protocols. Every
+  // frame IRac emits carries the complete desired state -- power, mode, temperature, fan --
+  // so a second copy sets exactly what the first one set. That is NOT true of toggle-style
+  // protocols, where a repeat would undo the command; if IR_AC_PROTOCOL is ever pointed at
+  // one, this must go back to 1.
+  //
+  // The cost is blocking time in loop(), and it scales with the protocol's frame length:
+  // ELECTRA_AC is 104 bits (~100 ms per frame), but HITACHI_AC344 and HITACHI_AC424 run
+  // 344 and 424 bits -- closer to 400 ms each. Two frames is the useful default; on the
+  // long Hitachi variants, weigh a second frame against ~0.8 s of stalled loop before
+  // raising it.
+  #ifndef IR_AC_REPEATS
+    #define IR_AC_REPEATS 2
+  #endif
+  #ifndef IR_AC_REPEAT_GAP_MS
+    #define IR_AC_REPEAT_GAP_MS 45     // handsets leave a similar gap between state frames
+  #endif
+
+  // Send the frame already staged in ac.next, IR_AC_REPEATS times.
+  static void sendAcFrameRepeated() {
+    for (int i = 0; i < (IR_AC_REPEATS); i++) {
+      if (i) delay(IR_AC_REPEAT_GAP_MS);
+      ac.sendAc();
+    }
+  }
 #endif
 
 // applyHvacSetpoint drives the room's air conditioner to `celsius`.
@@ -752,9 +802,9 @@ void applyHvacSetpoint(float celsius) {
     ac.next.sleep    = -1;
     ac.next.clock    = -1;
     ac.next.power    = true;
-    ac.sendAc();
-    Serial.printf("[hvac] IR frame sent: %s -> %.1f C\n",
-                  typeToString(gIrProtocol).c_str(), celsius);
+    sendAcFrameRepeated();
+    Serial.printf("[hvac] IR frame sent x%d: %s -> %.1f C\n",
+                  (IR_AC_REPEATS), typeToString(gIrProtocol).c_str(), celsius);
     return;
   }
   Serial.println("[hvac] WARNING: IR AC compiled in but protocol unsupported -> not sent");
@@ -803,9 +853,9 @@ void applyHvacOff() {
     ac.next.sleep    = -1;
     ac.next.clock    = -1;
     ac.next.power    = false;                    // the one bit that matters here
-    ac.sendAc();
-    Serial.printf("[hvac] IR frame sent: %s -> POWER OFF\n",
-                  typeToString(gIrProtocol).c_str());
+    sendAcFrameRepeated();
+    Serial.printf("[hvac] IR frame sent x%d: %s -> POWER OFF\n",
+                  (IR_AC_REPEATS), typeToString(gIrProtocol).c_str());
     return;
   }
   Serial.println("[hvac] WARNING: IR AC compiled in but protocol unsupported -> OFF not sent");
@@ -1314,6 +1364,347 @@ void handleCommand(const String& msg) {
     else if (tok == "LIGHTS_OFF") setLights(false);
     else if (tok.startsWith("SETPOINT=")) applyHvacToken(tok.substring(9));
     else if (tok.startsWith("HVAC_SET:")) applyHvacToken(tok.substring(9));
+    // Hardware-only test for the emitter, with no protocol involved.
+    //
+    // "The AC does not respond" has two causes that look identical from the serial log: the
+    // LED is not firing, or it is firing a vendor protocol this unit does not speak. A
+    // normal frame cannot tell them apart -- it is 20 % duty cycle spread over a couple of
+    // hundred milliseconds, too brief and too dim to judge by eye and far too brief to put
+    // a multimeter across. This emits 2 s of unmodulated 38 kHz carrier instead, which is
+    // long enough to photograph and long enough to measure:
+    //
+    //   phone camera  -> steady violet glow, not a flicker. Nothing = the LED, the
+    //                    transistor pinout or a leg in the wrong column. Protocol is
+    //                    irrelevant to this test.
+    //   meter across R2 -> the carrier is 50 % duty, so a DC meter reads half the peak drop.
+    //                    ~1.4 V across 15 ohm = 95 mA average = 190 mA peak, which is the
+    //                    design figure. Near 0 V means no current is flowing at all; the
+    //                    full rail means the transistor is never turning on.
+    //
+    // Blocks loop() for the full 2 s. That is the point -- it is a deliberate diagnostic,
+    // not something the engine should ever send on its own.
+    // Which of head 1's two UART wires is broken.
+    //
+    // "no ACK on open-command-mode" is a symptom of three different faults and cannot tell
+    // them apart: our TX never reaches the module (GPIO17 -> module RX), the module's reply
+    // never reaches us (module OT1 -> GPIO16), or the module is deaf. The OT2 pull test
+    // already settles the power question, so what is left is the pair of data wires.
+    //
+    // A UART transmitter idles HIGH. So the RX pin can be interrogated exactly the way OT2
+    // is: park an internal pulldown on it and see whether it still reads high. Only a real
+    // driver on the far end holds a line up against a ~45k pulldown, so:
+    //
+    //   DRIVEN HIGH -> the module's TX pad is connected and idling. That wire is good, and
+    //                  the fault is on the OTHER wire (GPIO17 -> module RX) or in the module.
+    //   FOLLOWS THE PULLS -> nothing is driving the line: that wire is open, or the module's
+    //                  TX pad is dead. This is the half to reseat.
+    //
+    // Head 2 is tested too, as a control. Its UART demonstrably works, so its reading is
+    // what "good" looks like on this board -- without that reference a single result is
+    // hard to trust.
+    else if (tok == "RD03_LINETEST") {
+#if USE_MMWAVE_UART || USE_MMWAVE2_UART
+      for (int h = 0; h < 2; h++) {
+        HardwareSerial* io = nullptr; const char* label = nullptr;
+        uint8_t rxPin = 255, txPin = 255;
+  #if USE_MMWAVE_UART
+        if (h == 0) { io = &Serial2; label = "head1"; rxPin = MMWAVE_UART_RX;  txPin = MMWAVE_UART_TX;  }
+  #endif
+  #if USE_MMWAVE2_UART
+        if (h == 1) { io = &Serial1; label = "head2"; rxPin = MMWAVE2_UART_RX; txPin = MMWAVE2_UART_TX; }
+  #endif
+        if (!io) continue;
+
+        io->end();                       // release the pin from the UART peripheral
+        delay(20);
+        pinMode(rxPin, INPUT_PULLDOWN); delay(5);
+        const int withPulldown = digitalRead(rxPin);
+        pinMode(rxPin, INPUT_PULLUP);   delay(5);
+        const int withPullup   = digitalRead(rxPin);
+        pinMode(rxPin, INPUT);
+
+        const bool driven  = (withPulldown == HIGH);          // held up against the pulldown
+        const bool floating = (withPulldown == LOW && withPullup == HIGH);
+        Serial.printf("[rd03:%s] RX line GPIO%d: pulldown=%s pullup=%s -> %s\n",
+                      label, rxPin,
+                      withPulldown == HIGH ? "HIGH" : "low",
+                      withPullup   == HIGH ? "high" : "LOW",
+                      driven   ? "DRIVEN HIGH by the module (TX pad connected, UART idling)"
+                      : floating ? "FLOATING — nothing is driving this line: the wire is open "
+                                   "or the module's TX pad is dead"
+                                 : "STUCK LOW — shorted to GND, or the module is mid-transmission");
+
+        io->begin(115200, SERIAL_8N1, rxPin, txPin);
+        delay(20);
+        while (io->available()) (void)io->read();
+
+        // Anything arriving unprompted? A silent line here with a DRIVEN verdict above
+        // means the module is connected but not talking, which points at our TX wire.
+        // Hex AND the ASCII rendering. These modules do not all speak the same protocol:
+        // the binary report frame opens F4 F3 F2 F1, but a head running the ASCII presence
+        // firmware emits plain text instead, and in hex the two are indistinguishable to
+        // anyone not decoding by hand. Printing both makes the difference obvious in the log.
+        const uint32_t until = millis() + 2500;
+        uint8_t got[192];
+        int n = 0;
+        while (millis() < until && n < (int)sizeof(got)) {
+          if (io->available()) got[n++] = (uint8_t)io->read();
+        }
+        if (!n) {
+          Serial.printf("[rd03:%s] listening 2.5 s for unprompted bytes: (silence)\n", label);
+        } else {
+          Serial.printf("[rd03:%s] %d bytes in 2.5 s\n", label, n);
+          Serial.printf("[rd03:%s]   hex:   ", label);
+          for (int i = 0; i < n; i++) Serial.printf("%02X ", got[i]);
+          Serial.printf("\n[rd03:%s]   ascii: ", label);
+          for (int i = 0; i < n; i++) {
+            const uint8_t c = got[i];
+            if (c == 0x0D) Serial.print("\\r");
+            else if (c == 0x0A) Serial.print("\\n");
+            else if (c >= 0x20 && c < 0x7F) Serial.write(c);
+            else Serial.print(".");
+          }
+          const bool binary = (n >= 4 && got[0] == 0xF4 && got[1] == 0xF3 &&
+                               got[2] == 0xF2 && got[3] == 0xF1);
+          Serial.printf("\n[rd03:%s]   -> %s\n", label,
+                        binary ? "binary Rd-03 report frames (this is what the parser expects)"
+                               : "NOT the binary report frame. If this reads as plain text, the "
+                                 "head is running ASCII presence firmware and will never ACK a "
+                                 "binary command — different protocol, not a broken link");
+        }
+      }
+      Serial.println("[rd03] line test done — heads reinitialise on the next probe cycle");
+#else
+      Serial.println("[rd03] RD03_LINETEST ignored (no radar UART compiled in)");
+#endif
+    }
+    // The same 2 s of 38 kHz, bit-banged on the pin directly — no IRsend, no IRac, no
+    // library state. Run it back to back with IR_CARRIER:
+    //   both light the LED   -> the emitter and the library are both fine
+    //   only this one lights -> the IRsend object is driving a different pin than we think
+    //   neither lights       -> the fault is in the circuit, not the code
+    // Every AC protocol IRac can build, one after another, ~2 s apart.
+    //
+    // Hand-picking a dozen candidates was never going to be enough: the Vietnamese market is
+    // full of OEM units (Midea, TCL, Haier, Sharp, Funiki, Sumikura, Carrier) whose remotes
+    // are nothing like the brand on the front panel, and a miss looks identical to a dead
+    // emitter. IRac knows exactly which protocols it can construct a frame for, so ask it
+    // rather than guessing, and try all of them.
+    //
+    // Each step alternates 18/30 C so a unit that understands the frame reacts visibly --
+    // nearly all of them beep and redraw the setpoint. Watch the AC and note the index.
+    // MQTT is serviced between steps so the session survives the couple of minutes this takes.
+    else if (tok == "IR_SWEEP") {
+#if USE_IR_AC
+      const decode_type_t restore = gIrProtocol;
+      int idx = 0;
+      Serial.println("[ir sweep] starting — watch the AC and note the index when it reacts");
+      for (int t = 1; t <= kLastDecodeType; t++) {
+        const decode_type_t p = (decode_type_t)t;
+        if (!IRac::isProtocolSupported(p)) continue;
+        idx++;
+        IRac::initState(&ac.next);
+        ac.next.protocol = p;
+        ac.next.model    = 1;
+        ac.next.mode     = stdAc::opmode_t::kCool;
+        ac.next.celsius  = true;
+        ac.next.degrees  = (idx % 2) ? 30 : 18;
+        ac.next.fanspeed = stdAc::fanspeed_t::kAuto;
+        ac.next.power    = true;
+        Serial.printf("[ir sweep] %3d  %-20s -> %2.0f C\n",
+                      idx, typeToString(p).c_str(), (double)ac.next.degrees);
+        ac.sendAc();
+        for (int w = 0; w < 20; w++) { client.loop(); delay(100); }   // keep MQTT alive
+      }
+      gIrProtocol = restore;
+      hvacPowerOn = !hvacPowerOn;          // force the next real command to transmit
+      Serial.printf("[ir sweep] done — %d protocols tried, restored %s\n",
+                    idx, typeToString(restore).c_str());
+#else
+      Serial.println("[ir] IR_SWEEP ignored (built without USE_IR_AC=1)");
+#endif
+    }
+    // Does the IR LED actually draw current? Answered without a multimeter.
+    //
+    // The ACS712 on the strip channel is powered from the same 5 V rail as the emitter and
+    // idles at Vcc/2, halved again by its 10k/10k divider — so the strip ADC is a live
+    // voltmeter on that rail, already wired and already calibrated. Hold the LED hard on,
+    // and if current is really flowing the rail sags through the jumper and contact
+    // resistance feeding it. No sag means no current, whatever the LED looks like.
+    //
+    // The earlier attempt at this failed because IR_CARRIER blocks loop(), so the strip
+    // channel never sampled while the carrier ran. Here both live in one function.
+    // Single-point CO2 calibration, command 0x5204, with a gate on the air it is given.
+    //
+    // This writes the sensor's zero. Issue it in occupied air and you do not get a slightly
+    // wrong sensor, you get a confidently wrong one: tell a sensor sitting in 2000 ppm that
+    // it is breathing 420, and from then on it under-reports by 1600 ppm while every
+    // self-check it has still passes. There is no way to detect that downstream, and the
+    // twin would act on it. So the node refuses unless the air looks like still outdoor air.
+    //
+    // The gate is stability, not absolute value, because stability is the thing that
+    // actually distinguishes the two cases. Outdoor air with nobody near it sits within a
+    // few ppm for minutes. An occupied room wanders and spikes -- one breath within a metre
+    // moves this sensor hundreds of ppm, which is how the 5742 ppm peak in this node's
+    // history got there. 60 s of sampling, and a peak-to-peak over 50 ppm means whatever is
+    // in front of the sensor is not a stable reference and the write is refused.
+    else if (tok.startsWith("CO2_CAL=")) {
+#if USE_CO2
+      String arg = tok.substring(8);
+      bool forced = false;
+      const int comma = arg.indexOf(',');
+      if (comma >= 0) { forced = arg.substring(comma + 1) == "FORCE"; arg = arg.substring(0, comma); }
+      const long target = arg.toInt();
+      if (target < 380 || target > 2000) {
+        Serial.printf("[co2 cal] target %ld ppm rejected — expected 380..2000. Outdoor air is "
+                      "~420 ppm and is the only reference worth using.\n", target);
+      } else {
+        Serial.printf("[co2 cal] sampling 60 s before writing %ld ppm — hold still and stay "
+                      "away from the sensor\n", target);
+        long sum = 0; int n = 0, lo = 99999, hi = 0;
+        for (int i = 0; i < 30; i++) {
+          int ppm;
+          if (readCo2(ppm)) { sum += ppm; n++; if (ppm < lo) lo = ppm; if (ppm > hi) hi = ppm; }
+          for (int w = 0; w < 20; w++) { client.loop(); delay(100); }
+        }
+        const int spread = (n ? hi - lo : 9999);
+        const double mean = (n ? (double)sum / n : 0.0);
+        Serial.printf("[co2 cal] %d/30 valid reads, mean %.0f ppm, range %d..%d (spread %d)\n",
+                      n, mean, lo, hi, spread);
+        if (n < 20) {
+          Serial.println("[co2 cal] REFUSED — too few valid reads to trust the air sample.");
+        } else if (spread > 50) {
+          Serial.printf("[co2 cal] REFUSED — %d ppm of drift over a minute is not a stable "
+                        "reference. Still outdoor air holds within a few ppm; this is someone "
+                        "breathing nearby, or a room that is still changing.\n", spread);
+        } else if (fabs(mean - (double)target) > 800.0 && !forced) {
+          // Stability is necessary but NOT sufficient: a still, closed, occupied room is
+          // also stable, and that is precisely the situation in which someone impatient
+          // runs this command and silently destroys the sensor's zero. ABC drift is
+          // typically a few hundred ppm; a correction approaching four figures is far more
+          // likely to mean the sensor is still indoors than that it has drifted that far.
+          Serial.printf("[co2 cal] REFUSED — the air reads %.0f ppm and you declared %ld. A "
+                        "%+.0f ppm correction is larger than baseline drift explains, and the "
+                        "usual cause is running this indoors. If the sensor really is outside "
+                        "and settled, repeat as CO2_CAL=%ld,FORCE\n",
+                        mean, target, (double)target - mean, target);
+        } else {
+          const uint8_t hiB = (uint8_t)((target >> 8) & 0xFF), loB = (uint8_t)(target & 0xFF);
+          Wire1.beginTransmission(ACD1200_ADDR);
+          Wire1.write(0x52); Wire1.write(0x04);
+          Wire1.write(hiB);  Wire1.write(loB);
+          Wire1.write(crc8_31(hiB, loB));
+          const bool wrote = (Wire1.endTransmission() == 0);
+          delay(20);
+          Serial.printf("[co2 cal] %s — sensor was reading %.0f ppm in air declared to be "
+                        "%ld ppm, a %+.0f ppm correction\n",
+                        wrote ? "WRITTEN" : "WRITE FAILED (sensor did not ACK)",
+                        mean, target, (double)target - mean);
+          if (wrote) Serial.println("[co2 cal] allow a few minutes for the reading to settle");
+        }
+      }
+#else
+      Serial.println("[co2 cal] ignored (built without USE_CO2=1)");
+#endif
+    }
+    else if (tok == "IR_LOAD_TEST") {
+#if USE_IR_AC && USE_STRIP
+      const uint8_t adcPin = gCfg.pinStripAdc;
+      auto avgCounts = [&](int n) {
+        long total = 0;
+        for (int i = 0; i < n; i++) { total += analogRead(adcPin); delayMicroseconds(150); }
+        return (double)total / n;
+      };
+      pinMode(kIrPin, OUTPUT);
+      digitalWrite(kIrPin, LOW);
+      delay(60);
+      const double before = avgCounts(400);
+      digitalWrite(kIrPin, HIGH);           // LED hard on, DC, for the sample window only
+      delayMicroseconds(500);               // let the rail settle
+      const double loaded = avgCounts(400);
+      digitalWrite(kIrPin, LOW);
+      delay(60);
+      const double after = avgCounts(400);
+
+      // V_pin = Vcc/4, so Vcc = 4 * counts * 3.3/4095.
+      const double kVoltsPerCount = 4.0 * 3.3 / 4095.0;
+      const double idle = (before + after) / 2.0;
+      const double sagCounts = idle - loaded;
+      Serial.printf("[ir load] rail idle %.1f cts (%.2f V)  |  LED on %.1f cts (%.2f V)  |  "
+                    "sag %+.1f cts = %+.3f V\n",
+                    idle, idle * kVoltsPerCount, loaded, loaded * kVoltsPerCount,
+                    sagCounts, sagCounts * kVoltsPerCount);
+      // Three bands, not two. The first version only had a lower threshold, so a dead short
+      // -- which collapses the rail to near zero -- reported the same cheerful "current is
+      // flowing" as a healthy 374 mA. It is flowing, but that is not the useful thing to say.
+      if (sagCounts >= 150.0) {
+        Serial.printf("[ir load] -> RAIL COLLAPSE, NOT A LOAD. %.0f counts of sag is a near "
+                      "short, not an emitter: disconnect it now. At this impedance the 15 ohm "
+                      "resistors dissipate several times their rating.\n", sagCounts);
+      } else if (sagCounts >= 8.0) {
+        Serial.println("[ir load] -> CURRENT IS FLOWING. The emitter circuit conducts; if the AC "
+                       "still ignores it, the fault is the protocol, not the wiring.");
+      } else {
+        Serial.println("[ir load] -> NO MEASURABLE CURRENT. The transistor is being driven but "
+                       "nothing is conducting: check the LED polarity (long leg to the resistor), "
+                       "the transistor's E/B/C order, and that every leg is truly seated.");
+      }
+#else
+      Serial.println("[ir] IR_LOAD_TEST needs USE_IR_AC and USE_STRIP");
+#endif
+    }
+    else if (tok == "IR_GPIO_TEST") {
+#if USE_IR_AC
+      Serial.printf("[ir] raw GPIO test: 2 s of bit-banged 38 kHz on GPIO%d (no IR library)\n",
+                    kIrPin);
+      pinMode(kIrPin, OUTPUT);
+      const uint32_t until = millis() + 2000;
+      noInterrupts();
+      while (millis() < until) {
+        for (int i = 0; i < 380 && millis() < until; i++) {   // ~10 ms of carrier per pass
+          digitalWrite(kIrPin, HIGH); delayMicroseconds(13);
+          digitalWrite(kIrPin, LOW);  delayMicroseconds(13);
+        }
+        interrupts();                     // let WiFi/MQTT breathe between bursts
+        delayMicroseconds(50);
+        noInterrupts();
+      }
+      interrupts();
+      digitalWrite(kIrPin, LOW);
+      Serial.println("[ir] raw GPIO test done");
+#else
+      Serial.println("[ir] IR_GPIO_TEST ignored (built without USE_IR_AC=1)");
+#endif
+    }
+    // IR_CARRIER, or IR_CARRIER=<seconds> for a longer window.
+    //
+    // 2 s is plenty to photograph but too short to METER: a typical handheld updates about
+    // twice a second and needs a second or two to settle, so a 2 s burst reads somewhere
+    // between zero and the real figure. Anyone putting probes across R2 wants ~10 s.
+    //
+    // Capped at 10 s deliberately. The carrier is 50 % duty, so a 10 s run puts ~95 mA
+    // average through each emitter (rated 100 mA continuous) and ~0.27 W in a quarter-watt
+    // R2 — inside the short-overload a resistor's thermal mass absorbs, but the part will be
+    // warm to the touch and there is no reason to hold it longer than a reading takes.
+    else if (tok == "IR_CARRIER" || tok.startsWith("IR_CARRIER=")) {
+#if USE_IR_AC
+      long secs = 2;
+      if (tok.startsWith("IR_CARRIER=")) {
+        secs = tok.substring(11).toInt();
+        if (secs < 1)  secs = 2;
+        if (secs > 10) secs = 10;
+      }
+      Serial.printf("[ir] carrier test: %ld s of 38 kHz on GPIO%d -- phone camera, "
+                    "or DC volts across one 15 ohm\n", secs, kIrPin);
+      customIrSend.begin();
+      customIrSend.enableIROut(38);
+      for (long i = 0; i < secs * 20; i++) customIrSend.mark(50000);  // mark() takes uint16_t
+      customIrSend.space(0);                                          // leave the pin low
+      Serial.println("[ir] carrier test done");
+#else
+      Serial.println("[ir] IR_CARRIER ignored (built without USE_IR_AC=1)");
+#endif
+    }
     else if (tok.startsWith("IR_SEND:")) {
 #if USE_IR_AC
       int p1 = tok.indexOf(':', 8);
@@ -1336,8 +1727,21 @@ void handleCommand(const String& msg) {
             Serial.printf("[ir] rejected bit count \"%s\" (parsed %ld; expected 1..512)\n",
                           bitsStr.c_str(), nbitsRaw);
           } else if (protocol != decode_type_t::UNKNOWN) {
-            customIrSend.send(protocol, data, nbits);
-            Serial.printf("[ir] sent %s: 0x%llx (%d bits)\n", protoStr.c_str(), (unsigned long long)data, nbits);
+            // send() returns false for every state-based protocol. Those carry their frame
+            // in a byte array, not a 64-bit value, so there is no data to hand this overload
+            // and IRsend refuses rather than emitting something wrong. Ignoring the return
+            // and printing "sent" regardless reports a transmission that never left the pin —
+            // exactly the kind of fabricated confirmation the log exists to prevent.
+            if (customIrSend.send(protocol, data, nbits)) {
+              Serial.printf("[ir] sent %s: 0x%llx (%d bits)\n",
+                            protoStr.c_str(), (unsigned long long)data, nbits);
+            } else {
+              Serial.printf("[ir] %s REFUSED — nothing was transmitted. It is a state-based "
+                            "protocol: its frame is a byte array, not a %d-bit value, so raw "
+                            "IR_SEND cannot express it. Use SETPOINT=/HVAC_OFF, which go "
+                            "through IRac and can build the full frame.\n",
+                            protoStr.c_str(), nbits);
+            }
           } else {
             Serial.printf("[ir] unknown protocol: %s\n", protoStr.c_str());
           }
@@ -1857,7 +2261,13 @@ void setup() {
   if (gCfg.pinLightingRelay != 255) {
     pinMode(gCfg.pinLightingRelay, OUTPUT);
   }
-  pinMode(gCfg.pinIrAc, OUTPUT);
+  if (gCfg.pinIrAc != kIrPin) {
+    Serial.printf("[hvac] WARNING: pinIrAc is configured as GPIO%d but the IR objects were "
+                  "built on GPIO%d and cannot be moved at runtime. Every frame is going out "
+                  "on GPIO%d; reflash with -DIR_PIN=%d to actually change it.\n",
+                  gCfg.pinIrAc, kIrPin, kIrPin, gCfg.pinIrAc);
+  }
+  pinMode(kIrPin, OUTPUT);
 #if USE_IR_AC
   customIrSend.begin();
   // IRac has no begin() — the per-protocol sender initialises itself on send. What DOES
@@ -2003,9 +2413,18 @@ void setup() {
     while (io->available()) (void)io->read();
     gRadarAlive[headIndex] = rd03::dumpConfig(*io, label);
     if (!gRadarAlive[headIndex]) {
-      Serial.printf("[mmwave] %s is NOT ANSWERING — treating it as absent. Its OT2 pin will be "
-                    "IGNORED for occupancy and omitted from telemetry, because an unpowered "
-                    "head leaves that pin floating and a floating pin reads as PRESENT.\n", label);
+      // Only the UART is lost here, not the head. OT2 and the serial link are separate
+      // wires and are judged separately: the pull test above drives the pin both ways and
+      // can tell a driven pin from a floating one, so a head whose OT2 passed that test
+      // still contributes presence and still publishes radarN. What a dead UART costs is
+      // the per-gate energy array and the ability to configure the module — nothing else.
+      // (This line used to claim the OT2 was ignored and omitted. It was, once, before the
+      // two channels were separated; saying so now sends whoever reads the log hunting a
+      // presence fault that does not exist.)
+      Serial.printf("[mmwave] %s UART is NOT ANSWERING — no gate array, and RD03_SET_* cannot be "
+                    "applied to this head. Its OT2 pin is unaffected and still reports presence: "
+                    "the pull test proved that pin is driven, which a floating pin cannot fake "
+                    "against an internal pulldown.\n", label);
     }
   #if defined(RD03_SET_MAX_GATE) && defined(RD03_SET_DELAY_S)
     rd03::applyConfig(*io, label, (uint32_t)RD03_SET_MIN_GATE, (uint32_t)RD03_SET_MAX_GATE,

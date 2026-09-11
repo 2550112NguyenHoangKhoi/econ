@@ -104,34 +104,45 @@ function Spark({ points, width = 520, height = 90 }) {
   );
 }
 
+// Both lists are generated from the library on disk, not hand-maintained, because the
+// names have to match EXACTLY what the node resolves. The previous list offered PANASONIC,
+// MITSUBISHI, SAMSUNG and TOSHIBA -- none of which IRac accepts; the AC variants are
+// PANASONIC_AC, MITSUBISHI_AC, SAMSUNG_AC, TOSHIBA_AC -- plus NEC/SONY/RC5/RC6, which are
+// TV remote protocols with no AC frame at all. Selecting any of them set a protocol the
+// node then refused, and the HVAC buttons silently kept using the previous one.
+//
+// IR_PROTOCOLS: every protocol IRac::isProtocolSupported() accepts, i.e. everything the
+// HVAC buttons and PROTOCOL= can actually drive. 65 of them.
 const IR_PROTOCOLS = [
-  'COOLIX',
-  'ELECTRA_AC',
-  // Hitachi ships several incompatible frame lengths under one brand and the remote does not
-  // say which, so this is a try-in-order list: HITACHI_AC (224-bit) covers most split units
-  // and the numbered variants are the frame's bit count.
-  //
-  // AC2 and AC3 are deliberately absent. IRremoteESP8266 can decode them but IRac cannot
-  // BUILD them, so isProtocolSupported() on the node rejects them -- listing them would
-  // offer a choice that always fails. Raw frames for those still work via IR_SEND.
-  'HITACHI_AC',
-  'HITACHI_AC1',
-  'HITACHI_AC264',
-  'HITACHI_AC296',
-  'HITACHI_AC344',
-  'HITACHI_AC424',
-  'DAIKIN',
-  'PANASONIC',
-  'MITSUBISHI',
-  'LG',
-  'SAMSUNG',
-  'TOSHIBA',
-  'GREE',
-  'NEC',
-  'SONY',
-  'RC5',
-  'RC6',
+  'AIRTON', 'AIRWELL', 'AMCOR', 'ARGO',
+  'BOSCH144', 'CARRIER_AC64', 'COOLIX', 'CORONA_AC',
+  'DAIKIN', 'DAIKIN128', 'DAIKIN152', 'DAIKIN160',
+  'DAIKIN176', 'DAIKIN2', 'DAIKIN216', 'DAIKIN64',
+  'DELONGHI_AC', 'ECOCLIM', 'ELECTRA_AC', 'EUROM',
+  'FUJITSU_AC', 'GOODWEATHER', 'GREE', 'HAIER_AC',
+  'HAIER_AC160', 'HAIER_AC176', 'HAIER_AC_YRW02', 'HITACHI_AC',
+  'HITACHI_AC1', 'HITACHI_AC264', 'HITACHI_AC296', 'HITACHI_AC344',
+  'HITACHI_AC424', 'KELON', 'KELVINATOR', 'LG',
+  'LG2', 'MIDEA', 'MIRAGE', 'MITSUBISHI112',
+  'MITSUBISHI136', 'MITSUBISHI_AC', 'MITSUBISHI_HEAVY_152', 'MITSUBISHI_HEAVY_88',
+  'NEOCLIMA', 'PANASONIC_AC', 'PANASONIC_AC32', 'RHOSS',
+  'SAMSUNG_AC', 'SANYO_AC', 'SANYO_AC88', 'SHARP_AC',
+  'TCL112AC', 'TECHNIBEL_AC', 'TECO', 'TEKNOPOINT',
+  'TOSHIBA_AC', 'TRANSCOLD', 'TROTEC', 'TROTEC_3550',
+  'TRUMA', 'VESTEL_AC', 'VOLTAS', 'WHIRLPOOL_AC',
+  'YORK',
 ];
+
+// Of those, the ones whose frame is a 64-bit value rather than a byte array. Only these
+// can go out through the raw "Transmit IR Code" path; IRsend refuses the rest without
+// transmitting.
+const VALUE_BASED_PROTOCOLS = new Set([
+  'AIRTON', 'AIRWELL', 'CARRIER_AC64', 'COOLIX',
+  'DAIKIN64', 'DELONGHI_AC', 'ECOCLIM', 'GOODWEATHER',
+  'GREE', 'KELON', 'LG', 'LG2',
+  'MIDEA', 'PANASONIC_AC32', 'TECHNIBEL_AC', 'TECO',
+  'TRANSCOLD', 'TRUMA', 'VESTEL_AC',
+]);
 
 const DEFAULT_HARDWARE_LIBRARY = [
   { id: 'ir_blaster', device: 'HVAC IR Blaster', pin: 'GPIO 25', bus: 'PWM / IRremoteESP8266', flag: 'USE_IR_AC', desc: 'Commands split-unit ACs (Coolix, Electra, Daikin, etc.) via 940nm IR emitter' },
@@ -181,7 +192,6 @@ function DeviceControls({ targetZone = 'zone-office-a', targetDevice = '' }) {
   const [protocol, setProtocol] = useState('COOLIX');
   const [hexCode, setHexCode] = useState('0xB27BE0');
   const [bits, setBits] = useState('32');
-  const [freq, setFreq] = useState('38');
   const [tempSetpoint, setTempSetpoint] = useState(22.0);
   const [damperVal, setDamperVal] = useState(75);
   const [sending, setSending] = useState(false);
@@ -336,7 +346,14 @@ function DeviceControls({ targetZone = 'zone-office-a', targetDevice = '' }) {
                 data-testid="ir-protocol-select"
                 style={{ ...S.input, width: '100%' }}
                 value={protocol}
-                onChange={(e) => setProtocol(e.target.value)}
+                onChange={(e) => {
+                  // Retarget the node too. Without this the select only rewrote the string
+                  // the raw-transmit button builds, so every HVAC button underneath kept
+                  // firing whatever protocol was compiled in -- picking HITACHI_AC344 here
+                  // and pressing "Set Temp" still transmitted ELECTRA_AC.
+                  setProtocol(e.target.value);
+                  sendCommand(`PROTOCOL=${e.target.value}`);
+                }}
               >
                 {IR_PROTOCOLS.map((p) => (
                   <option key={p} value={p}>{p}</option>
@@ -365,26 +382,23 @@ function DeviceControls({ targetZone = 'zone-office-a', targetDevice = '' }) {
                   onChange={(e) => setBits(e.target.value)}
                 />
               </div>
-              <div style={{ width: 70 }}>
-                <label style={{ fontSize: 11, color: '#9ca3af', display: 'block', marginBottom: 3 }}>kHz:</label>
-                <input
-                  data-testid="ir-freq-input"
-                  type="number"
-                  style={{ ...S.input, width: '100%' }}
-                  value={freq}
-                  onChange={(e) => setFreq(e.target.value)}
-                />
-              </div>
             </div>
 
             <button
               data-testid="ir-send-btn"
               style={{ ...btnStyle('primary'), marginTop: 4, width: '100%' }}
               onClick={() => sendCommand(`IR_SEND:${protocol}:${hexCode.trim()}:${bits}`)}
-              disabled={sending}
+              disabled={sending || !VALUE_BASED_PROTOCOLS.has(protocol)}
             >
               Transmit IR Code ({protocol})
             </button>
+            {!VALUE_BASED_PROTOCOLS.has(protocol) && (
+              <div style={{ fontSize: 10, color: '#9ca3af', lineHeight: 1.45 }}>
+                {protocol} carries its frame as a byte array, not a hex value, so raw transmit
+                cannot express it — the node would refuse it. Use the HVAC buttons below, which
+                build the full frame. The protocol is already applied to the node.
+              </div>
+            )}
 
             {/* Quick HVAC controls via IR */}
             <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px dashed #374151' }}>

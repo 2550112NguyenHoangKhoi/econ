@@ -73,10 +73,10 @@ flowchart LR
   LUX["BH1750 lux<br/>0x23 · optional"] -- "I²C 3.3V" --> E
   RAD["Rd-03 radar ×2<br/>presence · 3.3V"] -- "GPIO34 / GPIO15" --> E
   DS["DS18B20 MKE-S15<br/>supply T · 5V · NOT FITTED"] -- "GPIO27 1-Wire" --> E
-  CT["SCT-013 plug clamp<br/>33R burden + bias"] -- "GPIO34 ADC1" --> E
+  CT["SCT-013 plug clamp<br/>94R burden + bias"] -- "GPIO33 ADC1" --> E
   E -- "GPIO23 → CH1 (not fitted)" --> SSR["2-ch SSR G3MB-202P<br/>lights + socket"]
   E -- "GPIO26" --> RLY["SRD-05VDC-SL-C relay<br/>→ power strip"]
-  E -- "GPIO25 → 1kΩ → 2N2222" --> IR["IR LED 940nm<br/>→ split AC"]
+  E -- "GPIO25 → 500R → 2N2222A" --> IR["IR LED 940nm<br/>5V rail → split AC"]
   E -- "WiFi / MQTT" --> BR["Mosquitto broker<br/>→ Go engine"]
 ```
 
@@ -133,7 +133,7 @@ device that is only present when that build flag is set.
    GPIO26 ────────────────────► SRD-05VDC-SL-C ──► COM/NO in SERIES with LIVE ── power strip
           └─ boots HIGH: fail-energized                        [USE_PLUG]
 
-   GPIO25 ──[R1 1k]──► B  2N2222      3V3 ──[R2 10R]──►│IR LED 940nm│──► C
+   GPIO25 ──[R1 500R]► B  2N2222A     5V  ──[R2 15R]──►│IR LED 940nm│──► C
                           E ──► GND                                       [USE_IR_AC]
 
    ── Sensor inputs ────────────────────────────────────────────────────────────────
@@ -183,7 +183,7 @@ a **number**, identical on the 30-pin DevKit and the 38-pin NodeMCU-32S.
 | GPIO21 | I²C SDA | SDA | SHT30 SDA (**yellow**) · BH1750 SDA · shifter **BSDA** | `USE_SHT30`/`USE_CO2`/`USE_LUX` |
 | GPIO22 | I²C SCL | SCL | SHT30 SCL (**blue**) · BH1750 SCL · shifter **BSCL** | same |
 | GPIO26 | out | — | **SRD-05VDC-SL-C** coil driver IN — switches the power strip; boots HIGH | `USE_PLUG` |
-| GPIO25 | out | — | **R1 1 kΩ** → 2N2222 base (IR) | `USE_IR_AC` |
+| GPIO25 | out | — | **R1 500 Ω** (2 × 1 kΩ ∥) → 2N2222A base (IR); LED anode on **5 V** | `USE_IR_AC` |
 | GPIO23 | out | — | SSR **CH1** (lighting) — *not fitted* | `RELAY_PIN` |
 | GPIO19 | — | — | **free** — nothing wired here | — |
 | GPIO13 | in | — | Rd-03 **#1 OT2** (pin 5) | `USE_MMWAVE` |
@@ -317,14 +317,22 @@ This node does **not** use the SSR for the switched circuit. GPIO26 drives a Son
 ### IR AC driver `[USE_IR_AC]`
 
 ```
-   GPIO25 ──[ R1 1 kΩ ]──► B (base)
-                                2N2222 (NPN, TO-92)
-   3V3 ──[ R2 10 Ω ]──►|IR LED 940nm|──► C (collector)
+   GPIO25 ──[ R1 500 Ω ]──► B (base)
+                                2N2222A (NPN, TO-92)
+   5V ──[ R2 15 Ω ]───►|IR LED 940nm|──► C (collector)
                         (anode)  (cathode)
    GND ───────────────────────────────► E (emitter)
+
+   100 µF + 100 nF across 5V ↔ GND, close to the LED
 ```
 
-IR LED is the caka **"Led Phát"** 940 nm emitter (buy 2 to widen coverage; if in series, raise R2 to ~4.7 Ω or drive from 5 V). Aim at the indoor unit's receiver window.
+IR LED is the caka **"Led Phát"** 940 nm emitter. **Run the anode from 5 V, not 3V3** — from
+3V3 the same resistor delivers about a third of the current and the AC stops responding
+past a metre or so. **Fit ONE.** A second emitter widens coverage but costs reach if it ends
+up in series — two forward drops leave under a volt across the burden — and in parallel it
+needs its own 15 Ω plus more base drive than the standard 500 Ω supplies. The base resistor scales with the collector current you are asking for; the
+arithmetic, and when to reach for a MOSFET instead, is in
+[§3 IR emitter](#3-ir-emitter--real-ac-control). Aim at the indoor unit's receiver window.
 
 ### Plug CT front end — SCT-013-000 `[USE_PLUG]`
 
@@ -334,11 +342,16 @@ IR LED is the caka **"Led Phát"** 940 nm emitter (buy 2 to widen coverage; if i
                        ├──[ C1 0.1 µF ]── GND
                        │
    CT sleeve ──────────┘
-   CT tip ─────────────────────────────────────────► GPIO34
-   R3 33 Ω burden ─── across CT tip ↔ CT sleeve
+   CT tip ─────────────────────────────────────────► GPIO33
+   R3 94 Ω burden ─── across CT tip ↔ CT sleeve   (2 × 47 Ω in series)
 ```
 
-Clamp around the **live conductor only**. Build `-DUSE_PLUG=1 -DPLUG_CAL_A_PER_V=60.6 -DPLUG_MAINS_V=230`. For the **SCT-013-030** (1 V voltage-output) variant, **omit R3** and build `-DPLUG_CAL_A_PER_V=30.0`.
+Clamp around the **live conductor only**. The scale flag has to match the burden you actually
+fitted: `2000 ÷ R_burden` is the starting point, not the answer — see
+[§5 If you cannot get a 33 Ω burden](#if-you-cannot-get-a-33-%CF%89-burden). This node runs **94 Ω**
+(two 47 Ω in series) and `PLUG_CAL_A_PER_V=22.1`, which is the firmware default in
+`edge/esp32/src/node_config.h` and does not need a flag. For the **SCT-013-030** (1 V
+voltage-output) variant, **omit R3** and build `-DPLUG_CAL_A_PER_V=30.0`.
 
 ### AC-clamp front end — 2nd SCT-013 `[USE_AC_CLAMP]`
 
@@ -356,14 +369,16 @@ Electrically **identical** to the plug front end but read on **GPIO35**, with it
 
 ## Passive components — the resistors and capacitor to buy
 
-All resistors **1/4 W** (5 % is fine), from the caka *"Điện Trở Vạch 1/4W"* value list; the
-0.1 µF caps come from the hshop ceramic kit. Per node:
+All resistors **1/4 W** (5 % is fine) **except R2**, which carries the IR LED's pulse current
+and should be 0.5 W; values come from the caka *"Điện Trở Vạch 1/4W"* list, and the 0.1 µF caps
+from the hshop ceramic kit. Per node:
 
 | Ref | Value | Qty | Tol. | Where it goes | Purpose | Flag |
 |---|---|---|---|---|---|---|
-| **R1** | **1 kΩ** | 1 | any | GPIO19 → 2N2222 base | Limits transistor base current | `USE_IR_AC` |
-| **R2** | **10 Ω** | 1 | any · **8.2–22 Ω OK** | 3V3 → IR-LED anode | IR-LED current limit (~100 mA pulse) | `USE_IR_AC` |
-| **R3** | **33 Ω** | 1 | **1 % preferred** · substitutable | across SCT-013 (plug) | Burden: current → voltage; sets the 60.6 A/V scale | `USE_PLUG` |
+| **R1** | **500 Ω** = **2 × 1 kΩ in parallel** | 2 | 333 Ω (3 in parallel) if you want margin. caka's ¼ W list jumps 100 Ω → 1 kΩ, so parallel is how you land between | GPIO25 → 2N2222A base | Base drive. Must be small enough to *saturate* the transistor at the collector current you want — a single 1 kΩ gives 2.4 mA and will not, above ~50 mA | `USE_IR_AC` |
+| **R2** | **15 Ω** | 1 | ¼ W is enough · **8.2–22 Ω**, see §3. *Not 10 Ω — caka's ¼ W list skips it* | **5 V** → IR-LED anode | IR-LED current limit (~190 mA pulse from 5 V; only ~60 mA from 3V3). 0.47 W *peak* but ~20 % duty inside a frame, so ~0.09 W average — a ¼ W part is fine | `USE_IR_AC` |
+| **C2** | **100 µF** electrolytic | 1 | ≥ 10 V · 22 µF is the minimum worth fitting | 5V ↔ GND, next to the IR LED | Local reservoir for the LED's current bursts, so a transmit does not brown out the radio. **Not in the hshop ceramic kit** (that tops out at 0.1 µF) — salvage one from a dead charger or buy separately | `USE_IR_AC` |
+| **R3** | **94 Ω** (2 × 47 Ω) | 2 | **1 % preferred** · substitutable | across SCT-013 (plug) | Burden: current → voltage; sets the **22.1 A/V** scale this node is calibrated at. 33 Ω (60.6 A/V) is the nominal design value; any burden works if the flag matches it | `USE_PLUG` |
 | **R4, R5** | **10 kΩ** | 2 | **matched pair** | 3V3–node–GND divider (plug) | 1.65 V ADC mid-rail bias | `USE_PLUG` |
 | **C1** | **0.1 µF** | 1 | any | bias node → GND (plug) | Steadies the mid-rail | `USE_PLUG` |
 | R6 | 4.7 kΩ | 1 | any | DS18B20 DATA → 3V3 | 1-Wire pull-up | `USE_SUPPLY_TEMP` |
@@ -373,9 +388,36 @@ All resistors **1/4 W** (5 % is fine), from the caka *"Điện Trở Vạch 1/4W
 | R7 | 10 kΩ | 1 | any | DHT DATA → 3V3 | DHT pull-up | `USE_DHT` (fallback) |
 
 **Minimum resistor buy for Build D (plug + IR, no 2nd clamp):**
-**1 × 1 kΩ, 1 × 10 Ω, 1 × 33 Ω, 2 × 10 kΩ** — plus one 0.1 µF from the ceramic kit.
+**2 × 1 kΩ, 1 × 15 Ω, 2 × 47 Ω, 2 × 10 kΩ** — plus one 0.1 µF from the ceramic kit.
 Buy each value once (caka sells ~a bag per value at ~3.000₫), which leaves spares. The I²C
 and most sensor breakouts already carry their own 4.7 kΩ pull-ups — don't add more.
+
+Two 1 kΩ rather than one, and 15 Ω rather than 10 Ω: caka's ¼ W list runs
+8.2/15/22/27/39/47/68/100 Ω then jumps to 1 kΩ, so **neither 10 Ω nor the ~300 Ω the IR
+base wants is a part you can buy there.** Two 1 kΩ in parallel is 500 Ω, which is enough
+drive for the ~190 mA a 15 Ω sets — same two breadboard rows, no extra SKU. The same trick
+covers the 94 Ω burden with two 47 Ω in series.
+
+### Reading the hshop ceramic kit
+
+The kit's parts are marked with the **3-digit pF code**: first two digits, then that many
+zeros, in picofarads. One- and two-digit markings are plain pF.
+
+| Marking | Value | | Marking | Value |
+|---|---|---|---|---|
+| **104** | **0.1 µF** (100 nF) — *the one every C in this doc means* | | 102 | 1 nF |
+| 473 | 47 nF | | 471 | 470 pF |
+| 333 | 33 nF | | 331 | 330 pF |
+| 223 | 22 nF | | 221 | 220 pF |
+| 103 | 10 nF | | 101 | 100 pF |
+| 472 | 4.7 nF | | 9 … 68 | 9–68 pF as marked |
+| 332 | 3.3 nF | | | |
+| 222 | 2.2 nF | | | |
+
+⚠️ **Nothing in this kit is a reservoir capacitor.** 104 is its largest part, and the whole
+kit paralleled — every value, one of each — comes to **0.225 µF**, still 62× short of the
+~14 µF the IR driver's C2 needs. Ceramics of that size do not come in a through-hole
+assortment; C2 has to be an electrolytic bought or salvaged separately.
 
 **Which tolerances actually matter.** Only two rows care:
 
@@ -615,27 +657,91 @@ Until recently the firmware only pulsed this pin; it now sends genuine vendor IR
 GPIO sources ~12 mA, and an IR LED needs ~100 mA of pulse current to reach across a room.
 
 ```
-   3V3 ──────────────┐
+   5V (VIN) ─────────┐                  ← NOT 3V3. See "Run it from 5 V" below.
                      │
-                    ┌┴┐  10 Ω  (LED current limit)
+                    ┌┴┐  15 Ω  (LED current limit)
                     └┬┘
                      │
                     ─┴─  IR LED 940 nm   (anode → resistor, cathode → collector)
                     ▽
                      │
                      ├──────────── C (collector)
-   GPIO19 ──[1 kΩ]── B (base)         2N2222 / S8050 (NPN)
+   GPIO25 ─[2×1kΩ∥]─ B (base)         2N2222A / S8050 (NPN)
                      ├──────────── E (emitter)
                      │
    GND ──────────────┘
+
+   100 µF electrolytic + 100 nF ceramic across 5V ↔ GND, close to the LED.
 ```
 
+#### Run it from 5 V, and size the base resistor for the current you want
+
+If the AC responds at 30 cm but not across the room, the frame is correct and the **emitter
+is starving**. Two things in the older 3V3 + 1 kΩ version of this circuit hold the current
+down, and both are easy to miss because each looks fine on its own:
+
+**The 3V3 rail has almost no headroom left.** The `V_f ≈ 1.5 V` in the formula below is a
+datasheet figure at 20 mA. A 940 nm emitter's forward voltage climbs steeply with current —
+at 150–250 mA it is nearer **1.9 V**. Subtract that and a real `V_ce(sat)` and the 3V3 rail
+has ~1 V left to push across the resistor, so a 10 Ω burden delivers **~70–90 mA**, not the
+160 mA the arithmetic promises. From 5 V a 15 Ω gives **~190 mA**.
+
+**A 1 kΩ base resistor does not saturate the transistor at that current.** It sources
+`(3.3 − 0.7) / 1000 ≈ 2.6 mA` of base current. To hold a bipolar in saturation you want a
+*forced* beta of roughly 10–20, i.e. `I_B ≈ I_C / 20`:
+
+Size it from the transistor's **minimum** gain, not its typical. The 2N2222 sold by caka is
+binned **hFE 35–300** — an unbinned spread, and a part at the bottom of it has a third of the
+gain the 2N2222A datasheet curves suggest. Design against 35 and any part in the bag works;
+design against "about 100" and some bags don't. With `V_BE(sat) ≈ 1.0 V` at these base
+currents:
+
+| Base resistor | I_B from 3.3 V | Max I_C at **hFE = 35** | Drives |
+|---|---|---|---|
+| 1 kΩ | 2.3 mA | 81 mA | nothing useful |
+| 500 Ω = 2 × 1 kΩ | 4.6 mA | 161 mA | under one LED's 190 mA |
+| **333 Ω = 3 × 1 kΩ** | **6.9 mA** | **242 mA** | **one LED** |
+| **250 Ω = 4 × 1 kΩ** | **9.2 mA** | **322 mA** | two LEDs, ~85 % of target |
+| 200 Ω = 5 × 1 kΩ | 11.5 mA | 403 mA | two LEDs in full |
+
+11.5 mA is still inside the ESP32's 20 mA comfortable per-pin budget, so five in parallel is
+allowed; past that
+
+Parallel 1 kΩ resistors are how you land in that range at all — caka's ¼ W list has nothing
+between 100 Ω and 1 kΩ, and identical resistors across the same two breadboard rows need no
+extra SKU. **Three for one LED, five for two.** Below ~150 Ω you are asking the GPIO for more than it should
+give, and the right answer is a **logic-level N-channel MOSFET** (AO3400, IRLML2502) instead
+of the bipolar — a gate draws no steady current at all, and `R_DS(on)` under 0.1 Ω hands the
+whole rail to the LED rather than dropping 0.3–0.5 V across a `V_ce(sat)`.
+
+**Received power falls as 1/r², so range scales as √current.** 90 mA → 270 mA is 3× the
+current and therefore about **1.7× the distance** — the difference between reaching the far
+wall and not.
+
+**Add the reservoir capacitor.** 270 mA of switched pulses on a rail shared with the ESP32's
+radio is how a board browns out mid-transmit. Size it from the charge one carrier pulse
+draws: 270 mA for ~13 µs is 3.5 µC, so holding the droop under 0.25 V needs `C = Q/ΔV` ≈
+**14 µF**. 22 µF is the floor, 100 µF electrolytic is comfortable — and a 0.1 µF ceramic in
+parallel for the switching edges. **The 0.1 µF alone is not a reservoir:** 3.5 µC into
+0.1 µF is a 35 V droop, i.e. it holds up nothing at the burst envelope. Fit it anyway, but
+if the board resets or WiFi drops when a frame goes out, the missing electrolytic is why.
+
 - **Aim it at the indoor unit's receiver window.** These are line-of-sight; a few metres,
-  or a bounce off a light-coloured ceiling, is usually fine.
-- Two LEDs in series (raise the resistor to ~4.7 Ω, or run from 5 V) widen coverage in a
-  large room.
+  or a bounce off a light-coloured ceiling, is usually fine. A bounce costs range — budget
+  for it.
+- **A second LED buys coverage, not reach — and in series it costs you both.** Two 940 nm
+  emitters drop ~3.8 V between them, which from a 5 V rail leaves under a volt across the
+  burden: ~85 mA, no better than the 3V3 build this replaced. If you fit two, they go in
+  *parallel*, each with its own 15 Ω, and the base network has to grow to match the doubled
+  collector current (4 × 1 kΩ = 250 Ω). One emitter on the standard values is the right
+  default.
+- **The firmware sends each frame twice** — `-DIR_AC_REPEATS=n` to change it. There is no
+  acknowledgement on an IR link, so a burst lost to
+  sunlight or a fluorescent ballast is a command lost silently. Repeating is safe only
+  because these are absolute-state protocols — every frame carries the full power/mode/
+  temperature state, so the second copy sets what the first one set.
 - Verify before trusting it: the serial monitor prints
-  `[hvac] IR frame sent: COOLIX -> 24.0 C`, and telemetry carries **`acReal:true`**. Without
+  `[hvac] IR frame sent x2: COOLIX -> 24.0 C`, and telemetry carries **`acReal:true`**. Without
   `USE_IR_AC` the node publishes `acReal:false` and the twin knows the setpoint reached
   nothing — a setback that saves no energy is never counted as if it had.
 - A phone camera sees 940 nm as a faint violet flicker: point the emitter at one to confirm
@@ -796,14 +902,16 @@ signal, so it has to be biased to mid-rail first.
                                │            │
                         GND ───┴──[10 kΩ]──┴──┐
                                               │
-   SCT-013 jack  tip  ───┬──────────────────────────────► GPIO34
+   SCT-013 jack  tip  ───┬──────────────────────────────► GPIO33
                          │                    │
                         ┌┴┐ 33 Ω burden       │
                         └┬┘                   │
    SCT-013 jack  sleeve ─┴────────────────────┘
 ```
 
-Build with `-DUSE_PLUG=1 -DPLUG_CAL_A_PER_V=60.6 -DPLUG_MAINS_V=230`.
+Build with `-DUSE_PLUG=1 -DPLUG_MAINS_V=230`, and set the scale to match your burden.
+The firmware default is **22.1**, identified on this node against a 94 Ω burden; it is
+*not* the 60.6 that a 33 Ω burden would nominally give.
 
 > **You do not have to get the calibration right before flashing.** Those two flags are now
 > only the *defaults*: both are settable at runtime over MQTT and persisted to NVS, so the
@@ -913,7 +1021,11 @@ The burden value is **free to choose**; it only has to be told to the firmware. 
 SCT-013-000 is 100 A : 50 mA, a **2000:1** turns ratio, so:
 
 ```
-PLUG_CAL_A_PER_V  =  2000 ÷ R_burden        (33 Ω → 60.6, which is the firmware default)
+PLUG_CAL_A_PER_V  =  2000 ÷ R_burden        (33 Ω → 60.6)
+
+The firmware default is 22.1, for the 94 Ω burden fitted to this node — not a value
+from this formula. Every time the nominal has been trusted it has been a few percent
+low; node_config.h carries the identified values and the reason.
 ```
 
 Any of these work — pick one, fit it, and build with the matching flag:
@@ -926,6 +1038,7 @@ Any of these work — pick one, fit it, and build with the matching flag:
 | **39 Ω** | **`51.3`** | **60 A** | **41 mA** | ✅ Best common substitute |
 | **47 Ω** | **`42.6`** | **50 A** | **34 mA** | ✅ Best resolution; still 3× a 16 A circuit |
 | 68 Ω | `29.4` | 34 A | 24 mA | Only if the circuit is ≤ 20 A |
+| **94 Ω** (2 × 47 Ω) | **`22.1`** *(identified)* | **24 A** | **17 mA** | **Fitted to this node.** Nominal would be 21.3 |
 | 100 Ω | `20.0` | 23 A | 16 mA | Single desk / single appliance only |
 
 Read the trade-off straight down the table: **a bigger burden buys resolution and spends
@@ -953,13 +1066,29 @@ is ample**, and a parallel bank splits it further.
 **The 10 Ω IR resistor has the same freedom.** R2 sets the LED pulse current:
 
 ```
-I_pulse  ≈  (3.3 V − V_f(≈1.5 V) − V_ce(sat)(≈0.2 V)) ÷ R2
+I_pulse  ≈  (V_rail − V_f − V_ce(sat)) ÷ R2
 ```
 
-Anything from **8.2 Ω to 22 Ω** (≈195 mA down to ≈73 mA peak) works; 15 Ω lands near 105 mA
-and is the easiest substitute to find. The IR carrier is bursty and low duty-cycle, so a
-940 nm emitter takes these peaks comfortably. Lower resistance = more range; if the AC
-responds at 3 m, you are done, and there is nothing to gain by pushing it.
+The two voltages you subtract are where this goes wrong. Use the values the parts actually
+show at *pulse* current, not at 20 mA: `V_f ≈ 1.9 V` for a 940 nm emitter above ~150 mA, and
+`V_ce(sat) ≈ 0.3 V` **only if the base is driven hard enough to saturate** (see §3) — 0.7 V
+or more if it is not.
+
+| R2 | from 3V3 | from 5 V | Notes |
+|---|---|---|---|
+| 22 Ω | ~50 mA | ~130 mA | Short range |
+| 15 Ω | ~70 mA | ~190 mA | Easiest value to find |
+| 10 Ω | ~90 mA | ~270 mA | Not in caka's ¼ W list |
+| **15 Ω** | **~60 mA** | **~190 mA** | **The value in the BOM.** ¼ W is fine |
+| 4.7 Ω | ~190 mA | ~575 mA | Needs a MOSFET, not a GPIO-driven bipolar |
+
+The IR carrier is bursty and low duty-cycle — a 38 kHz mark is ~13 µs on, well inside the
+"1 A for ≤100 µs at ≤10 % duty" a 5 mm 940 nm emitter is rated for — so the peaks are not
+what limits you. **The rail is.** Read across a row rather than down a column: moving the
+anode from 3V3 to 5 V buys more than any resistor change available to you.
+
+Lower resistance = more range; if the AC responds at 3 m, you are done, and there is nothing
+to gain by pushing it.
 
 ### Clamping it on
 
@@ -1391,7 +1520,7 @@ Work down this list; each step proves the one below it is worth attempting.
 | CO₂ always omitted | 120 s preheat not elapsed, missing level shifter, or Pin 5 pulled low (UART mode) |
 | CO₂ reads plausibly but drifts low over weeks | ABC calibration on in a 24/7 space — build `-DCO2_ABC_OFF=1` |
 | `plugW` ≈ 0 with a load running | Clamp around both conductors instead of the live only |
-| `plugW` wrong by a constant factor | Wrong `PLUG_CAL_A_PER_V` for the CT variant (60.6 for -000 + burden, 30.0 for -030) |
+| `plugW` wrong by a constant factor | Wrong `PLUG_CAL_A_PER_V` for the burden actually fitted (2000 ÷ R for -000, 30.0 for -030; this node is 94 Ω → **22.1**). Identify it rather than deriving it — see node_config.h |
 | AC ignores every setpoint | Wrong `IR_AC_PROTOCOL`; or no driver transistor (range < 1 m); or `acReal:false`, meaning `USE_IR_AC` was never set |
 | Lights inverted | Active-LOW mechanical board (Option A) — set its jumper to HIGH, or invert `setLights()`. The SSR (Option B) is high-level trigger and never inverts |
 | LED lamp flickers or glows when switched "off" | SSR below its **0.1 A minimum** load — use a ≥ 25 W load on that channel, or a mechanical relay for the lights |

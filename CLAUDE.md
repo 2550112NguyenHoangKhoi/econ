@@ -71,9 +71,13 @@ prior, not the answer.
   caller: the YOLOv11 symbol detector (trained, mAP@50 69.5%) is never invoked by the
   digitizer; `/api/rooms/models` and `/api/forecast/load` have no dashboard consumer; five
   dashboard airflow components are orphaned; `backend/core_engine/` has **zero references
-  anywhere** and was superseded by the Go engine. `acW` and `lux` arrive from firmware and are
-  stored, but nothing acts on them. PAPER.md Appendix A is the full list — consult it before
-  extending something that may already be dead.
+  anywhere** and was superseded by the Go engine. PAPER.md Appendix A is the full list —
+  consult it before extending something that may already be dead.
+  *(`acW` and `lux` were listed here as dead. They are not, and have not been for a while:
+  `acW` reaches `carbon.go` and the cooling model, `lux` drives the daylight ratio in
+  `engine.go`. Neither sensor is fitted on the pilot node, which is why they never appear in
+  telemetry — an unfitted sensor and an unwired code path look identical from the dashboard,
+  and that is what this entry had confused.)*
 - **Two commits' worth of history is not the whole story.** `docs/EVIDENCE.md` explains why
   the design is shaped the way it is, grounded in the case studies it cites.
 
