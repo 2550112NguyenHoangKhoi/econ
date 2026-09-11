@@ -70,6 +70,7 @@ char CLIENT_ID[32];                         // econ-esp32-<ZONE_TOPIC>
 // compile-time: it is this node's identity on the bus, the thing its retained LWT and
 // its command subscription are keyed on, so changing it at runtime would orphan both.
 #include <Preferences.h>
+#include <ESPmDNS.h>
 #include "node_config.h"
 
 // ---------------------------------------------------------------------------------------
@@ -83,6 +84,62 @@ char CLIENT_ID[32];                         // econ-esp32-<ZONE_TOPIC>
 static Preferences gWifiPrefs;
 static String  gScanSsids[24];        // index -> SSID from the last scan
 static int     gScanCount = 0;
+
+static const unsigned long WIFI_CONNECT_TIMEOUT_MS = 20000;
+
+// The broker address is compiled into wifi_secrets.h, which pins it to one network's
+// DHCP lease. Carry the node -- or the laptop -- to another site and it dials an
+// address that no longer exists ("Host is unreachable"), with no way to correct it
+// short of a reflash. gMqttHost may therefore hold either a literal IP or an mDNS
+// name: macOS and avahi-equipped Linux advertise <hostname>.local on whatever network
+// they join, so a name follows the machine and a fresh site needs no lookup at all.
+static Preferences gMqttPrefs;
+static char        gMqttHost[64];
+static IPAddress   gBrokerIp;
+static bool        gBrokerResolved = false;
+
+static void mqttLoadHost() {
+  String host = MQTT_HOST;
+  if (gMqttPrefs.begin("econmqtt", true)) {
+    host = gMqttPrefs.getString("host", MQTT_HOST);
+    gMqttPrefs.end();
+  }
+  snprintf(gMqttHost, sizeof(gMqttHost), "%s", host.c_str());
+}
+
+static void mqttSaveHost(const char* host) {
+  snprintf(gMqttHost, sizeof(gMqttHost), "%s", host);
+  gBrokerResolved = false; // force a fresh lookup against the new name
+  if (gMqttPrefs.begin("econmqtt", false)) {
+    gMqttPrefs.putString("host", host);
+    gMqttPrefs.end();
+  }
+}
+
+// Turn gMqttHost into an address. A literal IP is used as-is; anything else is treated
+// as an mDNS name. Returns false when it cannot be resolved yet, and the caller simply
+// retries on its normal 5 s cadence.
+static bool resolveBroker() {
+  if (gBrokerResolved) return true;
+  IPAddress parsed;
+  if (parsed.fromString(gMqttHost)) {
+    gBrokerIp = parsed;
+    gBrokerResolved = true;
+    return true;
+  }
+  if (WiFi.status() != WL_CONNECTED) return false;
+  String name(gMqttHost);
+  if (name.endsWith(".local")) name = name.substring(0, name.length() - 6);
+  IPAddress found = MDNS.queryHost(name.c_str(), 2000);
+  if (found != IPAddress((uint32_t)0)) {
+    gBrokerIp = found;
+    gBrokerResolved = true;
+    Serial.printf("[mqtt] resolved %s -> %s via mDNS\n", gMqttHost, gBrokerIp.toString().c_str());
+    return true;
+  }
+  Serial.printf("[mqtt] could not resolve \"%s\" over mDNS yet\n", gMqttHost);
+  return false;
+}
 
 static bool wifiLoadSaved(String* ssid, String* pass) {
   if (!gWifiPrefs.begin("econwifi", true)) return false;
@@ -574,8 +631,24 @@ void setupWifi() {
   WiFi.begin(useSsid, usePass);
   Serial.printf("[wifi] connecting to %s (%s)", useSsid,
                 haveSaved ? "saved in NVS" : "compiled default");
-  while (WiFi.status() != WL_CONNECTED) { delay(400); Serial.print("."); }
-  Serial.printf("\n[wifi] connected, ip=%s\n", WiFi.localIP().toString().c_str());
+  // Bounded, and never fatal. The USB console in loop() is the only way to provision
+  // a node whose saved network is out of range, so setup() must not block on the old
+  // credentials: an unbounded wait here means the board never reaches loop(), never
+  // answers "[wifi] scan", and prints dots until someone reflashes it. Continuing
+  // offline costs nothing -- loop() already retries MQTT every 5 s.
+  const unsigned long started = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - started < WIFI_CONNECT_TIMEOUT_MS) {
+    delay(400);
+    Serial.print(".");
+  }
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.printf("\n[wifi] connected, ip=%s\n", WiFi.localIP().toString().c_str());
+    MDNS.begin(CLIENT_ID);
+  } else {
+    Serial.printf("\n[wifi] not connected after %lu s -- continuing offline.\n",
+                  WIFI_CONNECT_TIMEOUT_MS / 1000);
+    Serial.println("[wifi] provision over USB: \"[wifi] scan\", then \"[wifi] connect <n> \\\"PASS\\\"\"");
+  }
 }
 
 // ---------------- HVAC IR ----------------
@@ -1666,7 +1739,9 @@ void readAndPublish() {
 
 // ---------------- MQTT CONNECT ----------------
 bool mqttConnect() {
-  Serial.print("[mqtt] connecting...");
+  if (!resolveBroker()) return false;
+  client.setServer(gBrokerIp, MQTT_PORT);
+  Serial.printf("[mqtt] connecting to %s (%s)...", gMqttHost, gBrokerIp.toString().c_str());
   // LWT: broker publishes "offline" (retained) on STATUS_TOPIC if this node drops.
   //
   // Credentials come from wifi_secrets.h (MQTT_USER / MQTT_PASS), because the shipped
@@ -2130,7 +2205,10 @@ void setup() {
 #if USE_CAMERA
   streamServer.begin();
 #endif
-  client.setServer(MQTT_HOST, MQTT_PORT);
+  mqttLoadHost();
+  // The server is set in mqttConnect() once the host resolves: an mDNS name has no
+  // address yet at this point in setup().
+  Serial.printf("[mqtt] broker configured as \"%s\"\n", gMqttHost);
   client.setBufferSize(2048);   // must be >= the telemetry StaticJsonDocument, see publish()
   client.setCallback(onMessage);
 
@@ -2287,6 +2365,10 @@ void loop() {
         if (WiFi.status() == WL_CONNECTED) {
           Serial.printf("[wifi] connected, ip=%s\n", WiFi.localIP().toString().c_str());
           wifiSaveCredentials(current_ssid, current_pass);
+          MDNS.begin(CLIENT_ID);
+          gBrokerResolved = false; // different network: the broker name resolves elsewhere
+          Serial.printf("[wifi] broker is \"%s\" -- \"[mqtt] host <ip-or-name.local>\" to repoint\n",
+                        gMqttHost);
         } else {
           Serial.println("[wifi] FAILED to connect within 15s — nothing saved, "
                          "the previous network is still what boots");
@@ -2301,6 +2383,50 @@ void loop() {
                     WiFi.status() == WL_CONNECTED ? "connected" : "NOT connected",
                     WiFi.SSID().c_str(), WiFi.localIP().toString().c_str(), (int)WiFi.RSSI(),
                     saved ? ss.c_str() : "(none)");
+    } else if (line.startsWith("[mqtt] host ")) {
+      String host = line.substring(12);
+      host.trim();
+      if (host.length() > 0 && host.length() < sizeof(gMqttHost)) {
+        client.disconnect();
+        mqttSaveHost(host.c_str());
+        Serial.printf("[mqtt] broker set to %s:%d (saved to NVS)\n", gMqttHost, MQTT_PORT);
+      } else {
+        Serial.println("[mqtt] host rejected: empty or too long");
+      }
+    } else if (line == "[i2c] scan") {
+      // Every I2C sensor announces "expected at 0x.." during setup whether or not it
+      // is present, so the boot log cannot tell a missing sensor from a wiring fault.
+      // Ask the bus who actually answers.
+#if USE_SHT30 || USE_CO2 || USE_LUX
+      // Both buses: the CO2 sensor sits on its own Wire1 (GPIO27/5) behind the level
+      // shifter, so scanning only the primary bus reports it missing when it is fine.
+      int found = 0;
+      Serial.printf("[i2c] scanning Wire  SDA=GPIO%d SCL=GPIO%d...\n", gCfg.pinI2cSda, gCfg.pinI2cScl);
+      for (uint8_t addr = 1; addr < 127; addr++) {
+        Wire.beginTransmission(addr);
+        if (Wire.endTransmission() == 0) {
+          const char* who = "unknown";
+          if (addr == SHT30_ADDR) who = "SHT30 temp/humidity";
+          if (addr == 0x21)       who = "OV7670 camera";
+          Serial.printf("[i2c] Wire  0x%02X responding -- %s\n", addr, who);
+          found++;
+        }
+      }
+#if USE_CO2
+      Serial.println("[i2c] scanning Wire1 SDA=GPIO27 SCL=GPIO5...");
+      for (uint8_t addr = 1; addr < 127; addr++) {
+        Wire1.beginTransmission(addr);
+        if (Wire1.endTransmission() == 0) {
+          Serial.printf("[i2c] Wire1 0x%02X responding -- %s\n", addr,
+                        addr == ACD1200_ADDR ? "ACD1200 CO2" : "unknown");
+          found++;
+        }
+      }
+#endif
+      Serial.printf("[i2c] scan done, %d device(s) across both buses\n", found);
+#else
+      Serial.println("[i2c] bus not compiled in (no USE_SHT30/USE_CO2/USE_LUX)");
+#endif
     } else if (line.startsWith("[mqtt] sub ")) {
       int arrowIdx = line.indexOf(" -> ");
       if (arrowIdx > 0) {
