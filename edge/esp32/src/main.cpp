@@ -997,6 +997,12 @@ float readAcAmps() {
   #define STRIP_DIVIDER_RATIO 0.5f
 #endif
 
+// Whether the strip front end is wired such that its readings mean anything. Set by the
+// rest-level check below. Publishing a reading the firmware has already diagnosed as wrong
+// is the same fabrication the radar and CO2 channels go out of their way to avoid: with the
+// ACS712 disconnected this channel was reporting ~3.9 kW of load that does not exist.
+static bool gStripFrontEndOk = true;
+
 static CurrentDenoiser stripDenoiser([]() {
   CurrentDenoiseConfig c;
   c.calAPerV     = STRIP_CAL_A_PER_V;
@@ -1073,9 +1079,13 @@ float readStripAmps() {
   // toward 5 V on a 3.3 V-only pin as load rises, which is a hardware risk, not just a
   // calibration one. Check it once, out loud.
   {
-    static bool dividerChecked = false;
-    if (!dividerChecked && n >= 100) {
-      dividerChecked = true;
+    // Re-run every 60 s rather than once. A boot-time verdict is a latch: plug the ACS712
+    // in after start-up and the channel would stay suppressed until the next reflash, which
+    // is the same failure mode already fixed on both radar paths today.
+    static uint32_t lastDividerCheck = 0;
+    const bool dividerDue = (lastDividerCheck == 0) || (millis() - lastDividerCheck > 60000);
+    if (dividerDue && n >= 100) {
+      lastDividerCheck = millis();
       double mean = stripDenoiser.lastMean();
       double expected = (2.6 * (float)STRIP_DIVIDER_RATIO / 3.3) * 4095.0;
       double ratioSeen = mean / ((2.6 / 3.3) * 4095.0);   // implied divider from the rest level
@@ -1095,8 +1105,10 @@ float readStripAmps() {
         delayMicroseconds(500);
         bool canPullUp = digitalRead(gCfg.pinStripAdc) == HIGH;
         pinMode(gCfg.pinStripAdc, INPUT);
+        gStripFrontEndOk = false;
         Serial.printf("[strip] FAULT: rest level %.0f counts — an ACS712 always outputs Vcc/2, "
-                      "so nothing is reaching GPIO%d.\n", mean, gCfg.pinStripAdc);
+                      "so nothing is reaching GPIO%d. stripW will be OMITTED, not guessed.\n",
+                      mean, gCfg.pinStripAdc);
         if (canPullUp) {
           Serial.println("[strip] the pin pulls HIGH, so GPIO32 itself is fine — the source is "
                          "at 0 V. Check the ACS712's VCC is on 5V (measure at the module's own "
@@ -1107,6 +1119,7 @@ float readStripAmps() {
                          "a ground row, or a jumper bridging to the GND rail.");
         }
       } else if (mean > expected * 1.5) {
+        gStripFrontEndOk = false;
         Serial.printf("[strip] WARNING: rest level %.0f counts implies NO voltage divider "
                       "(implied ratio %.2f, configured %.2f, expected ~%.0f counts).\n",
                       mean, ratioSeen, (double)(float)STRIP_DIVIDER_RATIO, expected);
@@ -1115,6 +1128,11 @@ float readStripAmps() {
                        "Fit the 10k/10k divider, or rebuild with -DSTRIP_DIVIDER_RATIO=1.0 "
                        "if the sensor is genuinely driving the pin directly.");
       } else {
+        if (!gStripFrontEndOk) {
+          Serial.println("[strip] front end now agrees with the configured divider — stripW "
+                         "is being published again.");
+        }
+        gStripFrontEndOk = true;
         Serial.printf("[strip] rest level %.0f counts agrees with divider ratio %.2f\n",
                       mean, (double)(float)STRIP_DIVIDER_RATIO);
       }
@@ -1576,7 +1594,12 @@ void readAndPublish() {
     Serial.printf("[strip] offload pass-through: rawFallback=true (%d raw samples streamed)\n",
                   gRawStripSampleCount);
   } else if (stripAmps >= 0) {
-    doc["stripW"] = round(stripAmps * gCfg.plugMainsV * 10) / 10.0;
+    // Omitted, never estimated, when the front end has failed its own self-check. A value
+    // here is a claim about real watts on a real circuit; with the ACS712 unplugged the
+    // maths still produces a number, and that number was ~3.9 kW of nothing.
+    if (gStripFrontEndOk) {
+      doc["stripW"] = round(stripAmps * gCfg.plugMainsV * 10) / 10.0;
+    }
   } else {
     Serial.println("[strip] ADC window starved -> omitted");
   }
