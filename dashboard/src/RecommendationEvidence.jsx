@@ -1,5 +1,6 @@
 import React from 'react';
 import ForecastChart from './ForecastChart';
+import { fx, hasReading, NO_VALUE } from './measured';
 
 // The evidence behind one recommendation.
 //
@@ -126,7 +127,8 @@ export default function RecommendationEvidence({ rec, model, matureAfter, limit,
   const learned = rec.basis === 'learned' && rec.sigma > 0;
   const rows = [];
 
-  rows.push(['Reading now', `${(rec.value ?? 0).toFixed(1)} ${unit}`]);
+  // 'Reading now' asserts a measurement. When there is none, say so rather than print 0.0.
+  rows.push(['Reading now', hasReading(rec.value) ? `${fx(rec.value, 1)} ${unit}` : NO_VALUE]);
 
   if (learned) {
     rows.push(['Learned normal', `${rec.baseline.toFixed(1)} ± ${rec.sigma.toFixed(1)} ${unit}`]);

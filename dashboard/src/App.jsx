@@ -24,7 +24,7 @@ import { useLibrary } from './useLibrary';
 import { FOOTPRINT } from './floorGeometry';
 import { rateNow, money, touPeriodLabel, touPeriod } from './tariff';
 import { SimState } from './telemetry';
-import { useDigitalTwin, buildFaultZones, DEFAULT_FAULT_TARGET } from './useDigitalTwin';
+import { useDigitalTwin, buildFaultZones, DEFAULT_FAULT_TARGET, FALLBACK_SETPOINT_C, FALLBACK_DEADBAND_K } from './useDigitalTwin';
 import AirflowWindow from './AirflowWindow';
 import StreamStatus from './StreamStatus';
 import CanvasErrorBoundary from './CanvasErrorBoundary';
@@ -42,8 +42,8 @@ const smoothstep = (min, max, value) => {
 };
 
 const ThermalNode = ({ data, selected }) => {
-  const setpoint = data.setpoint || 24.0;
-  const deadband = data.deadband || 2.0;
+  const setpoint = data.setpoint ?? FALLBACK_SETPOINT_C;
+  const deadband = data.deadband ?? FALLBACK_DEADBAND_K;
   
   const deviation = (parseFloat(data.temp) - setpoint) / deadband;
   
@@ -109,7 +109,7 @@ const VAVNode = ({ data, selected }) => (
 // against setpoint, occupancy, and the VAV airflow as a bar.
 const UnitNode = ({ data, selected }) => {
   const temp = Number(data.temp || 0);
-  const dev = Math.abs(temp - (data.setpoint || 24)) / (data.deadband || 2);
+  const dev = Math.abs(temp - (data.setpoint ?? FALLBACK_SETPOINT_C)) / (data.deadband ?? FALLBACK_DEADBAND_K);
   const state = data.alert === true ? 'alarm' : (dev > 1 ? 'drift' : 'ok');
   const c = state === 'alarm' ? 'var(--accent-red)' : state === 'drift' ? 'var(--accent-yellow)' : 'var(--accent-green)';
   // Airflow bar scaled against the largest flow the building is currently delivering,
@@ -137,7 +137,7 @@ const UnitNode = ({ data, selected }) => {
       </div>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 3 }}>
         <span style={{ fontSize: '9px', fontWeight: 700, color: c }}>{temp.toFixed(1)}°C</span>
-        <span style={{ fontSize: '8px', color: 'var(--text-muted)' }}>SP {(data.setpoint ?? 24).toFixed(0)}°</span>
+        <span style={{ fontSize: '8px', color: 'var(--text-muted)' }}>SP {(data.setpoint ?? FALLBACK_SETPOINT_C).toFixed(0)}°</span>
         <span style={{ fontSize: '8px', color: 'var(--text-secondary)' }}>{data.occupancy ?? 0} PAX</span>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 3 }}>

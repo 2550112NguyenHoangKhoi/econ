@@ -13,6 +13,7 @@ import {
   carbonTonnesPerYear, carbonAvoidedTonnesPerYear, tonnesStr,
   getFloorAreaM2, getZoneMix, getIsItDominated,
 } from './sustainability';
+import { fx, hasReading } from './measured';
 
 // (Plant utilization is measured against the peak load this building has actually been
 // observed at — see useMeanLoad. There is no synthesized nameplate here on purpose: the
@@ -457,7 +458,7 @@ export default function GlobalMetricsPanel({ simData, globalMetrics, loadHistory
                   <span style={{ width: 6, height: 6, borderRadius: '50%', flexShrink: 0, background: n.online ? 'var(--accent-green)' : 'var(--text-muted)', boxShadow: n.online ? '0 0 4px var(--accent-green)' : 'none' }} />
                   <span style={{ color: 'var(--text-primary)', fontWeight: 'bold' }}>{(n.source || 'edge').toUpperCase()}</span>
                   <span style={{ color: 'var(--text-secondary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{(n.zoneId || '').replace('zone-', '')}</span>
-                  {n.tempPinned && <span style={{ color: 'var(--accent-blue)' }}>{(n.hwTemp || 0).toFixed(1)}°C</span>}
+                  {n.tempPinned && hasReading(n.hwTemp) && <span style={{ color: 'var(--accent-blue)' }}>{fx(n.hwTemp, 1)}°C</span>}
                   <span style={{ color: 'var(--text-secondary)' }}>{n.occupancy ?? 0}P</span>
                 </div>
               ))}

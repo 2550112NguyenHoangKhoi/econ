@@ -13,6 +13,7 @@ import RecommendationEvidence from './RecommendationEvidence';
 import ForecastChart from './ForecastChart';
 import { API_BASE } from './api';
 import { powerMw, powerKw } from './units';
+import { fx, hasReading } from './measured';
 
 // fmtEta renders a predicted time-to-breach the way an operator reads it.
 function fmtEta(sec) {
@@ -559,7 +560,7 @@ export default function AiInsightsPanel({ simData, activeScenario, faultTarget, 
               <span style={{ width: 6, height: 6, borderRadius: '50%', flexShrink: 0, background: n.online ? 'var(--accent-green)' : 'var(--text-muted)', boxShadow: n.online ? '0 0 4px var(--accent-green)' : 'none' }} />
               <span style={{ color: 'var(--text-primary)', fontWeight: 'bold' }}>{(n.source || 'edge').toUpperCase()}</span>
               <span style={{ color: 'var(--text-secondary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: '60px' }}>{(n.zoneId || '').replace('zone-', '')}</span>
-              {sensorBadge(n.tempPinned, 'T', n.tempPinned ? `temperature ${(n.hwTemp || 0).toFixed(1)}°C measured` : 'no live temperature sensor')}
+              {sensorBadge(n.tempPinned, 'T', n.tempPinned && hasReading(n.hwTemp) ? `temperature ${fx(n.hwTemp, 1)}°C measured` : 'no live temperature sensor')}
               {sensorBadge((n.humidity || 0) > 0, 'H', (n.humidity || 0) > 0 ? `humidity ${(n.humidity).toFixed(0)}%RH measured` : 'no live humidity sensor')}
               {sensorBadge((n.co2 || 0) > 0, 'CO₂', (n.co2 || 0) > 0 ? `${Math.round(n.co2)} ppm measured (NDIR)` : 'no live CO₂ sensor')}
               {sensorBadge((n.plugW || 0) > 0, 'W', (n.plugW || 0) > 0 ? `plug circuit ${(n.plugW).toFixed(0)} W measured (SCT-013)` : 'no live power clamp')}

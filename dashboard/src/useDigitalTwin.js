@@ -2,6 +2,18 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import * as flatbuffers from 'flatbuffers';
 import { SimState } from './telemetry';
 import { getBuilding, subscribeBuildingChange } from './buildingStore';
+
+// Last-resort DISPLAY defaults, used only when the building fixture omits a value.
+//
+// These are not building coefficients and must never be treated as one: every real
+// setpoint and deadband comes from server/data/programme-library.json via the generated
+// fixture, per rule 2 -- a number describing the building does not belong in JS. They were
+// previously five separate `|| 24.0` / `|| 2.0` literals scattered across this file and
+// App.jsx, which is exactly how a placeholder turns into a de facto coefficient nobody can
+// find. Named once, with provenance, so a zone rendering at 24 is traceable to a gap in the
+// fixture rather than to an invented number.
+export const FALLBACK_SETPOINT_C = 24.0;
+export const FALLBACK_DEADBAND_K = 2.0;
 import { API_BASE, WS_URL, getAdminToken } from './api';
 
 // Data-driven fault targets: derive the selectable zones from all known buildings so any
@@ -53,9 +65,9 @@ export const getInitialSimData = (targetBuilding = getBuilding()) => {
           label: z.name,
           type: z.zoneType,
           bim_asset_id: z.bim_asset_id,
-          temp: z.thermalProperties?.setpoint || 24.0,
-          setpoint: z.thermalProperties?.setpoint || 24.0,
-          deadband: z.thermalProperties?.deadband || 2.0,
+          temp: z.thermalProperties?.setpoint ?? FALLBACK_SETPOINT_C,
+          setpoint: z.thermalProperties?.setpoint ?? FALLBACK_SETPOINT_C,
+          deadband: z.thermalProperties?.deadband ?? FALLBACK_DEADBAND_K,
           alert: false,
           lightsOn: true, // live actuated state arrives from the backend stream
           occupancy: z.thermalProperties?.occupancy || 0, // real occupancy arrives from the backend stream
@@ -340,7 +352,7 @@ export function useDigitalTwin(onUpdate) {
             // is critical regardless of scenario — this is what surfaces a genuinely hot/cooling-
             // starved room in the 3D model, topology, and the "Active Critical Faults" count.
             const prev = newSimData.zones[id];
-            const sp = prev?.setpoint ?? 24;
+            const sp = prev?.setpoint ?? FALLBACK_SETPOINT_C;
             const db = prev?.deadband ?? 1;
             const CRITICAL_MARGIN = 5; // °C above the comfort band before a zone is "critical"
 

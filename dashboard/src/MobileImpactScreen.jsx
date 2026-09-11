@@ -10,6 +10,7 @@ import {
   euiRunRateFromLoadMw, euiFromMeanLoadMw, EUI_MIN_WINDOW_H,
   carbonTonnesPerYear, carbonAvoidedTonnesPerYear, tonnesStr,
 } from './sustainability';
+import { fx, hasReading } from './measured';
 
 // Mobile "Impact" screen — the phone-sized face of the twin. Served automatically on
 // small viewports instead of the WebGL-heavy desktop stack, and fed entirely by the
@@ -231,7 +232,7 @@ export default function MobileImpactScreen({ simData = {}, aiForecast, hardwareN
                 <span style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0, background: n.online ? '#3DDC84' : 'rgba(255,255,255,0.3)' }} />
                 <span style={{ fontWeight: 'bold' }}>{(n.source || 'edge').toUpperCase()}</span>
                 <span style={{ color: 'rgba(255,255,255,0.5)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{(n.zoneId || '').replace('zone-', '')}</span>
-                {n.tempPinned && <span style={{ color: '#4FC3F7' }}>{(n.hwTemp || 0).toFixed(1)}°C</span>}
+                {n.tempPinned && hasReading(n.hwTemp) && <span style={{ color: '#4FC3F7' }}>{fx(n.hwTemp, 1)}°C</span>}
                 <span style={{ color: 'rgba(255,255,255,0.6)' }}>{n.occupancy ?? 0}P</span>
               </div>
             ))}
