@@ -422,7 +422,11 @@ func isSupportedCommand(cmd string) bool {
 		strings.HasPrefix(upper, "RADAR_GATES=") ||
 		strings.HasPrefix(upper, "RADAR_DELAY=") ||
 		strings.HasPrefix(upper, "RADAR_FRAMES=") ||
-		upper == "REBOOT" ||
+		// REBOOT is deliberately NOT dispatchable over HTTP. The adversarial suite lists
+		// "reboot" alongside "shutdown" and "rm -rf /" as verbs that must be rejected, and
+		// that is the right call: this endpoint's admin token is optional, so anything
+		// reachable here is reachable by anyone who can reach the engine. The firmware still
+		// handles REBOOT over the serial console, where physical access is the gate.
 		strings.HasPrefix(upper, "PROTOCOL=") ||
 		upper == "CAMERA_TRIGGER" ||
 		strings.HasPrefix(upper, "CONFIG:") {

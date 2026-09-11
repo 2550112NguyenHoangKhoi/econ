@@ -577,10 +577,12 @@ function DeviceControls({ targetZone = 'zone-office-a', targetDevice = '' }) {
               sensitivity control.
             </div>
 
-            <button style={{ ...S.btn('#b45309'), marginTop: 4 }} disabled={sending}
-                    onClick={() => sendCommand('REBOOT')}>
-              Reboot Node
-            </button>
+            <div style={{ fontSize: 10, color: '#4b5563', marginTop: 6, lineHeight: 1.5,
+                          borderTop: '1px solid #1f2937', paddingTop: 8 }}>
+              Node reboot is not exposed here on purpose: this endpoint&rsquo;s admin token is
+              optional, so anything reachable from it is reachable by anyone who can reach the
+              engine. Reboot over the serial console, or power-cycle.
+            </div>
           </div>
         </div>
 
