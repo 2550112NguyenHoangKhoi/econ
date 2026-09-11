@@ -39,7 +39,12 @@ type localInferOutput struct {
 	Device              string               `json:"device,omitempty"`
 	ZeroShot            bool                 `json:"zero_shot,omitempty"`
 	ContextUsed         int                  `json:"context_used,omitempty"`
-	Error               string               `json:"error,omitempty"`
+	// Degraded marks a result that infer.py produced WITHOUT the model -- torch missing,
+	// checkpoint unavailable. The payload keeps its shape so the endpoint still answers,
+	// but nothing downstream may present it as a model output. Basis carries the reason.
+	Degraded bool   `json:"degraded,omitempty"`
+	Basis    string `json:"basis,omitempty"`
+	Error    string `json:"error,omitempty"`
 }
 
 // resolvePythonInterpreter searches for a suitable python3 binary.

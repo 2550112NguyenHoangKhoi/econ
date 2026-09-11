@@ -98,14 +98,28 @@ def run_lstm_inference(data: dict, weights_path: str | None = None,
         for i, row in enumerate(raw_seq):
             if not isinstance(row, (list, tuple)) or len(row) != SENSOR_FEATURES:
                 raise ValueError(f"timestep {i} must have exactly {SENSOR_FEATURES} features [room_temp, airflow]")
+        # No torch: this is a placeholder, NOT the trained model, and it must say so.
+        #
+        # It previously returned outdoor_temp/10 as "predicted_peak_load" with status "ok"
+        # and no marker at all, which is a fabricated value travelling on the channel that
+        # means "the model predicted this". At -25 C it emitted -2.5 MW -- a negative load,
+        # physically impossible -- and the engine consumed it like any other forecast.
+        #
+        # The shape is kept so the system still answers without torch installed, but it is
+        # clamped to a possible value, reports the padded length the real path reports, and
+        # carries degraded=True plus the reason so every caller can tell the difference.
+        outdoor = float(data.get("outdoor_temp", 32.0))
         return {
             "status": "ok",
             "engine": "lstm",
-            "predicted_peak_load": float(data.get("outdoor_temp", 32.0)) / 10.0,
-            "outdoor_temp_used": float(data.get("outdoor_temp", 32.0)),
+            "degraded": True,
+            "basis": "torch is not installed: heuristic placeholder, not the trained LSTM",
+            "predicted_peak_load": max(0.0, outdoor / 10.0),
+            "outdoor_temp_used": outdoor,
             "outdoor_humidity_used": float(data.get("outdoor_humidity", 65.0)),
             "weather_source": "input",
-            "timesteps_used": len(raw_seq) if raw_seq else 12,
+            "device": "cpu",
+            "timesteps_used": SEQ_LEN,
         }
 
     try:
@@ -214,13 +228,22 @@ def run_timesfm_inference(data: dict, horizon: int = 12) -> dict:
         res["status"] = "ok"
         return res
     except Exception as e:
+        # Same correction as the LSTM branch, and this one was worse: it swallowed EVERY
+        # exception -- a missing checkpoint, a broken install, a genuine inference error --
+        # discarded the reason, and returned status "ok" with a flat line at last*1.05 and
+        # nine invented quantile bands, indistinguishable from a real foundation-model
+        # forecast. The bands in particular are pure fabrication: they are arithmetic on one
+        # number, not an uncertainty the model expressed.
+        #
+        # The fallback stays so the endpoint keeps answering, but it is labelled, it carries
+        # the real reason, and it no longer claims quantiles it did not compute.
         return {
             "status": "ok",
             "engine": "timesfm",
+            "degraded": True,
+            "basis": f"TimesFM unavailable ({e}): persistence placeholder, not a model forecast",
             "forecast": [history[-1] * 1.05] * req_horizon,
-            "quantiles": {
-                f"q{i}": [history[-1] * (0.9 + 0.02 * i)] * req_horizon for i in range(1, 10)
-            }
+            "device": "cpu",
         }
 
 
