@@ -354,11 +354,28 @@ func BuildForecastGraphLocal(engine *simulation.Engine, horizon int) *simulation
 			upperBand[i] = math.Round(v*1.10*10000) / 10000
 		}
 		upperPeak := math.Round(*lstmRes.PeakMw*1.10*10000) / 10000
+
+		// Expose the bands this tier already computed under the names it already claims.
+		// It returned UpperQuantile "q9" and a populated UpperBand while leaving Quantiles
+		// nil, so anything doing Quantiles[UpperQuantile] -- the obvious way to read this
+		// payload, and what the TimesFM tier above supports -- got nothing back. Same numbers,
+		// same names, now actually reachable.
+		//
+		// q1 is deliberately absent: this tier computes a central trajectory and a +10% upper
+		// bound and nothing else. The fallback publishes a q1 because it genuinely derives a
+		// lower bound; inventing one here to fill the map out would be fabricating a figure
+		// no model produced.
+		quantiles := map[string][]float64{
+			"q5": series,
+			"q9": upperBand,
+		}
+
 		return &simulation.ForecastGraphData{
 			Engine:         "lstm",
 			Series:         series,
 			UpperBand:      upperBand,
 			UpperQuantile:  "q9",
+			Quantiles:      quantiles,
 			PeakUpperMw:    &upperPeak,
 			LstmPeakMw:     lstmRes.PeakMw,
 			StepMinutes:    histIntervalMinutes,
