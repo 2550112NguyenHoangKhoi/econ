@@ -65,6 +65,40 @@ export default function ForecastChart({
     : chartData.reduce((m, d) => Math.max(m, d.hi || 0), 0);
 
   const hasUpper = chartData.some((d) => d.hi != null);
+
+  // The axis must span every series this chart claims to draw, and where it cannot, the
+  // chart must say so rather than draw a line that is not where it appears to be.
+  //
+  // The axis was domain={['auto','auto']}, which Recharts derives from the plotted Lines and
+  // which ignores ReferenceLine entirely. On the pilot building that produced a y-axis of
+  // 0.0013–0.0014 MW while the legend named three series: the 0.001 MW forecast (on scale),
+  // a 2.446 MW band (clipped to the top edge, so it read as a flat dashed line at a value it
+  // does not have), and a 2.22 MW reference line that was not drawn at all. Three entries in
+  // the legend, one of them truthful.
+  //
+  // Extending the domain to 2.22 MW is not the fix either: the forecast series would collapse
+  // to a flat line on the floor and become unreadable. Two numbers 2000x apart do not share a
+  // linear axis usefully. So the axis is fitted to the series it can show, and a reference
+  // that falls outside it is reported as a multiple instead of being drawn.
+  const { yDomain, refOffScale, refFactor } = useMemo(() => {
+    const vals = chartData.flatMap((d) => [d.mw, d.hi]).filter((v) => v != null && !Number.isNaN(v));
+    if (!vals.length) return { yDomain: ['auto', 'auto'], refOffScale: false, refFactor: 0 };
+    let lo = Math.min(...vals);
+    let hi = Math.max(...vals);
+    // A reference within an order of magnitude shares the axis; anything beyond would flatten
+    // the series, so it is declared off-scale instead.
+    const onScale = lstmPeak != null && lstmPeak > 0 && lstmPeak <= hi * 10 && lstmPeak >= lo / 10;
+    if (onScale) {
+      lo = Math.min(lo, lstmPeak);
+      hi = Math.max(hi, lstmPeak);
+    }
+    const pad = (hi - lo) * 0.08 || Math.abs(hi) * 0.08 || 0.001;
+    return {
+      yDomain: [lo - pad, hi + pad],
+      refOffScale: lstmPeak != null && lstmPeak > 0 && !onScale,
+      refFactor: hi > 0 && lstmPeak != null ? lstmPeak / hi : 0,
+    };
+  }, [chartData, lstmPeak]);
   const engineLabel = (engine || 'timesfm').toUpperCase();
   const stepMin = stepMinutes > 0 ? stepMinutes : 5;
 
@@ -251,7 +285,7 @@ export default function ForecastChart({
               tick={{ fontSize: 8, fill: 'var(--text-muted, #64748b)' }}
               tickLine={false}
               axisLine={false}
-              domain={['auto', 'auto']}
+              domain={yDomain}
             />
             <Tooltip
               contentStyle={{
@@ -267,9 +301,10 @@ export default function ForecastChart({
                 name === 'hi' ? `${(upperQuantile || 'q9').toUpperCase()} band` : 'Forecast load',
               ]}
             />
-            {lstmPeak != null && (
+            {lstmPeak != null && !refOffScale && (
               <ReferenceLine
                 y={lstmPeak}
+                ifOverflow="extendDomain"
                 stroke="var(--accent-red, #ef4444)"
                 strokeDasharray="4 4"
                 label={{
@@ -385,7 +420,9 @@ export default function ForecastChart({
           {lstmPeak != null && (
             <>
               <span style={{ color: 'var(--text-secondary, #94a3b8)' }}>
-                Red line — LSTM (supervised peak reference)
+                {refOffScale
+                  ? `LSTM (supervised peak reference) — off scale, ${refFactor >= 10 ? Math.round(refFactor) : refFactor.toFixed(1)}× the forecast`
+                  : 'Red line — LSTM (supervised peak reference)'}
               </span>
               <span style={{ fontFamily: 'monospace', color: 'var(--accent-red, #ef4444)', textAlign: 'right' }}>
                 {powerMw(lstmPeak)}

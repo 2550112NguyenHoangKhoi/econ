@@ -93,7 +93,18 @@ func TestLocalModelInference_QueryLSTMIPC_Direct(t *testing.T) {
 	if res.PeakMw == nil || *res.PeakMw <= 0 {
 		t.Fatalf("expected valid non-zero peak load, got %v", res.PeakMw)
 	}
-	if !strings.Contains(res.Basis, "supervised LSTM") {
+	// Basis must describe what actually produced the number. Without torch installed,
+	// infer.py answers from its placeholder branch and Basis says so -- asserting
+	// "supervised LSTM" there would be asserting the very claim the placeholder must not
+	// make. Check the degraded contract instead, so both environments are covered.
+	if res.Degraded {
+		if strings.Contains(res.Basis, "supervised LSTM") {
+			t.Errorf("a degraded result must not describe itself as the supervised LSTM, got %q", res.Basis)
+		}
+		if res.Basis == "" {
+			t.Error("a degraded result must say why it is degraded, got an empty basis")
+		}
+	} else if !strings.Contains(res.Basis, "supervised LSTM") {
 		t.Errorf("expected basis to describe supervised LSTM, got %q", res.Basis)
 	}
 }

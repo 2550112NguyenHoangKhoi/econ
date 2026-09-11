@@ -229,8 +229,15 @@ func queryLSTMIPC(engine *simulation.Engine, req forecastRequest, realSamples in
 	peak := out.PredictedPeakLoad
 	res.Available = true
 	res.PeakMw = &peak
-	res.Basis = fmt.Sprintf("supervised LSTM via local infer.py (%s weather: %.1f°C, %.0f%%)",
-		out.WeatherSource, out.OutdoorTempUsed, out.OutdoorHumidityUsed)
+	res.Degraded = out.Degraded
+	if out.Degraded {
+		// Say what it actually is. Reporting "supervised LSTM" for a heuristic placeholder
+		// is the same error the Python fallback was making, one layer up.
+		res.Basis = out.Basis
+	} else {
+		res.Basis = fmt.Sprintf("supervised LSTM via local infer.py (%s weather: %.1f°C, %.0f%%)",
+			out.WeatherSource, out.OutdoorTempUsed, out.OutdoorHumidityUsed)
+	}
 	return res, nil
 }
 
@@ -290,6 +297,10 @@ func queryTimesFMIPC(engine *simulation.Engine, horizon int, history []float64) 
 	res.Available = true
 	res.PeakMw = &peak
 	res.Series = series
+	res.Degraded = out.Degraded
+	if out.Degraded && out.Basis != "" {
+		res.Basis = out.Basis
+	}
 
 	if len(out.Quantiles) > 0 {
 		res.Quantiles = out.Quantiles

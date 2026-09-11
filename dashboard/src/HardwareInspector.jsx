@@ -1295,6 +1295,14 @@ function SustainabilityTab() {
   if (!data) return <div style={S.dim}>Loading sustainability data...</div>;
 
   const accounting = data?.carbonAccounting || {};
+  // A measurement that has not arrived is not zero.
+  //
+  // These four read from an object that defaults to {} until /api/sustainability answers,
+  // and every one of them was `(Number(x) || 0).toFixed(n)` -- so an empty payload rendered
+  // as 0.0 W, 0.000 kgCO2e/h, 0.00 kg/kWh, 0.000 kgCO2e, in 24px bold, indistinguishable
+  // from a building genuinely drawing nothing. `|| 0` cannot tell absent from zero, so this
+  // tests for absence explicitly and leaves a dash where there is no number yet.
+  const fx = (v, d) => (v == null || Number.isNaN(Number(v)) ? '—' : Number(v).toFixed(d));
   const recs = data?.carbonCreditRecommendations || {};
   const quote = recs?.marketQuote || {};
   const altQuotes = recs?.alternativeQuotes || [];
@@ -1310,19 +1318,19 @@ function SustainabilityTab() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
           <div>
             <div style={S.dim}>Instantaneous Power</div>
-            <div style={{fontSize: 24, fontWeight: 'bold'}}>{(Number(accounting.instantaneousPowerW) || 0).toFixed(1)} W</div>
+            <div style={{fontSize: 24, fontWeight: 'bold'}}>{fx(accounting.instantaneousPowerW, 1)} W</div>
           </div>
           <div>
             <div style={S.dim}>Emission Rate</div>
-            <div style={{fontSize: 24, fontWeight: 'bold'}}>{(Number(accounting.instantaneousEmissionRateKgPerHour) || 0).toFixed(3)} kgCO2e/h</div>
+            <div style={{fontSize: 24, fontWeight: 'bold'}}>{fx(accounting.instantaneousEmissionRateKgPerHour, 3)} kgCO2e/h</div>
           </div>
           <div>
             <div style={S.dim}>Grid Factor</div>
-            <div style={{fontSize: 24, fontWeight: 'bold'}}>{(Number(accounting.gridEmissionFactorKgPerKwh) || 0).toFixed(2)} kg/kWh</div>
+            <div style={{fontSize: 24, fontWeight: 'bold'}}>{fx(accounting.gridEmissionFactorKgPerKwh, 2)} kg/kWh</div>
           </div>
           <div>
             <div style={S.dim}>Cumulative Emissions</div>
-            <div style={{fontSize: 24, fontWeight: 'bold'}}>{(Number(accounting.cumulativeEmissionsKgCO2e) || 0).toFixed(3)} kgCO2e</div>
+            <div style={{fontSize: 24, fontWeight: 'bold'}}>{fx(accounting.cumulativeEmissionsKgCO2e, 3)} kgCO2e</div>
           </div>
         </div>
       </div>
@@ -2104,17 +2112,29 @@ function ForecastTab() {
             <div key={key} style={{ ...S.chartBox, flex: '1 1 300px', marginTop: 0 }}>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
                 <span style={{ fontSize: 15, fontWeight: 700, color: colour }}>{name}</span>
-                <span style={S.badge(e.available ? '#4ade80' : '#ef4444')}>
-                  {e.available ? 'LIVE' : 'UNAVAILABLE'}
+                {/* Three states, not two. A degraded result is one infer.py produced with
+                    no model behind it -- torch absent, or the checkpoint missing -- and it
+                    still arrives with available:true because the endpoint did answer. Badging
+                    that LIVE is how a placeholder gets read as a measurement. */}
+                <span style={S.badge(e.degraded ? '#f59e0b' : e.available ? '#4ade80' : '#ef4444')}>
+                  {e.degraded ? 'PLACEHOLDER' : e.available ? 'LIVE' : 'UNAVAILABLE'}
                 </span>
               </div>
               <div style={{ ...S.dim, fontSize: 11, marginTop: 2 }}>{kind}</div>
 
               {e.available ? (
                 <>
-                  <div style={{ fontSize: 30, fontWeight: 700, margin: '10px 0 2px' }}>
+                  <div style={{
+                    fontSize: 30, fontWeight: 700, margin: '10px 0 2px',
+                    color: e.degraded ? '#f59e0b' : undefined,
+                  }}>
                     {(Number(e.peakMw) || 0).toFixed(3)} <span style={{ fontSize: 14, color: '#9ca3af' }}>MW</span>
                   </div>
+                  {e.degraded && (
+                    <div style={{ fontSize: 11, color: '#f59e0b', lineHeight: 1.5, marginBottom: 4 }}>
+                      not a model output — {e.basis || 'the forecaster answered without its model'}
+                    </div>
+                  )}
                   <div style={{ ...S.dim, fontSize: 11 }}>
                     backed by <strong style={{ color: thin ? '#f59e0b' : '#4ade80' }}>
                       {e.realSamples ?? 0}{e.windowLen ? ` / ${e.windowLen}` : ''}

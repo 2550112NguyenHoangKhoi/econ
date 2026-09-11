@@ -765,10 +765,12 @@ export default function SustainabilityRecommendationsPanel({
             <span>Shed Idle Plugs</span>
           </button>
 
+          {/* Labelled by what it does. SETPOINT= is absolute, so the old "+2°C" was only
+              true while the building's base setpoint happened to be 24. */}
           <button
             data-testid="btn-action-eco-setback"
             disabled={actionLoading}
-            onClick={() => dispatchAction('SETPOINT=26.0', 'Eco Setback (+2°C)')}
+            onClick={() => dispatchAction('SETPOINT=26.0', 'Eco Setback (26°C)')}
             style={{
               ...S.btnAction,
               borderColor: '#10b981',
@@ -776,7 +778,7 @@ export default function SustainabilityRecommendationsPanel({
             }}
           >
             <ArrowUpRight size={13} />
-            <span>Eco Setback (+2°C)</span>
+            <span>Eco Setback (26°C)</span>
           </button>
 
           <button

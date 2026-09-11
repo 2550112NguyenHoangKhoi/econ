@@ -164,6 +164,11 @@ type engineResult struct {
 	RealSamples int    `json:"realSamples"`
 	WindowLen   int    `json:"windowLen,omitempty"`
 	Basis       string `json:"basis"`
+	// Degraded means infer.py answered WITHOUT the model behind it -- torch absent, or the
+	// checkpoint missing. The number still has the shape of a forecast and Available stays
+	// true, because the endpoint did answer; what must not happen is a consumer rendering
+	// it as a model result. The dashboard badges these PLACEHOLDER rather than LIVE.
+	Degraded bool `json:"degraded,omitempty"`
 	// Plausibility against the building's OWN observed load. A supervised model carries
 	// the building it was trained on inside its weights: point the LSTM trained on a
 	// 39,776 m2 tower at a 72 m2 house and it answers 2.4 MW for a building that has never

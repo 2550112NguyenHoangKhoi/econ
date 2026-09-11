@@ -535,7 +535,11 @@ function ZoneDrillHistory({ zone, liveZone, onClose, onZoom, isMobile }) {
         <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Loading history…</div>
       ) : tempData.length === 0 ? (
         <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
-          No persisted history yet — the live point is {(liveZone?.temp ?? 0).toFixed(1)}°C{sp != null ? ` vs ${sp.toFixed(1)}°C setpoint` : ''}. History fills once TimescaleDB has logged this zone.
+          {/* Only claim a live point when there is one. `?? 0` asserted "the live point is
+              0.0°C" for a zone that had reported nothing at all. */}
+          No persisted history yet{liveZone?.temp != null
+            ? ` — the live point is ${Number(liveZone.temp).toFixed(1)}°C${sp != null ? ` vs ${sp.toFixed(1)}°C setpoint` : ''}`
+            : ' and nothing live from this zone yet'}. History fills once TimescaleDB has logged this zone.
         </div>
       ) : (
         <>

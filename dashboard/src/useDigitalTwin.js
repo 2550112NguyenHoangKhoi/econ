@@ -162,9 +162,21 @@ export function useDigitalTwin(onUpdate) {
   const globalMetrics = useMemo(() => {
     const empty = { occupants: 0, avgTemp: 0, buildingLoadMw: 0, coolingOutputMw: 0, plantCop: 0, energySavedMw: 0, gridPowerMw: 0, bessDischargeMw: 0, bessSocPct: 0, hvacElectricalMw: 0, baseLoadMw: 0 };
     if (!simData || !simData.zones) return empty;
+    // Average only the zones that actually reported a temperature.
+    //
+    // This was `tempSum += parseFloat(z.temp) || 24.0`, four lines under a comment promising
+    // "No fabricated ratios". A zone that had reported nothing contributed a 24.0 nobody
+    // measured, and it was divided by zones.length either way -- so the building average was
+    // pulled toward 24 in exact proportion to how many zones were silent, and read as a
+    // measurement. 24 is also a building coefficient typed into JS, which belongs in the
+    // programme library, not here.
     let tempSum = 0;
+    let tempCount = 0;
     const zones = Object.values(simData.zones);
-    zones.forEach(z => { tempSum += parseFloat(z.temp) || 24.0; });
+    zones.forEach((z) => {
+      const t = parseFloat(z.temp);
+      if (Number.isFinite(t)) { tempSum += t; tempCount += 1; }
+    });
     const bldgLoad = simData.buildingLoadMw || 0;
     const bessDischarge = simData.bessDischargeMw || 0;
     const coolMw = simData.coolingOutputMw || 0;
@@ -176,7 +188,7 @@ export function useDigitalTwin(onUpdate) {
     const hvacElectricalMw = cop > 0 ? Math.min(bldgLoad, coolMw / cop) : 0;
     return {
       occupants: simData.totalOccupants || 0,
-      avgTemp: zones.length ? (tempSum / zones.length).toFixed(1) : 0,
+      avgTemp: tempCount ? (tempSum / tempCount).toFixed(1) : 0,
       buildingLoadMw: bldgLoad,
       coolingOutputMw: coolMw,                        // thermal cooling delivered (MW)
       plantCop: cop,                                  // chiller-plant coefficient of performance
