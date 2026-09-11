@@ -31,10 +31,19 @@ edge/esp32/.pio/
 
 # Per-deployment runtime state written by the Go server (regenerated at runtime, must not
 # be committed): the plug-sweep savings counter and the learned-baseline model snapshot.
+#
+# The list has to match what the engine actually persists, and it had drifted: two of the
+# five state files were missing from it. sustainability-state.json was tracked, so every
+# engine run rewrote a committed file -- the cumulative carbon counter climbing on each
+# tick -- and showed up as a repo modification that nobody made. dashboard-state.json was
+# neither tracked nor ignored, so it sat in `git status` as permanent untracked noise.
+# Both are regenerated from scratch at runtime; neither is a seed.
 server/data/plug-state.json
 server/data/baseline-model.json
 server/data/room-dynamics.json
 server/data/load-history.json
+server/data/sustainability-state.json
+server/data/dashboard-state.json
 
 # THIS DEPLOYMENT'S OWN building, ontology and site calibration.
 #
