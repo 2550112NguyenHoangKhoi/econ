@@ -286,6 +286,17 @@ export default function ForecastChart({
               tickLine={false}
               axisLine={false}
               domain={yDomain}
+              width={46}
+              // The domain is fitted to the data (lo - pad, hi + pad), so its bounds are
+              // arbitrary reals and Recharts derives equally arbitrary ticks from them.
+              // With no formatter it printed them at full float precision —
+              // "0.5823142264404297" — and five of those overlapped into an unreadable
+              // smear that looked like six-digit garbage on the axis.
+              //
+              // powerMw is the same formatter the header and the legend below use, so the
+              // axis now agrees with the figures printed beside it instead of contradicting
+              // them, and picks W / kW / MW to suit the magnitude.
+              tickFormatter={(v) => powerMw(v)}
             />
             <Tooltip
               contentStyle={{
