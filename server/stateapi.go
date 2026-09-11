@@ -2,7 +2,9 @@ package main
 
 import (
 	"econ/simulation"
+
 	"encoding/json"
+	"github.com/gorilla/websocket"
 	"io"
 	"log"
 	"net/http"
@@ -88,8 +90,18 @@ func BroadcastStateUpdate(key string, value interface{}, exclude wsSender) {
 
 	// 1 is websocket.TextMessage
 	for _, c := range conns {
-		_ = c.WriteMessage(1, data)
+		_ = safeStateSend(c, 1, data)
 	}
+}
+
+// safeStateSend routes real websocket connections through the per-connection write
+// lock so a state_update cannot interleave with the engine's telemetry broadcast.
+// Test doubles implement wsSender without being a *websocket.Conn and pass through.
+func safeStateSend(c wsSender, messageType int, data []byte) error {
+	if conn, ok := c.(*websocket.Conn); ok {
+		return simulation.WSWrite(conn, messageType, data)
+	}
+	return c.WriteMessage(messageType, data)
 }
 
 // BroadcastStateBatch transmits state_update frames for multiple updated toggles.
@@ -117,7 +129,7 @@ func BroadcastStateBatch(toggles map[string]interface{}, exclude wsSender) {
 		data, err := json.Marshal(payload)
 		if err == nil {
 			for _, c := range conns {
-				_ = c.WriteMessage(1, data)
+				_ = safeStateSend(c, 1, data)
 			}
 		}
 	}

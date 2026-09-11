@@ -239,7 +239,7 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request, engine *simulation.
 			"toggles": stateStore.GetAll(),
 		}
 		if syncBytes, err := json.Marshal(syncFrame); err == nil {
-			_ = conn.WriteMessage(websocket.TextMessage, syncBytes)
+			_ = simulation.WSWrite(conn, websocket.TextMessage, syncBytes)
 		}
 		RegisterStateWsClient(conn)
 		defer UnregisterStateWsClient(conn)
@@ -269,16 +269,16 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request, engine *simulation.
 			authorized = tokenMatches(tok)
 			if authorized {
 				log.Println("[auth] websocket client authorized for control")
-				_ = conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"auth","ok":true}`))
+				_ = simulation.WSWrite(conn, websocket.TextMessage, []byte(`{"type":"auth","ok":true}`))
 			} else {
 				log.Println("[auth] websocket client presented an invalid token")
-				_ = conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"auth","ok":false}`))
+				_ = simulation.WSWrite(conn, websocket.TextMessage, []byte(`{"type":"auth","ok":false}`))
 			}
 			continue
 		}
 		if !authorized {
 			log.Printf("[auth] refused command from unauthorized websocket client: %s", string(msg))
-			_ = conn.WriteMessage(websocket.TextMessage,
+			_ = simulation.WSWrite(conn, websocket.TextMessage,
 				[]byte(`{"type":"error","error":"unauthorized: send {\"action\":\"auth\",\"token\":\"...\"} before issuing commands"}`))
 			continue
 		}
@@ -350,18 +350,18 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request, engine *simulation.
 					targetFile := simulation.ModelFileFor(sm.Model)
 					if targetFile == "" {
 						log.Printf("[ws] unknown model switch target: %q", sm.Model)
-						_ = conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"error","error":"unknown model"}`))
+						_ = simulation.WSWrite(conn, websocket.TextMessage, []byte(`{"type":"error","error":"unknown model"}`))
 						return
 					}
 					data, err := os.ReadFile(simulation.DataPath(targetFile))
 					if err != nil {
 						log.Printf("[ws] failed to read building file %q: %v", targetFile, err)
-						_ = conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"error","error":"failed to read model file"}`))
+						_ = simulation.WSWrite(conn, websocket.TextMessage, []byte(`{"type":"error","error":"failed to read model file"}`))
 						return
 					}
 					if err := engine.ReloadBuilding(data); err != nil {
 						log.Printf("[ws] failed to reload building: %v", err)
-						_ = conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"error","error":"failed to reload building"}`))
+						_ = simulation.WSWrite(conn, websocket.TextMessage, []byte(`{"type":"error","error":"failed to reload building"}`))
 						return
 					}
 					if stateStore != nil {
@@ -371,7 +371,7 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request, engine *simulation.
 					}
 					log.Printf("[ws] successfully switched model to %q (%s, %d zones, %d vavs)",
 						sm.Model, engine.BuildingId(), len(engine.Zones), len(engine.Vavs))
-					_ = conn.WriteMessage(websocket.TextMessage, []byte(
+					_ = simulation.WSWrite(conn, websocket.TextMessage, []byte(
 						fmt.Sprintf(`{"type":"switch_model","ok":true,"model":%q,"buildingId":%q,"zones":%d,"vavs":%d}`,
 							sm.Model, engine.BuildingId(), len(engine.Zones), len(engine.Vavs)),
 					))

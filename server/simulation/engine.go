@@ -2240,6 +2240,7 @@ func (e *Engine) RemoveClient(conn *websocket.Conn) {
 	e.mu.Lock()
 	delete(e.Clients, conn)
 	e.mu.Unlock()
+	WSForget(conn)
 }
 
 // --- occupancy -------------------------------------------------------------
@@ -3249,7 +3250,7 @@ func (e *Engine) broadcast() {
 	// stall the simulation loop or MQTT ingestion.
 	var dead []*websocket.Conn
 	for _, client := range conns {
-		if err := client.WriteMessage(websocket.BinaryMessage, buf); err != nil {
+		if err := WSWrite(client, websocket.BinaryMessage, buf); err != nil {
 			client.Close()
 			dead = append(dead, client)
 		}
@@ -3260,6 +3261,9 @@ func (e *Engine) broadcast() {
 			delete(e.Clients, c)
 		}
 		e.mu.Unlock()
+		for _, c := range dead {
+			WSForget(c)
+		}
 	}
 }
 
