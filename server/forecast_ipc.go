@@ -354,6 +354,11 @@ func BuildForecastGraphLocal(engine *simulation.Engine, horizon int) *simulation
 			upperBand[i] = math.Round(v*1.10*10000) / 10000
 		}
 		upperPeak := math.Round(*lstmRes.PeakMw*1.10*10000) / 10000
+		// UpperQuantile names a key into Quantiles, and the dashboard resolves the band
+		// by that lookup (useForecastCompare.js). Publish the bands this branch actually
+		// computed so the lookup succeeds. The LSTM regressor predicts only a scalar peak,
+		// so there is no lower band to report here -- do not invent one.
+		quantiles := map[string][]float64{"q5": series, "q9": upperBand}
 		return &simulation.ForecastGraphData{
 			Engine:         "lstm",
 			Series:         series,
@@ -366,6 +371,7 @@ func BuildForecastGraphLocal(engine *simulation.Engine, horizon int) *simulation
 			Plausible:      !lstmRes.Implausible,
 			Plausibility:   lstmRes.Plausibility,
 			Samples:        lstmRes.RealSamples,
+			Quantiles:      quantiles,
 		}
 	}
 
