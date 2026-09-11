@@ -407,12 +407,36 @@ function App() {
       showWindSim ? airflowSize.w : 0,                   // airflow window
     );
     const rightOverlay = rightPanelWidth + (floating > 0 ? floating + 12 : 0);
+
+    let left = (isLeftPanelOpen ? leftPanelSize.w : 0) + GUTTER;
+    let right = rightOverlay + GUTTER;
+
+    // Never let the insets claim so much width that the building is framed into a strip
+    // it cannot be seen in. The overlays are measured at their FULL width but the topology
+    // and airflow windows are only about half the viewport tall, so on a 1512-wide console
+    // the left panel plus a 600 px topology window plus the metrics dock asked for 1421 px
+    // of exclusion and left a 91 px band. The camera dutifully aimed at the middle of it —
+    // x = 295 px — which is behind the AI panel, and the building vanished.
+    //
+    // Shrinking both insets proportionally keeps the bias (the building still sits in the
+    // freest part of the canvas) while guaranteeing it stays on screen.
+    const vw = window.innerWidth;
+    const MIN_FREE_FRACTION = 0.34;
+    const minFree = vw * MIN_FREE_FRACTION;
+    const claimed = left + right;
+    if (claimed > vw - minFree && claimed > 0) {
+      const allowed = Math.max(0, vw - minFree);
+      const scale = allowed / claimed;
+      left = Math.round(left * scale);
+      right = Math.round(right * scale);
+    }
+
     return {
-      left: (isLeftPanelOpen ? leftPanelSize.w : 0) + GUTTER,
-      right: rightOverlay + GUTTER,
+      left,
+      right,
       top: TOP_BAR,
       bottom: BOTTOM_BAR,
-      viewportW: window.innerWidth,
+      viewportW: vw,
       viewportH: window.innerHeight,
     };
   }, [isLeftPanelOpen, leftPanelSize.w, rightPanelWidth, panelSize.w, airflowSize.w, showWindSim, viewportTick]);
