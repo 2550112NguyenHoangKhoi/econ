@@ -720,7 +720,21 @@ func BuildForecastGraph(engine *simulation.Engine, horizon int) *simulation.Fore
 		for i, v := range series {
 			upperBand[i] = math.Round(v*1.10*10000) / 10000
 		}
-		upperPeak := math.Round(*lstm.PeakMw*1.10*10000) / 10000
+		// PeakUpperMw is "peak of the highest decile" (see the field's own comment), so it
+		// has to be the peak of the UpperBand this tier actually ships. It used to be
+		// lstmPeak*1.10, which is a different quantity entirely: with a flat persistence
+		// trajectory at 0.712 MW the band was 0.783 MW while this reported 2.509 MW, so the
+		// chart's header announced "Q9 2.509 MW" over a dashed band drawn at 0.783 — a
+		// factor of 3.2 between the label and the line beside it. The LSTM's own peak
+		// prediction is not lost; it travels as LstmPeakMw and is drawn as the separate
+		// supervised-peak reference.
+		upperPeak := 0.0
+		for _, v := range upperBand {
+			if v > upperPeak {
+				upperPeak = v
+			}
+		}
+		upperPeak = math.Round(upperPeak*10000) / 10000
 
 		// Expose the bands this tier already computed under the names it already claims.
 		// It returned UpperQuantile "q9" and a populated UpperBand while leaving Quantiles
