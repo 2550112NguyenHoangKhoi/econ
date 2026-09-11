@@ -728,11 +728,24 @@ func BuildForecastGraph(engine *simulation.Engine, horizon int) *simulation.Fore
 			Plausible:      !lstm.Implausible,
 			Plausibility:   lstm.Plausibility,
 			Samples:        lstm.RealSamples,
+			Quantiles:      lstmForecastQuantiles(series, upperBand),
 		}
 	}
 
 	// 3. Fallback: Cold-start or offline forecasting service
 	return generateFallbackForecast(engine, horizon)
+}
+
+// lstmForecastQuantiles carries the LSTM branch's bands in the same map the TimesFM and
+// fallback branches populate, so a consumer doing quantiles[UpperQuantile] resolves to the
+// same slice as UpperBand instead of nothing. Only the bands that actually exist are
+// published: the LSTM regressor predicts a scalar peak, so there is the point trajectory
+// ("q5") and the +10% upper band ("q9") — no lower band is invented for "q1".
+func lstmForecastQuantiles(series, upperBand []float64) map[string][]float64 {
+	return map[string][]float64{
+		"q5": series,
+		"q9": upperBand,
+	}
 }
 
 // generateLstmTrajectory returns an honest persistence payload for the horizon rather than synthesizing

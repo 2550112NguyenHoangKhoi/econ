@@ -366,6 +366,7 @@ func BuildForecastGraphLocal(engine *simulation.Engine, horizon int) *simulation
 			Plausible:      !lstmRes.Implausible,
 			Plausibility:   lstmRes.Plausibility,
 			Samples:        lstmRes.RealSamples,
+			Quantiles:      lstmForecastQuantiles(series, upperBand),
 		}
 	}
 
