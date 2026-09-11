@@ -2398,8 +2398,23 @@ void loop() {
           rd03::closeCommandMode(*io);
           gRadarAlive[h] = true;
           probeBackoff[h] = 30000;   // recovered: reset so the next loss retries promptly
-          gRadarStream[h] = rd03::enableReporting(*io, h == 0 ? "head1" : "head2");
-          Serial.printf("[mmwave] head%d is answering again — rejoined\n", h + 1);
+          const char* lbl = (h == 0) ? "head1" : "head2";
+
+          // Restore the configuration, not just the stream. These V1 modules have no save
+          // command, so every parameter lives in volatile RAM and a head that dropped out
+          // because it lost power comes back on factory defaults. Re-arming reporting mode
+          // without re-applying the gates and delay left it running a configuration nobody
+          // chose, silently different from the other head.
+          #if defined(RD03_SET_MAX_GATE) && defined(RD03_SET_DELAY_S)
+            rd03::applyConfig(*io, lbl, (uint32_t)RD03_SET_MIN_GATE,
+                              (uint32_t)RD03_SET_MAX_GATE, (uint32_t)RD03_SET_DELAY_S);
+          #endif
+          #if defined(RD03_FRAME_FILTERS) && defined(RD03_FRAMES_DETECT)
+            rd03::frameFilters(*io, lbl, RD03_FRAMES_DETECT, -1);
+          #endif
+
+          gRadarStream[h] = rd03::enableReporting(*io, lbl);
+          Serial.printf("[mmwave] head%d is answering again — rejoined, config re-applied\n", h + 1);
         }
       }
       continue;
