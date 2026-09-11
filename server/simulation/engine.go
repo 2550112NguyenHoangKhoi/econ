@@ -261,6 +261,9 @@ type Engine struct {
 	lastBessAt time.Time // wall-clock of the last BESS integration step
 	// lastOccupancyAt paces the modelled occupancy redraw (applyOccupancySchedule).
 	lastOccupancyAt time.Time
+	// Separate clock for per-zone modelled persistence, which is sampled far more slowly
+	// than the GLOBAL series -- see the write loop in broadcast().
+	lastZoneDbSave time.Time
 	// Automated Plug Load Control (plugs.go): sweep policy, cumulative avoided energy,
 	// and the wall-clock anchor its integration runs on (sim time accelerates; savings
 	// must not).
@@ -736,6 +739,28 @@ func (e *Engine) enforceStaticPressureSafety() {
 			e.AhuPressure = MaxSafeStaticPressurePa
 		}
 	}
+}
+
+// SnapshotZones returns the zone map copied under the engine lock.
+//
+// Callers outside this package were ranging over e.Zones directly and then re-indexing
+// it, which is two bugs at once. ReloadBuilding replaces the whole map under e.mu when
+// the operator switches building, so an unlocked reader races a map write — and one that
+// collects ids first and looks them up afterwards gets a nil *ZoneSim for every id that
+// vanished in between. That is precisely how the engine died: a switch from the 735-zone
+// tower to the 5-zone house landed mid-scan in the carbon snapshot, and the nil
+// dereference took the whole process down with exit 2 and no restart policy.
+//
+// The copy is shallow: the map is safe to range, and the ZoneSim values behind it are the
+// engine's live ones, as they were for the previous direct readers.
+func (e *Engine) SnapshotZones() map[string]*ZoneSim {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	out := make(map[string]*ZoneSim, len(e.Zones))
+	for id, z := range e.Zones {
+		out[id] = z
+	}
+	return out
 }
 
 func (e *Engine) getZoneToVavMap() map[string]*VavSim {
@@ -3071,9 +3096,28 @@ func (e *Engine) broadcast() {
 				e.Persist("GLOBAL", "outdoorHum", e.outdoorHum)
 			}
 		}
+		// Per-zone MODELLED series are written at a slower cadence than the GLOBAL ones.
+		//
+		// This loop ran every second across every zone, and on the digitized fixture that is
+		// 735 zones x 2 series = ~1,470 rows/s of values the simulation can reproduce exactly.
+		// It filled the TimescaleDB volume to 49 GB in the 7-day retention window -- 233.7M
+		// rows, of which 158k (0.068%) were measured. The disk reaching 100% is what stopped
+		// Docker, the forecaster and the browser tests.
+		//
+		// A modelled temperature does not carry a second of new information every second: it
+		// is an integration the engine re-derives on demand. Sampling it once a minute keeps
+		// every chart and the LSTM retraining features usable at ~1/60th the volume. Anything
+		// a sensor actually reported is untouched -- those are gated on their own freshness
+		// below, and measured rows go through persistMeasured at full rate.
+		persistZoneModelled := now.Sub(e.lastZoneDbSave) >= time.Minute
+		if persistZoneModelled {
+			e.lastZoneDbSave = now
+		}
 		for id, z := range e.Zones {
-			e.Persist(id, "temp", z.Temp)
-			e.Persist(id, "occupancy", float64(z.Occupancy))
+			if persistZoneModelled {
+				e.Persist(id, "temp", z.Temp)
+				e.Persist(id, "occupancy", float64(z.Occupancy))
+			}
 			// Environmentals from a live physical sensor (humidity %, CO2 ppm) get
 			// their own history series, each gated on its own sensor still reporting.
 			if z.HwHum > 0 && z.humFresh() {
