@@ -5,7 +5,10 @@
  *
  * Verifies Requirement R3 & Acceptance Criterion 2:
  * 1. Pure Mathematical & Model Invariants:
- *    - Validates default active model is Multi-Level Commercial Tower (15 floors, 1350 zones, ~42,036 m² area).
+ *    - Validates default active model is Multi-Level Commercial Tower (15 floors, 735 zones, ~39,777 m² area).
+ *      These figures are the OFFICEIZED fixture (tools/officeize_fixture.py). They used to be 1350 zones /
+ *      42,036 m² because the dashboard bundled the raw segmenter output as its offline fallback and nothing
+ *      ever regenerated it, so this suite was asserting the very fixture that script exists to correct.
  *    - Validates dynamic switching to 1-Level Domestic House (1 floor, 5 zones, ~72.3 m² area).
  *    - Validates sustainability calculus (getFloorAreaM2, getZoneMix, IS_IT_DOMINATED).
  *    - Validates subscribeBuildingChange subscription callback.
@@ -20,7 +23,7 @@
  *      - Topology labels contain domestic zones ('KITCHEN', 'OFFICE', 'LIVING', 'PASSAGE', 'BATHROOM').
  *      - GlobalMetricsPanel telemetry reflects 5 domestic zones (5Z) and ~72 m² conditioned area.
  *    - Asserts boundary clamping on level stepper under Domestic House model.
- *    - Asserts clean restoration of Office model (15 floor buttons, 90+ zones, >35,000 m² area).
+ *    - Asserts clean restoration of Office model (15 floor buttons, 49 zones per floor, >35,000 m² area).
  *    - Stress testing: 6 rapid toggle switches in succession with zero uncaught errors or DOM crashes.
  *    - Mobile Viewport (390x844) responsive verification.
  */
@@ -231,7 +234,7 @@ async function runVerification() {
   // ----------------------------------------------------------------------------
   harness.suite('Pure Model Invariants & Sustainability Calculus');
 
-  await harness.test('Default model is Multi-Level Commercial Tower (15 floors, ~42,036 m² conditioned area)', () => {
+  await harness.test('Default model is Multi-Level Commercial Tower (15 floors, ~39,777 m² conditioned area)', () => {
     setBuildingModelType('multi-level');
     const bld = getBuilding();
     harness.assertEqual(getBuildingModelType(), 'multi-level', 'Active model type is multi-level');
@@ -239,8 +242,12 @@ async function runVerification() {
     harness.assertEqual(bld.floors.length, 15, 'Office tower has 15 floors');
     
     const area = getFloorAreaM2(bld);
-    harness.assertCloseTo(area, 42036.6, 100, 'Calculated floor area matches commercial tower');
-    harness.assert(getIsItDominated(bld) === true, 'Office tower with server rooms is IT dominated');
+    harness.assertCloseTo(area, 39776.6, 100, 'Calculated floor area matches commercial tower');
+    // NOT IT-dominated, and that is the whole point of the officeized fixture: the raw
+    // segmenter labelled 555 small closets 'server-room' and stamped 85 kW on each, which
+    // made 86% of the building's connected load IT and produced the 15 MW this project
+    // spent a release correcting. A real 15-storey office has 15 comms rooms, not 555.
+    harness.assert(getIsItDominated(bld) === false, 'Officeized tower is not IT dominated (15 comms rooms, not 555)');
   });
 
   await harness.test('setBuildingModelType("domestic-home") cleanly switches to Domestic House (1 floor, 5 zones, ~72.3 m² area)', () => {
@@ -289,8 +296,8 @@ async function runVerification() {
     harness.assertEqual(IS_IT_DOMINATED, false, 'Exported IS_IT_DOMINATED is false for domestic home');
 
     setBuildingModelType('multi-level');
-    harness.assertCloseTo(FLOOR_AREA_M2, 42036.6, 100, 'Exported FLOOR_AREA_M2 restored to ~42,036 m²');
-    harness.assertEqual(IS_IT_DOMINATED, true, 'Exported IS_IT_DOMINATED restored to true for office tower');
+    harness.assertCloseTo(FLOOR_AREA_M2, 39776.6, 100, 'Exported FLOOR_AREA_M2 restored to ~39,777 m²');
+    harness.assertEqual(IS_IT_DOMINATED, false, 'Exported IS_IT_DOMINATED is false for the officeized tower');
   });
 
   // ----------------------------------------------------------------------------
@@ -431,7 +438,7 @@ async function runVerification() {
       await page.close();
     });
 
-    await harness.test('Clicking toggle-multilevel restores Multi-Level Office model (15 floor buttons, 90+ zones)', async () => {
+    await harness.test('Clicking toggle-multilevel restores Multi-Level Office model (15 floor buttons, 49 zones per floor)', async () => {
       const page = await browser.newPage();
       await setupRequestInterception(page);
       await page.setViewport({ width: 1440, height: 900 });
@@ -462,9 +469,10 @@ async function runVerification() {
       const bodyText = await page.evaluate(() => document.body.innerText);
       harness.assert(bodyText.includes('MAP LEVEL 4 TOPOLOGY'), 'Topology header indicates MAP LEVEL 4 TOPOLOGY');
 
-      // Multi-level floor 4 has 90 zones
+      // 49 zones per floor: the officeized tower is 735 zones over 15 floors. It read 90
+      // when the dashboard still bundled the raw segmenter output (1350 zones / 15).
       const zonesMetric = await page.$eval('[data-testid="level-metric-zones"]', el => el.innerText.trim());
-      harness.assert(zonesMetric.startsWith('90Z'), `Level 4 telemetry displays 90Z (got ${zonesMetric})`);
+      harness.assert(zonesMetric.startsWith('49Z'), `Level 4 telemetry displays 49Z (got ${zonesMetric})`);
 
       await page.close();
     });
