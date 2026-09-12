@@ -99,12 +99,30 @@ export function buildFlowField3D(floor, simState, opts = {}) {
   let supply = 0;
   const diffusers3d = [];
   const kCeil = nk - 1, kLow = 0;
+  // Declared wall-mounted units, keyed by the plan position flowfield.js nudged them to, so
+  // the height recorded for each unit survives into the volume.
+  const unitHeights = new Map();
+  for (const u of (floor?.airflowDomain?.hvacUnits || [])) {
+    const ux = u.x + (u.dirX || 0) * hx, uz = u.y + (u.dirY || 0) * hx;
+    unitHeights.set(`${ux.toFixed(2)},${uz.toFixed(2)}`, u.mountHeightM);
+  }
   for (const d of f2.diffusers) {
     const di = Math.floor((d.x - minX) / hx), dj = Math.floor((d.z - minZ) / hx);
-    if (di < 0 || dj < 0 || di >= nx || dj >= nz || solid[idx(di, dj, kCeil)]) continue;
-    S[idx(di, dj, kCeil)] += d.strength;        // inject at the ceiling
+    if (di < 0 || dj < 0 || di >= nx || dj >= nz) continue;
+    // A ceiling diffuser injects at the ceiling. A wall-mounted split does not: it sits
+    // ~2.3 m up and blows horizontally, and injecting it at the slab soffit would drive the
+    // same top-down plume the ceiling case produces — the one thing these units do not do.
+    const mh = unitHeights.get(`${d.x.toFixed(2)},${d.z.toFixed(2)}`);
+    const k = (mh != null)
+      ? Math.max(0, Math.min(nk - 1, Math.round((mh / H) * (nk - 1))))
+      : kCeil;
+    if (solid[idx(di, dj, k)]) continue;
+    S[idx(di, dj, k)] += d.strength;
     supply += d.strength;
-    diffusers3d.push({ x: d.x, y: H - 0.15, z: d.z, strength: d.strength, type: d.type, alert: d.alert });
+    diffusers3d.push({
+      x: d.x, y: (mh != null) ? mh : H - 0.15, z: d.z,
+      strength: d.strength, type: d.type, alert: d.alert,
+    });
   }
 
   // returns: low cells across the corridor/core (where f2 placed return glyphs)

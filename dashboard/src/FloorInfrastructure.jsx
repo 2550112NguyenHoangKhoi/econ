@@ -52,6 +52,37 @@ export default function FloorInfrastructure({ floor, simState, viewMode = 'hybri
     const ahu = field.panel;
 
     const cyan = [], red = [], amber = [], orange = [];
+
+    // What plant does this floor actually have?
+    //
+    // Everything below draws a ducted VAV system: an air-handling unit, a trunk along the
+    // core, branch feeders and ceiling diffuser boxes. That is the tower, and it is not
+    // every building. A room conditioned by wall-mounted splits has no AHU, no ducts and no
+    // diffusers at all — drawing them put a 2.4 m air handler and a trunk run through a
+    // 9 x 10 m office, one leg of it outside the room entirely, and depicted plant the
+    // building does not contain. A floor that declares its units is telling us which it is.
+    const wallUnits = Array.isArray(floor?.airflowDomain?.hvacUnits)
+      ? floor.airflowDomain.hvacUnits
+      : null;
+
+    if (wallUnits && wallUnits.length) {
+      // The units themselves, at the height and facing they were recorded with. A split is
+      // ~0.9 m wide, ~0.3 m deep and ~0.25 m tall — drawn to that, not to duct scale.
+      for (const u of wallUnits) {
+        const alongX = Math.abs(u.dirX || 0) > Math.abs(u.dirY || 0);
+        const w = alongX ? 0.32 : 0.9;
+        const d = alongX ? 0.9 : 0.32;
+        // Clear the wall, do not merely touch it. The unit is 0.32 m deep (half-depth
+        // 0.16) and the wall is wallThickness thick, so an inset of only half the box
+        // leaves it co-planar with the wall face and it z-fights through to the outside.
+        // Inset by half the box PLUS half the wall, with a small margin.
+        const wallT = floor?.geometry?.wallThickness ?? 0.2;
+        const inset = 0.16 + wallT / 2 + 0.04;
+        const ux = u.x + (u.dirX || 0) * inset;
+        const uz = u.y + (u.dirY || 0) * inset;
+        cyan.push(box(ux, (u.mountHeightM ?? 2.3), uz, w, 0.26, d));
+      }
+    } else {
     // HVAC: AHU + Orthogonal Supply Duct Trunk & Branch Feeders + Diffuser Terminal Boxes
     cyan.push(box(ahu.x, yCeil - 0.25, ahu.z, 2.4, 0.8, 1.8));
 
@@ -76,8 +107,13 @@ export default function FloorInfrastructure({ floor, simState, viewMode = 'hybri
       });
     }
 
-    // Returns low near the core
-    field.returns.forEach((r) => orange.push(box(r.x, 0.4, r.z, 1.0, 0.5, 1.0)));
+    }
+
+    // Returns low near the core. A split unit returns through its own face, not through a
+    // floor grille, so there is nothing to draw when the floor declares wall units.
+    if (!(wallUnits && wallUnits.length)) {
+      field.returns.forEach((r) => orange.push(box(r.x, 0.4, r.z, 1.0, 0.5, 1.0)));
+    }
 
     // Electrical: panel + orthogonal ceiling cable trays + junction boxes
     amber.push(box(ahu.x + 1.4, 1.4, ahu.z, 0.4, 1.6, 1.0));

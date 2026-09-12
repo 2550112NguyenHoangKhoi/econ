@@ -12,13 +12,15 @@
 
 import bundledTower from './building-data.json' with { type: 'json' };
 import bundledHome from './building-data-home.json' with { type: 'json' };
+import bundledRoomScan from './building-data-room-scan.json' with { type: 'json' };
 import { API_BASE } from './api.js';
 
 
 
-let activeModelType = 'multi-level'; // 'multi-level' or 'domestic-home'
+let activeModelType = 'multi-level'; // 'multi-level' | 'domestic-home' | 'room-scan'
 let towerData = bundledTower;
 let homeData = bundledHome;
+let roomScanData = bundledRoomScan;
 let live = false;
 const listeners = new Set();
 
@@ -36,10 +38,20 @@ export function isMultiLevelBuilding(b) {
   );
 }
 
+export const ROOM_SCAN_BUILDING_ID = 'bldg-econ-room-scan';
+
+export function isRoomScanBuilding(b) {
+  return Boolean(b && typeof b === 'object' && b.buildingId === ROOM_SCAN_BUILDING_ID);
+}
+
+// NOTE the room-scan exclusion. This matches any single-floor building by shape, which was
+// unambiguous while the house was the only one — a surveyed room is also single-floor, and
+// without this it would be accepted as the house and render under the wrong model.
 export function isHomeBuilding(b) {
   return Boolean(
     b &&
     typeof b === 'object' &&
+    !isRoomScanBuilding(b) &&
     (b.buildingId === 'bldg-econ-house-hcmc' || (Array.isArray(b.floors) && b.floors.length === 1))
   );
 }
@@ -47,6 +59,9 @@ export function isHomeBuilding(b) {
 export function getBuilding() {
   if (activeModelType === 'domestic-home') {
     return isHomeBuilding(homeData) ? homeData : bundledHome;
+  }
+  if (activeModelType === 'room-scan') {
+    return isRoomScanBuilding(roomScanData) ? roomScanData : bundledRoomScan;
   }
   return isMultiLevelBuilding(towerData) ? towerData : bundledTower;
 }
@@ -71,15 +86,34 @@ export function getActiveFloorAsset(building, activeFloor) {
 export function getAllKnownBuildings() {
   const t = isMultiLevelBuilding(towerData) ? towerData : bundledTower;
   const h = isHomeBuilding(homeData) ? homeData : bundledHome;
-  return [t, h];
+  const r = isRoomScanBuilding(roomScanData) ? roomScanData : bundledRoomScan;
+  return [t, h, r];
 }
 
 export function getBuildingModelType() {
   return activeModelType;
 }
 
+// Apply a model the ENGINE has already switched to, without telling it to switch again.
+//
+// The engine broadcasts buildingModelType to every client. Routing that broadcast back
+// through setBuildingModelType() POSTs /api/building/switch, which makes the engine
+// broadcast again — and with two dashboards open on different models neither yields, so
+// the engine reloads the building hundreds of times a minute. autoPilot and operationMode
+// already had adopt paths for exactly this reason (adoptAutoPilot, adoptMode); the
+// building model never did.
+export function adoptBuildingModelType(type) {
+  if (type !== 'multi-level' && type !== 'domestic-home' && type !== 'room-scan') return getBuilding();
+  if (activeModelType === type) return getBuilding();
+  activeModelType = type;
+  listeners.forEach((fn) => {
+    try { fn(getBuilding(), activeModelType); } catch (e) { console.error(e); }
+  });
+  return getBuilding();
+}
+
 export async function setBuildingModelType(type, options = {}) {
-  if (type !== 'multi-level' && type !== 'domestic-home') return getBuilding();
+  if (type !== 'multi-level' && type !== 'domestic-home' && type !== 'room-scan') return getBuilding();
 
   const force = Boolean(options?.force);
   const changed = activeModelType !== type;
@@ -92,6 +126,7 @@ export async function setBuildingModelType(type, options = {}) {
   const prevModelType = activeModelType;
   const prevTowerData = towerData;
   const prevHomeData = homeData;
+  const prevRoomScanData = roomScanData;
   const prevLive = live;
 
   activeModelType = type;
@@ -104,6 +139,10 @@ export async function setBuildingModelType(type, options = {}) {
   } else if (type === 'domestic-home') {
     if (!isHomeBuilding(homeData)) {
       homeData = bundledHome;
+    }
+  } else if (type === 'room-scan') {
+    if (!isRoomScanBuilding(roomScanData)) {
+      roomScanData = bundledRoomScan;
     }
   }
 
@@ -137,6 +176,9 @@ export async function setBuildingModelType(type, options = {}) {
         } else if (type === 'domestic-home' && isHomeBuilding(j)) {
           homeData = j;
           updated = true;
+        } else if (type === 'room-scan' && isRoomScanBuilding(j)) {
+          roomScanData = j;
+          updated = true;
         }
         if (updated && activeModelType === type) {
           listeners.forEach((fn) => {
@@ -152,6 +194,7 @@ export async function setBuildingModelType(type, options = {}) {
     activeModelType = prevModelType;
     towerData = prevTowerData;
     homeData = prevHomeData;
+    roomScanData = prevRoomScanData;
     live = prevLive;
     
     // Report the failure WITHOUT alert().
@@ -204,6 +247,10 @@ export async function bootBuilding() {
       if (isMultiLevelBuilding(j)) {
         towerData = j;
         activeModelType = 'multi-level';
+        live = true;
+      } else if (isRoomScanBuilding(j)) {
+        roomScanData = j;
+        activeModelType = 'room-scan';
         live = true;
       } else {
         homeData = j;

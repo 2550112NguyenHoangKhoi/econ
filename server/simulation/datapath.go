@@ -42,12 +42,18 @@ import (
 const (
 	BuildingDataFile     = "building-data.json"
 	BuildingDataHomeFile = "building-data-home.json"
-	OntologyFile         = "brick-ontology.json"
-	OntologyHomeFile     = "brick-ontology.home.json"
-	ProgrammeLibraryFile = "programme-library.json"
+	// A single room surveyed with a phone (Polycam DXF + STL) and converted by
+	// tools/roomscan_to_buildingdata.py. Its geometry and ceiling height are measured
+	// rather than segmented; its coefficients come from the same programme library as
+	// the other two.
+	BuildingDataRoomScanFile = "building-data-room-scan.json"
+	OntologyFile             = "brick-ontology.json"
+	OntologyHomeFile         = "brick-ontology.home.json"
+	ProgrammeLibraryFile     = "programme-library.json"
 )
 
-// ModelFileFor maps a model name/alias ("domestic-home", "home", "house", "multi-level", "office", "tower")
+// ModelFileFor maps a model name/alias ("domestic-home", "home", "house", "multi-level",
+// "office", "tower", "room-scan")
 // to its corresponding building JSON file name. Returns empty string if unrecognized.
 func ModelFileFor(model string) string {
 	switch strings.ToLower(strings.TrimSpace(model)) {
@@ -55,6 +61,10 @@ func ModelFileFor(model string) string {
 		return BuildingDataHomeFile
 	case "office", "multi-level", "multilevel", "multi_level", "tower", "commercial", "bldg-econ-digitized":
 		return BuildingDataFile
+	// Deliberately NOT aliased to "office": that name already resolves to the tower
+	// above, and silently re-pointing it would switch every existing caller's building.
+	case "room-scan", "roomscan", "room_scan", "scan", "scanned-room", "bldg-econ-room-scan":
+		return BuildingDataRoomScanFile
 	default:
 		return ""
 	}

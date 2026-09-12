@@ -1,0 +1,263 @@
+{
+  "buildingId": "bldg-econ-room-scan",
+  "floors": [
+    {
+      "level": 1,
+      "elevation": 0.0,
+      "height": 2.98,
+      "name": "Scanned room",
+      "geometry": {
+        "outline": [
+          [
+            0,
+            0
+          ],
+          [
+            9.27,
+            0
+          ],
+          [
+            9.27,
+            10.36
+          ],
+          [
+            0,
+            10.36
+          ]
+        ],
+        "exteriorPolygon": [
+          [
+            0.0,
+            0.0
+          ],
+          [
+            2.99,
+            0.0
+          ],
+          [
+            2.99,
+            0.26
+          ],
+          [
+            4.64,
+            0.26
+          ],
+          [
+            4.64,
+            0.0
+          ],
+          [
+            9.27,
+            0.0
+          ],
+          [
+            9.27,
+            10.36
+          ],
+          [
+            1.17,
+            10.36
+          ],
+          [
+            1.09,
+            10.36
+          ],
+          [
+            1.09,
+            10.31
+          ],
+          [
+            1.09,
+            10.2
+          ],
+          [
+            0.9,
+            10.2
+          ],
+          [
+            0.0,
+            10.2
+          ]
+        ],
+        "corePolygon": [],
+        "wallThickness": 0.2
+      },
+      "airflowDomain": {
+        "doors": [
+          {
+            "x": 1.91,
+            "y": 10.37,
+            "tx": 0,
+            "tz": 1
+          },
+          {
+            "x": 2.43,
+            "y": 9.49,
+            "tx": 0,
+            "tz": 1
+          },
+          {
+            "x": 9.28,
+            "y": 8.75,
+            "tx": 0,
+            "tz": 1
+          },
+          {
+            "x": 8.49,
+            "y": 8.06,
+            "tx": 0,
+            "tz": 1
+          },
+          {
+            "x": 1.57,
+            "y": 10.36,
+            "tx": 0,
+            "tz": 1
+          },
+          {
+            "x": 2.42,
+            "y": 10.36,
+            "tx": 0,
+            "tz": 1
+          },
+          {
+            "x": 9.27,
+            "y": 9.25,
+            "tx": 0,
+            "tz": 1
+          },
+          {
+            "x": 9.27,
+            "y": 8.01,
+            "tx": 0,
+            "tz": 1
+          }
+        ],
+        "windows": [
+          {
+            "x": 6.51,
+            "y": -0.01,
+            "tx": 0,
+            "tz": 1
+          },
+          {
+            "x": 5.97,
+            "y": 0.86,
+            "tx": 0,
+            "tz": 1
+          },
+          {
+            "x": 6.24,
+            "y": 0.0,
+            "tx": 0,
+            "tz": 1
+          }
+        ],
+        "hvacUnits": [
+          {
+            "wall": 5,
+            "x": 9.27,
+            "y": 5.18,
+            "mountHeightM": 2.3,
+            "dirX": -1.0,
+            "dirY": 0.0,
+            "type": "wall-split",
+            "placement": "installer-specified"
+          },
+          {
+            "wall": 12,
+            "x": 0.0,
+            "y": 5.1,
+            "mountHeightM": 2.3,
+            "dirX": 1.0,
+            "dirY": 0.0,
+            "type": "wall-split",
+            "placement": "installer-specified"
+          }
+        ]
+      },
+      "zones": [
+        {
+          "zoneId": "zone-office-lvl1",
+          "name": "Office",
+          "zoneType": "open-office",
+          "bim_asset_id": "833e93c2-34a0-5e54-b1b0-90a7189f9909",
+          "polygon": [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              2.99,
+              0.0
+            ],
+            [
+              2.99,
+              0.26
+            ],
+            [
+              4.64,
+              0.26
+            ],
+            [
+              4.64,
+              0.0
+            ],
+            [
+              9.27,
+              0.0
+            ],
+            [
+              9.27,
+              10.36
+            ],
+            [
+              1.17,
+              10.36
+            ],
+            [
+              1.09,
+              10.36
+            ],
+            [
+              1.09,
+              10.31
+            ],
+            [
+              1.09,
+              10.2
+            ],
+            [
+              0.9,
+              10.2
+            ],
+            [
+              0.0,
+              10.2
+            ]
+          ],
+          "centroid": {
+            "x": 4.65,
+            "y": 5.19
+          },
+          "thermalProperties": {
+            "setpoint": 24.0,
+            "deadband": 2.0,
+            "baseHeatLoad": 859,
+            "solarGainMultiplier": 0.3,
+            "rWall": 0.001985,
+            "cAir": 1714888,
+            "areaM2": 95.4,
+            "exteriorWallM2": 118.5,
+            "roofM2": 95.4,
+            "partitionM2": 0.0,
+            "timeConstantH": 0.95
+          },
+          "hvacMapping": {
+            "vavId": "vav-office-lvl1"
+          }
+        }
+      ]
+    }
+  ]
+}

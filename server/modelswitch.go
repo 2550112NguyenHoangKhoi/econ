@@ -32,13 +32,20 @@ func buildingDataHandler(engine *simulation.Engine) http.HandlerFunc {
 		if modelParam != "" {
 			targetFile = simulation.ModelFileFor(modelParam)
 			if targetFile == "" {
-				http.Error(w, fmt.Sprintf("unknown building model %q: must be 'multi-level' or 'domestic-home'", modelParam), http.StatusBadRequest)
+				http.Error(w, fmt.Sprintf("unknown building model %q: must be 'multi-level', 'domestic-home' or 'room-scan'", modelParam), http.StatusBadRequest)
 				return
 			}
 		} else {
-			if engine != nil && engine.BuildingId() == "bldg-econ-house-hcmc" {
-				targetFile = simulation.BuildingDataHomeFile
-			} else {
+			// Resolve from whatever the engine actually has loaded. This used to test for
+			// the house id alone and send everything else to the tower, which was correct
+			// only while there were exactly two buildings: a third one booted every
+			// dashboard onto the tower no matter what the operator had selected, because
+			// the no-parameter fetch is what bootBuilding() calls. ModelFileFor already
+			// accepts building ids, so ask it rather than re-listing them here.
+			if engine != nil {
+				targetFile = simulation.ModelFileFor(engine.BuildingId())
+			}
+			if targetFile == "" {
 				targetFile = simulation.BuildingDataFile
 			}
 		}

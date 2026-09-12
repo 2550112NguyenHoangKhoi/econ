@@ -3,7 +3,7 @@ import { Users, Wind, Box, Zap, AlertTriangle, Activity, Settings, Map, Camera, 
 import { ReactFlow, Background, Controls, Handle, Position, applyNodeChanges, applyEdgeChanges } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import BuildingModel, { SingleFloorLayout } from './BuildingModel';
-import { getBuilding, getBuildingModelType, setBuildingModelType, subscribeBuildingChange, getActiveFloorAsset } from './buildingStore';
+import { getBuilding, getBuildingModelType, setBuildingModelType, subscribeBuildingChange, getActiveFloorAsset, adoptBuildingModelType } from './buildingStore';
 
 import TelemetryPanel from './TelemetryPanel';
 
@@ -358,7 +358,9 @@ function App() {
     setBuildingModelTypeState(type);
     const newBld = getBuilding();
     setCurrentBuilding(newBld);
-    if (type === 'domestic-home') {
+    if (type === 'domestic-home' || type === 'room-scan') {
+      // Both are single-storey: defaultFloor() would pick whatever the tower's default is
+      // and the level stepper would then clamp against a building with one level.
       setActiveFloor(1);
       setSelectedZone(null);
     } else {
@@ -605,7 +607,17 @@ function App() {
       adoptOperationMode(updates.operationMode);
     }
     if (updates.buildingModelType && updates.buildingModelType !== getBuildingModelType()) {
-      handleToggleBuildingModel(updates.buildingModelType);
+      // ADOPTED, not re-POSTed — same reason as autoPilot and operationMode above. Routing
+      // this through handleToggleBuildingModel() sent /api/building/switch back to the
+      // engine, which broadcast the result, which every other dashboard answered with
+      // another switch. With two windows on different models neither yielded and the
+      // engine reloaded the building ~475 times a minute, 735 zones each time.
+      adoptBuildingModelType(updates.buildingModelType);
+      setBuildingModelTypeState(updates.buildingModelType);
+      const adopted = getBuilding();
+      setCurrentBuilding(adopted);
+      setActiveFloor(adopted.floors?.length > 1 ? defaultFloor(adopted) : 1);
+      setSelectedZone(null);
     }
   }, [adoptAutoPilot, adoptOperationMode]);
 
@@ -648,16 +660,32 @@ function App() {
   // value, the mirror wrote it straight back, and a single operator click rang the
   // engine's autopilot on/off five times before settling.
 
-  useEffect(() => {
-    if (operationMode) {
-      updateToggle('operationMode', operationMode);
-    }
-  }, [operationMode, updateToggle]);
+  // These mirror a LOCAL choice up to the engine. They must not fire on mount.
+  //
+  // On the first render these hold this tab's defaults — multi-level, simulation — not the
+  // operator's selection, which is still in flight from GET /api/state. Pushing them anyway
+  // meant every page load overwrote the engine's persisted state with a fresh tab's
+  // defaults: an engine deliberately left on the scanned room in real mode was put back on
+  // the tower in simulation by nothing more than someone reloading a dashboard. The same
+  // hazard the comment above describes for autoPilot, via a different route.
+  // operationMode is NOT mirrored here. POST /api/mode already calls stateStore.Set +
+  // Save (modeapi.go), so the engine owns this value the way it owns autoPilot, and
+  // mirroring it made the dashboard a second writer of it. A skip-first-render guard is
+  // not enough either: StrictMode invokes effects twice, so the guard is spent on the
+  // first pass and the second pass still writes this tab's default. An engine left in
+  // real mode was put back into simulation by a page reload.
 
+  // Mirrored, but never with a value the engine just gave us, and never with this tab's
+  // boot default. StrictMode double-invokes effects, so a plain first-render guard is
+  // spent before the real first push; comparing against the last engine-reported value is
+  // what actually holds.
+  const modelMirrorRef = useRef(null);
   useEffect(() => {
-    if (buildingModelType) {
-      updateToggle('buildingModelType', buildingModelType);
-    }
+    if (!buildingModelType) return;
+    if (modelMirrorRef.current === null) { modelMirrorRef.current = buildingModelType; return; }
+    if (modelMirrorRef.current === buildingModelType) return;
+    modelMirrorRef.current = buildingModelType;
+    updateToggle('buildingModelType', buildingModelType);
   }, [buildingModelType, updateToggle]);
 
   // The fault-injection picker follows the active building. Keyed on buildingModelType so
@@ -1566,6 +1594,26 @@ function App() {
           }}
         >
           <span>🏠</span> 1-Level Domestic Home
+        </button>
+        <button
+          data-testid="toggle-room-scan"
+          onClick={() => handleToggleBuildingModel('room-scan')}
+          style={{
+            padding: '5px 12px',
+            fontSize: '11px',
+            borderRadius: '6px',
+            border: 'none',
+            cursor: 'pointer',
+            background: buildingModelType === 'room-scan' ? 'var(--accent-blue)' : 'transparent',
+            color: buildingModelType === 'room-scan' ? '#ffffff' : 'var(--text-secondary)',
+            fontWeight: 'bold',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '5px',
+            transition: 'all 0.15s ease',
+          }}
+        >
+          <span>📐</span> Scanned Room
         </button>
       </div>
 
