@@ -93,3 +93,11 @@ build/
 # per copy, byte-identical between the .js and .cjs, and regenerable in seconds with
 # `npm run test:render`. Two copies were tracked; neither was ever imported by anything.
 dashboard/test_render.bundle.*
+
+# Compiled scratch binaries. The .cpp sources beside them are kept; the arm64 executables
+# are a `g++ file.cpp` away and are not portable off this Mac anyway.
+/test_denoiser
+edge/esp32/scratch
+
+# Per-editor config. Nothing in the build reads it, and it differs per machine.
+edge/esp32/.vscode/
