@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import * as flatbuffers from 'flatbuffers';
 import { SimState } from './telemetry';
 import { getBuilding, subscribeBuildingChange } from './buildingStore';
@@ -14,7 +14,7 @@ import { getBuilding, subscribeBuildingChange } from './buildingStore';
 // fixture rather than to an invented number.
 export const FALLBACK_SETPOINT_C = 24.0;
 export const FALLBACK_DEADBAND_K = 2.0;
-import { API_BASE, WS_URL, getAdminToken } from './api';
+import { API_BASE, WS_URL, getAdminToken, setAdminToken } from './api';
 
 // Data-driven fault targets: derive the selectable zones from all known buildings so any
 // model switch or regenerated building-data.json "just works" (no hard-coded zoneIds to re-wire).
@@ -323,6 +323,13 @@ export function useDigitalTwin(onUpdate) {
             if (!ctl.ok) console.warn('[econ] control token rejected — commands will be refused');
           } else if (ctl.type === 'error') {
             console.warn('[econ] engine refused a command:', ctl.error);
+            // A refusal for auth is the ONLY evidence a token-less operator gets that the
+            // engine is not in demo mode: no token was stored, so no auth message was ever
+            // sent, so no auth reply ever arrived to contradict the optimistic default.
+            // Without this the switch simply does nothing and the reason is console-only.
+            if (typeof ctl.error === 'string' && ctl.error.startsWith('unauthorized')) {
+              setWsAuthorized(false);
+            }
           }
         } catch {
           console.warn('[econ] unparseable text frame from engine:', event.data);
@@ -507,6 +514,18 @@ export function useDigitalTwin(onUpdate) {
   }, []);
   // [GEMINI IMPLEMENTATION END]
 
+  // Store an operator token and authorise the LIVE socket with it. Without this the only
+  // way to apply a token was to reload, because the auth message is sent once in onopen.
+  const authorize = useCallback((token) => {
+    const t = (token || '').trim();
+    setAdminToken(t);
+    const ws = wsRef.current;
+    if (t && ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ action: 'auth', token: t }));
+    }
+    return !!t;
+  }, []);
+
   return {
     simData,
     initialData,
@@ -522,6 +541,7 @@ export function useDigitalTwin(onUpdate) {
     sendManualOverride,
     aiForecast,
     wsAuthorized,
+    authorize,
     // Liveness of the telemetry stream. streamAgeMs is how old the newest frame on screen
     // is; streamOpen says whether the socket is currently up. A panel showing streamed
     // numbers uses these to say so rather than presenting the last frame as the present.

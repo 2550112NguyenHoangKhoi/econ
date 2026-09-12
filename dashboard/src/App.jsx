@@ -27,6 +27,7 @@ import { SimState } from './telemetry';
 import { useDigitalTwin, buildFaultZones, DEFAULT_FAULT_TARGET, FALLBACK_SETPOINT_C, FALLBACK_DEADBAND_K } from './useDigitalTwin';
 import AirflowWindow from './AirflowWindow';
 import StreamStatus from './StreamStatus';
+import OperatorTokenBar from './OperatorTokenBar';
 import CanvasErrorBoundary from './CanvasErrorBoundary';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Canvas } from '@react-three/fiber';
@@ -570,6 +571,8 @@ function App() {
     loadScenario,
     sendManualOverride,
     aiForecast,
+    wsAuthorized,
+    authorize,
     streamOpen,
     streamAgeMs,
   } = useDigitalTwin(onSimUpdate);
@@ -727,6 +730,7 @@ function App() {
           page reads as normal operation straight through an engine outage. */}
       <div style={{ position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)', zIndex: 4000 }}>
         <StreamStatus streamOpen={streamOpen} streamAgeMs={streamAgeMs} />
+        <OperatorTokenBar authorized={wsAuthorized} onAuthorize={authorize} />
       </div>
 
       {/* Live time-of-day sky, shared with the mobile view: golden hour, morning, afternoon,
