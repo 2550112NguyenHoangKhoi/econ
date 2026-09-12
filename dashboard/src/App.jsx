@@ -1,11 +1,10 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
-import { AlertTriangle, Activity, Map } from 'lucide-react';
-import { ReactFlow, Background, applyNodeChanges, applyEdgeChanges } from '@xyflow/react';
+import { AlertTriangle } from 'lucide-react';
+import { applyNodeChanges, applyEdgeChanges } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import BuildingModel, { SingleFloorLayout } from './BuildingModel';
 import { getBuilding, getBuildingModelType, setBuildingModelType, subscribeBuildingChange, getActiveFloorAsset, adoptBuildingModelType } from './buildingStore';
 
-import TelemetryPanel from './TelemetryPanel';
 
 import GlobalMetricsPanel from './GlobalMetricsPanel';
 import TelemetryLogs from './TelemetryLogs';
@@ -32,6 +31,8 @@ import { useStatePersistence } from './useStatePersistence';
 import nodeTypes from './topology/FlowNodes';
 import { buildTopologyFromSim, defaultFloor } from './topology/buildTopology';
 import ZoneDrilldownHUD from './ZoneDrilldownHUD';
+import TopologyPanel from './panels/TopologyPanel';
+import LeftDock from './panels/LeftDock';
 import ViewModeControls from './hud/ViewModeControls';
 import BuildingModelSelector from './hud/BuildingModelSelector';
 import LevelSelector from './hud/LevelSelector';
@@ -542,328 +543,46 @@ function App() {
         />
       )}
 
-      {/* LAYER 1: React Flow Topology in Bottom Right Corner */}
-      <div 
-        className="minimap-wrapper" 
-        style={{ 
-          // Anchored to the INSIDE edge of the metrics dock, not to the viewport edge.
-          // At right: 24 these floating windows sat directly on top of the ENTERPRISE
-          // OVERVIEW — the panel carrying total load, savings, EUI, carbon and the fault
-          // count — and hid most of it behind a secondary view the moment either was
-          // opened. safeArea already treats the dock and these windows as one right-hand
-          // exclusion for framing the building; this makes the layout agree with it.
-          position: 'absolute', width: panelSize.w, height: panelSize.h, bottom: '90px',
-          right: rightPanelWidth + 24 + 12, padding: 0, overflow: 'visible', zIndex: 10
-        }}
-      >
-        <div 
-          className="resize-handle" 
-          onPointerDown={(e) => {
-            e.preventDefault();
-            const startW = panelSize.w;
-            const startH = panelSize.h;
-            const startX = e.clientX;
-            const startY = e.clientY;
-            const onPointerMove = (moveEvent) => {
-              const dx = startX - moveEvent.clientX;
-              const dy = startY - moveEvent.clientY;
-              setPanelSize({
-                w: Math.max(360, Math.min(startW + dx, window.innerWidth * 0.9)),
-                h: Math.max(260, Math.min(startH + dy, window.innerHeight * 0.9))
-              });
-            };
-            const onPointerUp = () => {
-              document.removeEventListener('pointermove', onPointerMove);
-              document.removeEventListener('pointerup', onPointerUp);
-            };
-            document.addEventListener('pointermove', onPointerMove);
-            document.addEventListener('pointerup', onPointerUp);
-          }}
-          style={{
-            position: 'absolute', top: -10, left: -10, width: 20, height: 20, background: 'var(--accent-blue)', 
-            cursor: 'nwse-resize', zIndex: 100, borderRadius: '50%', border: '2px solid #000'
-          }} 
-        />
-        <div className="topology-panel" style={{ width: '100%', height: '100%', position: 'relative', overflow: 'hidden', borderRadius: '12px', border: '1px solid var(--border-glass)', background: 'var(--bg-panel)' }}>
-          <div className="panel-header" style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10, padding: '12px 16px', background: 'var(--bg-panel)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: '10px', color: 'var(--text-primary)', fontWeight: 'bold' }}>MAP LEVEL {activeFloor} TOPOLOGY</span>
-            
-            <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
-              <button 
-                 onClick={() => setShowWindSim(!showWindSim)}
-                 style={{ 
-                   background: 'transparent', 
-                   border: '1px solid var(--accent-blue)', 
-                   color: 'var(--accent-blue)', 
-                   fontSize: '9px', 
-                   padding: '4px 8px', 
-                   cursor: 'pointer',
-                   fontWeight: 'bold',
-                   pointerEvents: 'auto'
-                 }}
-              >
-                 {showWindSim ? '⏸ HIDE AIRFLOW' : '🌬 SHOW AIRFLOW'}
-              </button>
-              <span style={{ fontSize: '10px', color: 'var(--accent-blue)' }}>{Math.max(0, nodes.length - 1)} TERMINAL UNITS · 1 AHU</span>
-            </div>
-          </div>
+      <TopologyPanel
+        simData={simData}
+        nodes={nodes}
+        edges={edges}
+        onNodesChange={onNodesChange}
+        onEdgesChange={onEdgesChange}
+        setSelectedZone={setSelectedZone}
+        activeFloor={activeFloor}
+        currentBuilding={currentBuilding}
+        safeArea={safeArea}
+        panelSize={panelSize}
+        setPanelSize={setPanelSize}
+        airflowSize={airflowSize}
+        setAirflowSize={setAirflowSize}
+        showWindSim={showWindSim}
+        setShowWindSim={setShowWindSim}
+        rightPanelWidth={rightPanelWidth}
+      />
 
-          <UIErrorBoundary name="Topology Map">
-          <ReactFlow
-            nodes={nodes}
-            edges={edges}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            onNodeClick={(e, node) => {
-              if (node.type === 'zone' || node.type === 'unit') setSelectedZone(node.id);
-            }}
-            nodeTypes={nodeTypes}
-            fitView
-            fitViewOptions={{ padding: 0.15 }}
-            proOptions={{ hideAttribution: true }}
-            minZoom={0.1}
-            maxZoom={1.5}
-            translateExtent={[[-350, -400], [1900, 1400]]}
-            nodesDraggable={false}
-          >
-            <Background gap={40} size={1} color="rgba(255,255,255,0.05)" />
-            
-            {/* SVG Defs for Airflow Vector Gradients */}
-            <svg style={{ position: 'absolute', width: 0, height: 0 }}>
-              <defs>
-                <linearGradient id="flow-nominal" x1="0%" y1="0%" x2="100%" y2="100%">
-                  <stop offset="0%" stopColor="#3b82f6" />
-                  <stop offset="100%" stopColor="#10b981" />
-                </linearGradient>
-                <linearGradient id="flow-fault" x1="0%" y1="0%" x2="100%" y2="100%">
-                  <stop offset="0%" stopColor="#3b82f6" />
-                  <stop offset="100%" stopColor="#ef4444" />
-                </linearGradient>
-                <linearGradient id="flow-rem" x1="0%" y1="0%" x2="100%" y2="100%">
-                  <stop offset="0%" stopColor="#3b82f6" />
-                  <stop offset="100%" stopColor="#eab308" />
-                </linearGradient>
-              </defs>
-            </svg>
-          </ReactFlow>
-          </UIErrorBoundary>
-        </div>
-      </div>
-
-      {/* Standalone, resizable airflow window (its own WebGL canvas), toggled by the
-          "SHOW/HIDE AIRFLOW" control in the topology header. */}
-      {showWindSim && (
-        <AirflowWindow
-          floor={currentBuilding?.floors?.find(f => f.level === activeFloor)}
-          activeFloor={activeFloor}
-          simState={simData}
-          size={airflowSize}
-          setSize={setAirflowSize}
-          onClose={() => setShowWindSim(false)}
-          right={rightPanelWidth + 24 + 12}
-          bottom={90 + panelSize.h + 12}
-        />
-      )}
-
-      {/* LAYER 4: AI & TELEMETRY (Left Dock) */}
-      <div style={{ position: 'absolute', top: '1.5rem', left: '1.5rem', zIndex: 50, display: 'flex', gap: '8px', maxHeight: 'calc(100vh - 3rem)' }}>
-        <button 
-           onClick={() => setIsLeftPanelOpen(!isLeftPanelOpen)}
-           style={{ 
-             background: 'var(--bg-panel)', border: '1px solid var(--border-glass)', color: 'var(--text-primary)', 
-             borderRadius: '12px', padding: '12px', cursor: 'pointer', height: 'fit-content', display: 'flex', alignItems: 'center'
-           }}
-        >
-          <Activity size={20} color="var(--accent-blue)" />
-        </button>
-
-        {isLeftPanelOpen && (
-          <div style={{ width: leftPanelSize.w, height: 'calc(100vh - 3rem)', background: 'var(--bg-panel)', border: '1px solid var(--border-glass)', borderRadius: '12px', display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
-            <div 
-              className="resize-handle" 
-              onPointerDown={(e) => {
-                e.preventDefault();
-                const startW = leftPanelSize.w;
-                const startX = e.clientX;
-                const onPointerMove = (moveEvent) => {
-                  const dx = moveEvent.clientX - startX;
-                  setLeftPanelSize({
-                    w: Math.max(300, Math.min(startW + dx, window.innerWidth * 0.5)),
-                  });
-                };
-                const onPointerUp = () => {
-                  document.removeEventListener('pointermove', onPointerMove);
-                  document.removeEventListener('pointerup', onPointerUp);
-                };
-                document.addEventListener('pointermove', onPointerMove);
-                document.addEventListener('pointerup', onPointerUp);
-              }}
-              style={{
-                position: 'absolute', top: '50%', right: 0, transform: 'translateY(-50%)', width: 10, height: 40, cursor: 'ew-resize', zIndex: 100
-              }} 
-            />
-            <div style={{ display: 'flex', borderBottom: '1px solid var(--border-glass)', background: 'rgba(0,0,0,0.2)', overflowX: 'auto', scrollbarWidth: 'none' }}>
-              <button 
-                data-testid="tab-ai-insights"
-                onClick={() => setActiveLeftTab('ai')}
-                style={{
-                  flex: '1 1 auto',
-                  padding: '10px 6px',
-                  background: activeLeftTab === 'ai' ? 'rgba(0, 163, 224, 0.12)' : 'transparent',
-                  color: activeLeftTab === 'ai' ? 'var(--accent-blue)' : 'var(--text-secondary)',
-                  border: 'none',
-                  borderBottom: activeLeftTab === 'ai' ? '2px solid var(--accent-blue)' : '2px solid transparent',
-                  cursor: 'pointer',
-                  fontWeight: 'bold',
-                  fontSize: '11px',
-                  whiteSpace: 'nowrap',
-                  letterSpacing: '0.02em',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  minWidth: 'fit-content',
-                  transition: 'all 0.15s ease'
-                }}
-              >
-                AI INSIGHTS
-              </button>
-              <button 
-                data-testid="tab-profiler"
-                onClick={() => setActiveLeftTab('telemetry')}
-                style={{
-                  flex: '1 1 auto',
-                  padding: '10px 6px',
-                  background: activeLeftTab === 'telemetry' ? 'rgba(0, 163, 224, 0.12)' : 'transparent',
-                  color: activeLeftTab === 'telemetry' ? 'var(--accent-blue)' : 'var(--text-secondary)',
-                  border: 'none',
-                  borderBottom: activeLeftTab === 'telemetry' ? '2px solid var(--accent-blue)' : '2px solid transparent',
-                  cursor: 'pointer',
-                  fontWeight: 'bold',
-                  fontSize: '11px',
-                  whiteSpace: 'nowrap',
-                  letterSpacing: '0.02em',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  minWidth: 'fit-content',
-                  transition: 'all 0.15s ease'
-                }}
-              >
-                PROFILER
-              </button>
-              <button
-                data-testid="tab-logs"
-                onClick={() => setActiveLeftTab('logs')}
-                style={{
-                  flex: '1 1 auto',
-                  padding: '10px 6px',
-                  background: activeLeftTab === 'logs' ? 'rgba(0, 163, 224, 0.12)' : 'transparent',
-                  color: activeLeftTab === 'logs' ? 'var(--accent-blue)' : 'var(--text-secondary)',
-                  border: 'none',
-                  borderBottom: activeLeftTab === 'logs' ? '2px solid var(--accent-blue)' : '2px solid transparent',
-                  cursor: 'pointer',
-                  fontWeight: 'bold',
-                  fontSize: '11px',
-                  whiteSpace: 'nowrap',
-                  letterSpacing: '0.02em',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  minWidth: 'fit-content',
-                  transition: 'all 0.15s ease'
-                }}
-              >
-                LOGS
-              </button>
-              <button
-                data-testid="tab-plugs"
-                onClick={() => setActiveLeftTab('plugs')}
-                style={{
-                  flex: '1 1 auto',
-                  padding: '10px 6px',
-                  background: activeLeftTab === 'plugs' ? 'rgba(0, 163, 224, 0.12)' : 'transparent',
-                  color: activeLeftTab === 'plugs' ? 'var(--accent-blue)' : 'var(--text-secondary)',
-                  border: 'none',
-                  borderBottom: activeLeftTab === 'plugs' ? '2px solid var(--accent-blue)' : '2px solid transparent',
-                  cursor: 'pointer',
-                  fontWeight: 'bold',
-                  fontSize: '11px',
-                  whiteSpace: 'nowrap',
-                  letterSpacing: '0.02em',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  minWidth: 'fit-content',
-                  transition: 'all 0.15s ease'
-                }}
-              >
-                PLUGS
-              </button>
-              <button
-                data-testid="tab-sustainability"
-                onClick={() => setActiveLeftTab('sustainability')}
-                style={{
-                  flex: '1 1 auto',
-                  padding: '10px 6px',
-                  background: activeLeftTab === 'sustainability' ? 'rgba(16, 185, 129, 0.12)' : 'transparent',
-                  color: activeLeftTab === 'sustainability' ? '#10b981' : 'var(--text-secondary)',
-                  border: 'none',
-                  borderBottom: activeLeftTab === 'sustainability' ? '2px solid #10b981' : '2px solid transparent',
-                  cursor: 'pointer',
-                  fontWeight: 'bold',
-                  fontSize: '11px',
-                  whiteSpace: 'nowrap',
-                  letterSpacing: '0.02em',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  minWidth: 'fit-content',
-                  transition: 'all 0.15s ease'
-                }}
-              >
-                SUSTAINABILITY
-              </button>
-            </div>
-            
-            <div style={{ flex: 1, overflowY: 'auto', padding: '16px' }}>
-              {activeLeftTab === 'sustainability' ? (
-                <SustainabilityRecommendationsPanel
-                  key={buildingModelType}
-                  simData={simData}
-                  sendManualOverride={sendManualOverride}
-                />
-              ) : activeLeftTab === 'plugs' ? (
-                <PlugLoadPanel simData={simData} />
-              ) : activeLeftTab === 'logs' ? (
-                <TelemetryLogs simData={simData} />
-              ) : activeLeftTab === 'telemetry' ? (
-                <TelemetryPanel
-                  simData={simData}
-                  loadHistory={loadHistory}
-                  activeScenario={activeScenario}
-                  faultTarget={faultTarget}
-                  onOpenMaintenance={() => setMaintenanceTarget(failingZone ? failingZone.bim_asset_id : null)}
-                  autoPilot={autoPilot}
-                  setAutoPilot={setAutoPilot}
-                  setSelectedZone={setSelectedZone}
-                />
-              ) : (
-                <AiInsightsPanel
-                  simData={simData}
-                  activeScenario={activeScenario}
-                  faultTarget={faultTarget}
-                  aiForecast={aiForecast}
-                  setAutoPilot={setAutoPilot}
-                  hardwareNodes={hardwareNodes}
-                  setSelectedZone={setSelectedZone}
-                  sendManualOverride={sendManualOverride}
-                  onOpenPlugs={() => setActiveLeftTab('plugs')}
-                />
-              )}
-            </div>
-          </div>
-        )}
-      </div>
+      <LeftDock
+        simData={simData}
+        activeLeftTab={activeLeftTab}
+        setActiveLeftTab={setActiveLeftTab}
+        isLeftPanelOpen={isLeftPanelOpen}
+        setIsLeftPanelOpen={setIsLeftPanelOpen}
+        leftPanelSize={leftPanelSize}
+        setLeftPanelSize={setLeftPanelSize}
+        activeScenario={activeScenario}
+        faultTarget={faultTarget}
+        failingZone={failingZone}
+        aiForecast={aiForecast}
+        autoPilot={autoPilot}
+        setAutoPilot={setAutoPilot}
+        hardwareNodes={hardwareNodes}
+        sendManualOverride={sendManualOverride}
+        setSelectedZone={setSelectedZone}
+        setMaintenanceTarget={setMaintenanceTarget}
+        loadHistory={loadHistory}
+        buildingModelType={buildingModelType}
+      />
 
       {/* LAYER 2: Global Metrics (Right Dock) */}
       <GlobalMetricsPanel
