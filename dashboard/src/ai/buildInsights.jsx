@@ -3,6 +3,7 @@ import { Brain, Zap, AlertTriangle, TrendingDown, ThermometerSnowflake, Activity
 import { money, energyCostPerDay, peakShiftSavingPerMonth, rateStr, touPeriod, minutesToPeak, TARIFF } from '../tariff';
 import { untilLabel } from '../useOpsStatus';
 import { powerMw, powerKw } from '../units';
+import { fx, hasReading } from '../measured';
 
 // The rule set: everything the twin currently knows, turned into the ranked cards the AI
 // panel shows. Lifted out of AiInsightsPanel's useMemo unchanged -- 310 lines of domain
@@ -247,7 +248,16 @@ export function buildInsights({
 
   // 3b. The envelope's weather feed has gone stale: the physics is integrating against
   // the 30 °C climatological fallback, so loads and forecasts degrade together.
-  if (weather && !weather.live) {
+  // hasReading(), not a truthiness check on the object.
+  //
+  // `weather` is whatever /api/ops/status returned. An engine that answers 200 with a body
+  // this code does not expect -- a version mismatch, a proxy's JSON error envelope, a
+  // partially-deployed build -- yields an object with no `live` and no `outdoorC`. The old
+  // guard `weather && !weather.live` passed for exactly that object, and `outdoorC.toFixed()`
+  // then threw inside a useMemo and took the WHOLE dashboard down through the root error
+  // boundary. A stale weather feed is a warning card; a malformed response must not be a
+  // blank page.
+  if (weather && weather.live === false && hasReading(weather.outdoorC)) {
     generated.push({
       id: 'weather',
       type: 'warning',

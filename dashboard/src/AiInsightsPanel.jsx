@@ -203,7 +203,10 @@ export default function AiInsightsPanel({ simData, activeScenario, faultTarget, 
         ['Physical nodes', `${hwList.length} (${hwOnline} online)`],
         ['Forecaster', aiForecast ? `LSTM · ${aiForecast.weather_source === 'fallback' ? 'fallback weather' : 'live weather'}` : 'offline'],
         // Live control-loop state, straight from the engine's own endpoints.
-        ['Outdoor (envelope)', weather ? `${weather.outdoorC.toFixed(1)} °C · ${weather.live ? 'live Open-Meteo' : 'fallback'}` : '—'],
+        // fx() rather than .toFixed(): /api/ops/status can answer 200 with a body that has
+        // no outdoorC (version mismatch, proxy error envelope), and a diagnostics row is the
+        // last place that should be able to take the panel down.
+        ['Outdoor (envelope)', hasReading(weather?.outdoorC) ? `${fx(weather.outdoorC)} °C · ${weather.live ? 'live Open-Meteo' : 'fallback'}` : '—'],
         ['TOU band now', rateStr(touPeriod()) + '/kWh'],
         ['Pre-cool window', precool?.active ? `open until ${untilLabel(precool.until)}` : 'closed'],
         ['Plug sweep', plugStatus ? (plugStatus.config?.enabled ? (plugStatus.armed ? `armed · ${plugStatus.shedZones} zones swept` : 'disarmed (work hours)') : 'disabled') : '—'],

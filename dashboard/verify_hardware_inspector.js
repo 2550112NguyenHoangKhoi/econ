@@ -381,15 +381,25 @@ async function run() {
       harness.assert(options.includes('COOLIX'), 'Expected COOLIX protocol');
       harness.assert(options.includes('ELECTRA_AC'), 'Expected ELECTRA_AC protocol');
       harness.assert(options.includes('DAIKIN'), 'Expected DAIKIN protocol');
-      harness.assert(options.includes('PANASONIC'), 'Expected PANASONIC protocol');
-      harness.assert(options.includes('MITSUBISHI'), 'Expected MITSUBISHI protocol');
-      harness.assert(options.includes('LG'), 'Expected LG protocol');
-      harness.assert(options.includes('SAMSUNG'), 'Expected SAMSUNG protocol');
-      harness.assert(options.includes('TOSHIBA'), 'Expected TOSHIBA protocol');
-      harness.assert(options.includes('GREE'), 'Expected GREE protocol');
-      harness.assert(options.includes('NEC'), 'Expected NEC protocol');
-      harness.assert(options.includes('SONY'), 'Expected SONY protocol');
-      harness.assert(options.includes('RC5'), 'Expected RC5 protocol');
+      // PANASONIC_AC, not PANASONIC. IRac::isProtocolSupported() does not accept the bare
+      // vendor names -- the AC variants are the ones with a frame. Offering PANASONIC set a
+      // protocol the node then refused while the HVAC buttons silently kept the previous
+      // one, which is the defect this list was regenerated to fix. Asserting the bare name
+      // here was asserting the bug.
+      harness.assert(options.includes('PANASONIC_AC'), 'Expected PANASONIC_AC protocol');
+      // ...and the guard that keeps it fixed: none of the names the node cannot resolve.
+      for (const bogus of ['PANASONIC', 'MITSUBISHI', 'SAMSUNG', 'TOSHIBA', 'NEC', 'SONY', 'RC5', 'RC6']) {
+        harness.assert(!options.includes(bogus), `Protocol list must not offer "${bogus}" — IRac cannot drive an AC with it`);
+      }
+      // The AC variants of the vendors above. NEC/SONY/RC5/RC6 are TV-remote protocols with
+      // no AC frame at all and are asserted ABSENT in the loop above, not present here.
+      for (const proto of ['MITSUBISHI_AC', 'LG', 'SAMSUNG_AC', 'TOSHIBA_AC', 'GREE', 'HITACHI_AC']) {
+        harness.assert(options.includes(proto), `Expected ${proto} protocol`);
+      }
+      // HITACHI_AC specifically: it is what the pilot node is built with
+      // (-DIR_AC_PROTOCOL=HITACHI_AC), confirmed by sweeping the six send-supported Hitachi
+      // variants against the real unit. If it ever leaves this list the node's own protocol
+      // becomes unselectable from the UI.
     });
 
     const clearAndType = async (el, text) => {
@@ -405,7 +415,17 @@ async function run() {
       dispatchedCommands.length = 0;
 
       // Set protocol to DAIKIN
-      await page.select('[data-testid="ir-protocol-select"]', 'DAIKIN');
+      // COOLIX, not DAIKIN.
+      //
+      // Raw transmit sends IR_SEND:<proto>:<hex>:<bits>, which can only express a protocol
+      // whose frame IS a value. DAIKIN carries a byte array, so the node would refuse the
+      // frame — and the UI now DISABLES the button for those protocols rather than sending
+      // something that cannot work. Driving this test with DAIKIN was driving it with a
+      // disabled button; the click did nothing and the assertion read the protocol command
+      // as if it were the frame.
+      //
+      // The DAIKIN case is worth keeping as its own guard, so it is asserted below.
+      await page.select('[data-testid="ir-protocol-select"]', 'COOLIX');
 
       // Set hex code
       const hexInput = await page.$('[data-testid="ir-hex-input"]');
@@ -423,8 +443,23 @@ async function run() {
       const bannerText = await page.$eval('[data-testid="command-feedback-banner"]', el => el.textContent);
       harness.assert(bannerText.includes('SUCCESS'), 'Expected feedback banner to indicate success');
 
-      harness.assertEqual(dispatchedCommands.length, 1, 'Expected 1 dispatched command');
-      harness.assertEqual(dispatchedCommands[0].command, 'IR_SEND:DAIKIN:0x11223344:32', 'Expected IR_SEND command payload');
+      // Two commands, not one. Choosing a protocol in the dropdown now dispatches
+      // PROTOCOL=<name> immediately, so the node is told which protocol to resolve BEFORE
+      // the frame arrives; the IR_SEND follows on the button press. The old assertion
+      // predates that and was reading the protocol command as if it were the frame.
+      const irSends = dispatchedCommands.filter(c => c.command.startsWith('IR_SEND:'));
+      const protoSets = dispatchedCommands.filter(c => c.command.startsWith('PROTOCOL='));
+      harness.assertEqual(protoSets.length, 1, 'Expected the protocol to be set once, on selection');
+      harness.assertEqual(protoSets[0].command, 'PROTOCOL=COOLIX', 'Expected PROTOCOL=COOLIX on selection');
+      harness.assertEqual(irSends.length, 1, 'Expected 1 dispatched IR_SEND');
+      harness.assertEqual(irSends[0].command, 'IR_SEND:COOLIX:0x11223344:32', 'Expected IR_SEND command payload');
+
+      // ...and the guard: a byte-array protocol must disable raw transmit rather than send a
+      // frame the node will refuse. This is one of the IR control defects fixed in d5117da1.
+      await page.select('[data-testid="ir-protocol-select"]', 'DAIKIN');
+      await new Promise(r => setTimeout(r, 150));
+      const daikinDisabled = await page.$eval('[data-testid="ir-send-btn"]', el => el.disabled);
+      harness.assert(daikinDisabled, 'Raw transmit must be disabled for DAIKIN — its frame is a byte array, not a value');
       harness.assert(
         dispatchedCommands[0].zone === 'zone-office-a' || dispatchedCommands[0].device_id === 'esp32-zone-01',
         'Expected targeted zone or device_id'
@@ -575,13 +610,17 @@ async function run() {
       harness.assert(libBtn !== null, 'Expected Show Device Library button');
       await libBtn.click();
 
-      // Check for table containing GPIO 19, GPIO 25, GPIO 23, GPIO 33
+      // The pins the pilot node actually uses, per edge/esp32/platformio.ini.
+      //
+      // This list used to assert GPIO 19 and GPIO 23. Neither is wired: 19 is free, and the
+      // lighting relay on 23 is unpopulated (pinLightingRelay = 255), which the table itself
+      // reports as "Unused (255)". Asserting pins that are not in the build meant this check
+      // could only ever fail, so it stopped being read.
       await page.waitForSelector('table code', { timeout: 2000 });
       const pinCodes = await page.$$eval('table code', els => els.map(el => el.textContent));
-      harness.assert(pinCodes.some(p => p.includes('GPIO 19')), 'Expected GPIO 19 in library pin map');
-      harness.assert(pinCodes.some(p => p.includes('GPIO 25')), 'Expected GPIO 25 in library pin map');
-      harness.assert(pinCodes.some(p => p.includes('GPIO 23')), 'Expected GPIO 23 in library pin map');
-      harness.assert(pinCodes.some(p => p.includes('GPIO 33')), 'Expected GPIO 33 in library pin map');
+      for (const pin of ['GPIO 25', 'GPIO 26', 'GPIO 32', 'GPIO 33', 'GPIO 21', 'GPIO 22', 'GPIO 13', 'GPIO 16']) {
+        harness.assert(pinCodes.some(p => p.includes(pin)), `Expected ${pin} in library pin map`);
+      }
     });
 
   } finally {

@@ -27,10 +27,17 @@ export default function ModelExportCard() {
 
   // What this machine looks like, in the browser's own (limited) terms. Reported exactly
   // as measured — an unavailable value says so rather than showing a plausible guess.
-  const machine = rec
+  //
+  // `rec &&` is not enough to dereference rec.profile. /api/model/recommend can answer 200
+  // with a body this code does not expect -- a version mismatch, a proxy's JSON error
+  // envelope -- and `rec.profile.cores` then throws inside render, taking the whole panel
+  // down through the error boundary. Optional-chain every hop and fall back to the same
+  // "measuring…" state an absent response produces: an unexpected shape is not a reason to
+  // show a blank dashboard.
+  const machine = rec?.profile
     ? [
         `${rec.profile.cores || '?'} cores`,
-        rec.memoryBasis === 'reported' ? `${rec.effectiveMemoryGb} GB` : `~${rec.effectiveMemoryGb} GB est.`,
+        rec.memoryBasis === 'reported' ? `${rec.effectiveMemoryGb ?? '?'} GB` : `~${rec.effectiveMemoryGb ?? '?'} GB est.`,
         // gpu.name is the product on its own ("Apple M4"); gpu.label is the raw WebGL
         // renderer string, which browsers wrap in ANGLE boilerplate and which reads as
         // noise in a summary line.

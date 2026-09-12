@@ -10,6 +10,7 @@ import { useRoomModels } from './useRoomModels';
 import RecommendationEvidence from './RecommendationEvidence';
 import ForecastChart from './ForecastChart';
 import { powerMw, powerKw } from './units';
+import { fx, hasReading } from './measured';
 import ModelDownloadMobile from './mobile/ModelDownloadMobile';
 import RecCard from './mobile/RecCard';
 import RecommendationsEmptyState from './mobile/RecommendationsEmptyState';
@@ -260,11 +261,20 @@ export default function MobileAIScreen({
     }
 
     // 5b. Weather feed stale → envelope on the climatological fallback.
-    if (weather && !weather.live) {
+    // hasReading(), not a truthiness check on the object.
+    //
+    // `weather` is whatever /api/ops/status returned. An engine that answers 200 with a body
+    // this code does not expect -- a version mismatch, a proxy's JSON error envelope, a
+    // partially-deployed build -- yields an object with no `live` and no `outdoorC`. The old
+    // guard `weather && !weather.live` passed for exactly that object, and `outdoorC.toFixed()`
+    // then threw inside a useMemo and took the WHOLE dashboard down through the root error
+    // boundary. A stale weather feed is a warning card; a malformed response must not be a
+    // blank page.
+    if (weather && weather.live === false && hasReading(weather.outdoorC)) {
       out.push({
         id: 'weather', accent: '#F5C242', icon: <CloudOff size={20} color="#F5C242" />,
         title: 'Weather Feed Stale',
-        message: `Open-Meteo has not refreshed${weather.ageSec > 0 ? ` in ${(weather.ageSec / 3600).toFixed(1)} h` : ''}. The envelope physics is running on the ${weather.outdoorC.toFixed(1)} °C fallback — loads and forecasts are less trustworthy until it recovers.`,
+        message: `Open-Meteo has not refreshed${weather.ageSec > 0 ? ` in ${fx(weather.ageSec / 3600)} h` : ''}. The envelope physics is running on the ${fx(weather.outdoorC)} °C fallback — loads and forecasts are less trustworthy until it recovers.`,
       });
     }
 

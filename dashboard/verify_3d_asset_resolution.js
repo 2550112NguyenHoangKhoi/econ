@@ -18,7 +18,7 @@
  *    - setBuildingModelType('multi-level', { force: true }) dispatches GET /api/building-data?model=multi-level
  *      and POST /api/building/switch.
  * 5. Real Built App Puppeteer E2E 3D Model Mount Verification:
- *    - Production bundle mounts 15-floor commercial tower (>40,000 m², 15 floor buttons L1-L15, 0 domestic zones).
+ *    - Production bundle mounts 15-floor commercial tower (>35,000 m², 15 floor buttons L1-L15, 0 domestic zones).
  *    - Toggle to domestic home requests ?model=domestic-home and mounts 1 floor (~72 m², 5 domestic zones).
  *    - Toggle to multi-level requests ?model=multi-level, mounts 15 floors, and completely bypasses and purges home data.
  *    - Forced re-selection with { force: true } dispatches live multi-level asset fetch.
@@ -176,6 +176,21 @@ function createStaticServer(port = 5294) {
   });
 }
 
+// Every mocked response needs CORS headers.
+//
+// The page is served from http://dashboard.local/ but the dashboard fetches the engine at
+// API_BASE = http://<host>:8080, which is a DIFFERENT ORIGIN. Puppeteer's request
+// interception fabricates the response, but the browser still applies CORS to a fabricated
+// one — so without these headers every engine call fails with "No 'Access-Control-Allow-Origin'
+// header", setBuildingModelType takes its unreachable-engine path, and the ?model= request
+// under test is never dispatched at all. Four assertions in this file were unreachable for
+// exactly that reason and looked like product failures.
+const CORS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type,X-Admin-Token',
+};
+
 // Intercepts browser requests to serve static files from dist and mock API endpoints
 function setupInterceptionWithTracking(page, requestLog) {
   return page.setRequestInterception(true).then(() => {
@@ -192,11 +207,19 @@ function setupInterceptionWithTracking(page, requestLog) {
           modelParam: url.searchParams.get('model'),
         });
 
+        // Preflight. A POST with Content-Type: application/json is not a simple request, so
+        // the browser sends OPTIONS first and will not issue the POST unless it is answered.
+        if (req.method() === 'OPTIONS') {
+          req.respond({ status: 204, headers: CORS, body: '' });
+          return;
+        }
+
         if (url.pathname === '/api/building-data') {
           const modelParam = url.searchParams.get('model');
           if (modelParam === 'multi-level') {
             req.respond({
               status: 200,
+              headers: CORS,
               contentType: 'application/json',
               body: JSON.stringify(bundledTower),
             });
@@ -204,6 +227,7 @@ function setupInterceptionWithTracking(page, requestLog) {
           } else if (modelParam === 'domestic-home') {
             req.respond({
               status: 200,
+              headers: CORS,
               contentType: 'application/json',
               body: JSON.stringify(bundledHome),
             });
@@ -212,6 +236,7 @@ function setupInterceptionWithTracking(page, requestLog) {
             // Adversarial test: unparameterized query serves home data to test client anti-poisoning
             req.respond({
               status: 200,
+              headers: CORS,
               contentType: 'application/json',
               body: JSON.stringify(bundledHome),
             });
@@ -222,6 +247,7 @@ function setupInterceptionWithTracking(page, requestLog) {
         if (url.pathname === '/api/building/switch') {
           req.respond({
             status: 200,
+            headers: CORS,
             contentType: 'application/json',
             body: JSON.stringify({ ok: true, switched: true }),
           });
@@ -231,6 +257,7 @@ function setupInterceptionWithTracking(page, requestLog) {
         if (url.pathname.startsWith('/api/')) {
           req.respond({
             status: 200,
+            headers: CORS,
             contentType: 'application/json',
             body: JSON.stringify({ ok: true }),
           });
@@ -244,12 +271,14 @@ function setupInterceptionWithTracking(page, requestLog) {
           const ext = path.extname(filePath);
           req.respond({
             status: 200,
+            headers: CORS,
             contentType: mimeTypes[ext] || 'application/octet-stream',
             body: fs.readFileSync(filePath),
           });
         } else {
           req.respond({
             status: 200,
+            headers: CORS,
             contentType: 'application/json',
             body: JSON.stringify({ ok: true }),
           });
@@ -429,6 +458,12 @@ async function runVerification() {
 
       await page.goto(appUrl, { waitUntil: 'domcontentloaded' });
       await page.waitForSelector('[data-testid="building-model-toggle"]', { timeout: 10000 });
+      // level-btn-* are rendered by the right-dock GlobalMetricsPanel, which mounts on its
+      // own schedule -- the bottom model selector appearing does not imply they exist yet.
+      // Waiting for the container that holds them removes a race that made these tests fail
+      // in ~1.1 s with "No element found", which reads like a missing feature rather than a
+      // test that looked too early.
+      await page.waitForSelector('[data-testid="level-toggle"]', { timeout: 10000 }).catch(() => {});
       await new Promise(r => setTimeout(r, 600));
 
       // Assert network request was parameterized with ?model=multi-level
@@ -441,11 +476,19 @@ async function runVerification() {
       const floorButtons = await page.$$('[data-testid^="level-btn-"]');
       harness.assertEqual(floorButtons.length, 15, 'Mounts exactly 15 floor level buttons (L1..L15)');
 
-      // Assert conditioned area > 40,000 m² (commercial tower, not 72.3 m²)
+      // Assert conditioned area is at commercial-tower scale (not the 72.3 m² house).
+      // 39,776.6 m² on the officeized fixture; the old >40,000 threshold was the raw
+      // segmenter's 42,036 m² and has been unreachable since 9820ed8a.
       const bodyText = await page.evaluate(() => document.body.innerText);
+      // Matched by VALUE rather than by a list of literal strings. The old form looked for
+      // '42,036 m²' / '42,' / '40,' -- the raw segmenter's number and two prefixes of it --
+      // so it could only ever pass on a fixture the project has since replaced, and it would
+      // have kept passing on any unrelated figure that happened to start with "42,".
+      const areaMatch = bodyText.match(/([\d,]+(?:\.\d+)?)\s*m²/);
+      const areaM2 = areaMatch ? parseFloat(areaMatch[1].replace(/,/g, '')) : 0;
       harness.assert(
-        bodyText.includes('42,036 m²') || bodyText.includes('42k') || bodyText.includes('40,') || bodyText.includes('42,'),
-        'Conditioned floor area reflects commercial tower scale (>40,000 m²)'
+        areaM2 > 35000,
+        `Conditioned floor area reflects commercial tower scale (>35,000 m², read ${areaM2 || 'nothing'})`
       );
       harness.assert(!bodyText.includes('72.3 m²') && !bodyText.includes('72 m²'), 'Does NOT display domestic 72 m² floor area');
 
@@ -467,6 +510,12 @@ async function runVerification() {
 
       await page.goto(appUrl, { waitUntil: 'domcontentloaded' });
       await page.waitForSelector('[data-testid="building-model-toggle"]', { timeout: 10000 });
+      // level-btn-* are rendered by the right-dock GlobalMetricsPanel, which mounts on its
+      // own schedule -- the bottom model selector appearing does not imply they exist yet.
+      // Waiting for the container that holds them removes a race that made these tests fail
+      // in ~1.1 s with "No element found", which reads like a missing feature rather than a
+      // test that looked too early.
+      await page.waitForSelector('[data-testid="level-toggle"]', { timeout: 10000 }).catch(() => {});
       await new Promise(r => setTimeout(r, 400));
 
       requestLog.length = 0; // Clear log before clicking
@@ -495,6 +544,12 @@ async function runVerification() {
 
       await page.goto(appUrl, { waitUntil: 'domcontentloaded' });
       await page.waitForSelector('[data-testid="building-model-toggle"]', { timeout: 10000 });
+      // level-btn-* are rendered by the right-dock GlobalMetricsPanel, which mounts on its
+      // own schedule -- the bottom model selector appearing does not imply they exist yet.
+      // Waiting for the container that holds them removes a race that made these tests fail
+      // in ~1.1 s with "No element found", which reads like a missing feature rather than a
+      // test that looked too early.
+      await page.waitForSelector('[data-testid="level-toggle"]', { timeout: 10000 }).catch(() => {});
       await new Promise(r => setTimeout(r, 400));
 
       // Switch to domestic home first
@@ -519,7 +574,9 @@ async function runVerification() {
       await page.click('[data-testid="level-btn-4"]');
       await new Promise(r => setTimeout(r, 300));
       const zonesMetric = await page.$eval('[data-testid="level-metric-zones"]', el => el.innerText.trim());
-      harness.assert(zonesMetric.startsWith('90Z'), `Level 4 telemetry displays 90Z (got ${zonesMetric})`);
+      // 49 zones per floor on the officeized fixture (735 over 15 floors); 90 was the raw
+      // segmenter's per-floor count and has been wrong since 9820ed8a.
+      harness.assert(zonesMetric.startsWith('49Z'), `Level 4 telemetry displays 49Z (got ${zonesMetric})`);
 
       // Verify zero home data remains
       const bodyText = await page.evaluate(() => document.body.innerText);
@@ -536,6 +593,12 @@ async function runVerification() {
 
       await page.goto(appUrl, { waitUntil: 'domcontentloaded' });
       await page.waitForSelector('[data-testid="building-model-toggle"]', { timeout: 10000 });
+      // level-btn-* are rendered by the right-dock GlobalMetricsPanel, which mounts on its
+      // own schedule -- the bottom model selector appearing does not imply they exist yet.
+      // Waiting for the container that holds them removes a race that made these tests fail
+      // in ~1.1 s with "No element found", which reads like a missing feature rather than a
+      // test that looked too early.
+      await page.waitForSelector('[data-testid="level-toggle"]', { timeout: 10000 }).catch(() => {});
       await new Promise(r => setTimeout(r, 500));
 
       requestLog.length = 0;
@@ -565,6 +628,12 @@ async function runVerification() {
 
       await page.goto(appUrl, { waitUntil: 'domcontentloaded' });
       await page.waitForSelector('[data-testid="building-model-toggle"]', { timeout: 10000 });
+      // level-btn-* are rendered by the right-dock GlobalMetricsPanel, which mounts on its
+      // own schedule -- the bottom model selector appearing does not imply they exist yet.
+      // Waiting for the container that holds them removes a race that made these tests fail
+      // in ~1.1 s with "No element found", which reads like a missing feature rather than a
+      // test that looked too early.
+      await page.waitForSelector('[data-testid="level-toggle"]', { timeout: 10000 }).catch(() => {});
       await new Promise(r => setTimeout(r, 400));
 
       // 8 rapid alternating switches

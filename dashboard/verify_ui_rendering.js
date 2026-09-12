@@ -219,7 +219,9 @@ async function runVerification() {
 
   await harness.test('Multi-level and Domestic-home fixtures contain all expected zones and properties', () => {
     const knownBlds = getAllKnownBuildings();
-    harness.assertEqual(knownBlds.length, 2, 'getAllKnownBuildings returns both tower and domestic home');
+    // Three, not two: commit 39599eec added the scanned room as a third selectable
+    // building. This assertion was written when there were two and never moved.
+    harness.assertEqual(knownBlds.length, 3, 'getAllKnownBuildings returns the tower, the domestic home and the scanned room');
     const tower = knownBlds[0];
     const home = knownBlds[1];
 
@@ -243,10 +245,15 @@ async function runVerification() {
     const homeFloorZoneIds = new Set((homeFloorObj?.zones || []).map(z => z.zoneId));
     harness.assertEqual(homeFloorZoneIds.size, 5, 'Domestic home Level 1 yields exactly 5 terminal unit zones');
 
-    // Tower Level 1 topology: exactly 90 terminal units
+    // Tower Level 1 topology: exactly 49 terminal units.
+    //
+    // 90 was the RAW segmenter output's figure. tools/officeize_fixture.py re-derives
+    // programme and physics from geometry and lands on 735 zones over 15 floors = 49 per
+    // floor; the dashboard's bundled mirror has been the officeized fixture since 9820ed8a.
+    // This assertion was pinning the very fixture that script exists to replace.
     const towerFloorObj = tower.floors.find(f => f.level === 1);
     const towerFloorZoneIds = new Set((towerFloorObj?.zones || []).map(z => z.zoneId));
-    harness.assertEqual(towerFloorZoneIds.size, 90, 'Tower Level 1 yields exactly 90 terminal unit zones');
+    harness.assertEqual(towerFloorZoneIds.size, 49, 'Tower Level 1 yields exactly 49 terminal unit zones');
 
     // Mutual exclusivity
     const intersection = [...homeFloorZoneIds].filter(hz => towerFloorZoneIds.has(hz));
@@ -288,7 +295,11 @@ async function runVerification() {
     const towerFloor = tower.floors[0];
     const towerField = buildFlowField(towerFloor, { zones: {}, vavs: {} });
     harness.assert(towerField != null, 'Tower flowfield built successfully');
-    harness.assert(towerField.diffusers.length > 50, 'Tower has full diffuser array (>50)');
+    // >40, not >50. The threshold was set against the raw segmenter's 90-zone floor; the
+    // officeized fixture has 49 zones per floor and buildFlowField places 44 diffusers on
+    // them. The assertion's INTENT -- "a tower floor gets a full array, not the handful a
+    // house gets" -- is preserved; only the number it was calibrated against was stale.
+    harness.assert(towerField.diffusers.length > 40, `Tower has full diffuser array (>40, got ${towerField.diffusers.length})`);
     harness.assert(towerField.grid.W >= 40, `Tower domain width is ${towerField.grid.W.toFixed(1)}m (>=40m)`);
   });
 

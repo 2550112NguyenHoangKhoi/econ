@@ -45,16 +45,22 @@ export const VALUE_BASED_PROTOCOLS = new Set([
 ]);
 
 
+// What is physically on the pilot node, matched against edge/esp32/platformio.ini's build
+// flags and edge/WIRING.md. This table is REPORTING, not configuration -- pins are fixed at
+// compile time (see the note in DeviceControls below for why a runtime pin editor cannot
+// work), so anything wrong here is wrong on screen only, which is exactly why it drifts
+// unnoticed. Check it against platformio.ini when a flag changes.
 export const DEFAULT_HARDWARE_LIBRARY = [
   { id: 'ir_blaster', device: 'HVAC IR Blaster', pin: 'GPIO 25', bus: 'PWM / IRremoteESP8266', flag: 'USE_IR_AC', desc: 'Commands split-unit ACs (Coolix, Electra, Daikin, etc.) via 940nm IR emitter' },
   { id: 'smart_plug', device: 'Smart Plug Relay', pin: 'GPIO 26', bus: 'Digital Output', flag: 'USE_PLUG', desc: 'Sheds non-critical socket circuits after-hours (APLC automated plug load control)' },
   { id: 'lighting', device: 'Lighting Relay', pin: 'Unused (255)', bus: 'Digital Output', flag: 'RELAY_PIN', desc: 'Legacy/unpopulated lighting relay (virtual, pinLightingRelay = 255)' },
   { id: 'strip_meter', device: 'ACS712 Power Strip Meter', pin: 'GPIO 32 (ADC1_CH4)', bus: 'Analog ADC (True-RMS)', flag: 'USE_STRIP', desc: 'True-RMS strip current sensing with compute offload fallback streaming' },
-  { id: 'plug_clamp', device: 'SCT-013 Plug CT Clamp', pin: 'GPIO 33 (ADC1_CH5)', bus: 'Analog ADC (33Ω burden)', flag: 'USE_PLUG', desc: 'Monitors wall plug circuit current draw (plugW)' },
-  { id: 'ac_clamp', device: 'SCT-013 AC CT Clamp', pin: 'GPIO 35 (ADC1_CH7)', bus: 'Analog ADC (33Ω burden)', flag: 'USE_AC_CLAMP', desc: 'Measures compressor active power (acW) for thermodynamic model tracking' },
+  { id: 'plug_clamp', device: 'SCT-013 Plug CT Clamp', pin: 'GPIO 33 (ADC1_CH5)', bus: 'Analog ADC (94Ω burden)', flag: 'USE_PLUG', desc: 'Monitors wall plug circuit current draw (plugW). Burden is 2 x 47Ω in series -- caka stocks no 33Ω -- and the node is calibrated at PLUG_CAL_A_PER_V=22.1, identified against a known load rather than derived from 2000/R' },
+  { id: 'ac_clamp', device: 'SCT-013 AC CT Clamp', pin: 'GPIO 35 (ADC1_CH7)', bus: 'Analog ADC', flag: 'USE_AC_CLAMP', desc: 'Measures compressor active power (acW) for thermodynamic model tracking. Not fitted on the pilot node' },
   { id: 'supply_temp', device: 'DS18B20 Supply Air Temp', pin: 'Unused (255)', bus: '1-Wire Digital', flag: 'USE_SUPPLY_TEMP', desc: 'High-precision temperature sensor in AC discharge louvre' },
   { id: 'env_sensors', device: 'SHT30 / ACD1200 / BH1750', pin: 'GPIO 21 (SDA), GPIO 22 (SCL)', bus: 'I2C Bus (400 kHz)', flag: 'USE_SHT30, USE_CO2, USE_LUX', desc: 'Environmental telemetry: air temperature, relative humidity, CO2 ppm, lux' },
   { id: 'pir_radar', device: 'Rd-03 V1 Radar x2', pin: 'GPIO 13 & GPIO 14', bus: 'Digital (OT2 high = sensing)', flag: 'USE_MMWAVE', desc: 'Two 24GHz FMCW presence heads, ORed into occupancy. Unlike a PIR these hold their output high for a stationary person, so a still occupant is not read as an empty room' },
+  { id: 'radar_uart', device: 'Rd-03 config UART x2', pin: 'GPIO 16/17 (head 1), GPIO 4/18 (head 2)', bus: 'UART 115200', flag: 'USE_MMWAVE_UART', desc: 'Range gates and disappearance delay are pushed to each head over this link at boot. Not optional: a head with OT2 intact but its OT1 wire open still reports presence and still passes the boot pull test, while silently keeping its factory 10.5 m gates — it sees through the wall and reports the corridor. RD03_LINETEST over serial finds it' },
 ];
 
 

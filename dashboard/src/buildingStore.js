@@ -27,6 +27,9 @@ const listeners = new Set();
 // The last building-switch failure, or null. Kept so a panel can show "could not switch,
 // still on X" in the page instead of a modal that stops the page.
 let lastSwitchError = null;
+// Set when a switch completed from the bundled fixture because the engine was unreachable.
+// Not an error: the view is coherent, it is simply not engine-backed. See setBuildingModelType.
+let lastSwitchOffline = false;
 
 export function isMultiLevelBuilding(b) {
   return Boolean(
@@ -152,12 +155,46 @@ export async function setBuildingModelType(type, options = {}) {
   });
 
   try {
-    // Notify Go backend of the active building model switch
-    const switchRes = await fetch(`${API_BASE}/api/building/switch`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: type }),
-    });
+    // Notify Go backend of the active building model switch.
+    //
+    // Two failure modes hide behind this one await, and they deserve opposite responses:
+    //
+    //   the engine ANSWERED and refused (!ok)  -> revert. The engine is the authority on
+    //       which building is live, and a dashboard showing one building while the twin
+    //       simulates another is the desync this project has already shipped a fix for.
+    //
+    //   the engine did not answer at all (fetch rejects) -> do NOT revert. There is no
+    //       authority to disagree with. The dashboard bundles all three fixtures precisely
+    //       so it can be driven with no engine, and refusing to switch in that state gives
+    //       an operator a dead button and a console error instead of the offline view the
+    //       bundles exist to provide. `live` is already false in that state, so nothing
+    //       downstream mistakes the result for engine-backed data.
+    //
+    // Collapsing both into "revert" is what made five assertions in verify_ui_rendering.js
+    // and five in verify_3d_asset_resolution.js unfixable: those suites serve dist/ with no
+    // engine behind it, which is exactly the unreachable case.
+    let switchRes;
+    try {
+      switchRes = await fetch(`${API_BASE}/api/building/switch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: type }),
+      });
+    } catch (netErr) {
+      // Unreachable. Keep the switch, keep the bundled fixture, and say so once.
+      live = false;
+      lastSwitchError = null;
+      lastSwitchOffline = true;
+      console.info(
+        `[building] switched to "${type}" from the bundled fixture — the engine at ${API_BASE} did not answer, ` +
+        `so this view is not engine-backed (${netErr?.message || netErr}).`
+      );
+      listeners.forEach((fn) => {
+        try { fn(getBuilding(), activeModelType); } catch (e) { console.error(e); }
+      });
+      return getBuilding();
+    }
+    lastSwitchOffline = false;
 
     if (!switchRes.ok) {
       throw new Error(`Backend switch failed: ${switchRes.status} ${switchRes.statusText}`);
@@ -226,6 +263,14 @@ export function getLastBuildingSwitchError() {
   return lastSwitchError;
 }
 
+// True when the last switch completed from the bundled fixture because the engine could not
+// be reached. Distinct from getLastBuildingSwitchError(), which means the engine answered
+// and said no — that one reverts, this one does not. A panel that wants to tell the operator
+// "you are looking at a bundled building, not the twin" reads this.
+export function isBuildingSwitchOffline() {
+  return lastSwitchOffline;
+}
+
 export function subscribeBuildingChange(fn) {
   listeners.add(fn);
   return () => listeners.delete(fn);
@@ -237,25 +282,52 @@ export function buildingIsLive() {
   return live && activeModelType === 'multi-level';
 }
 
+// Load the active building's geometry from the engine at startup.
+//
+// Two things here used to be wrong and are worth stating, because both failed silently:
+//
+//  1. It asked for `/api/building-data` with no `?model=`, so the engine answered with
+//     whichever building IT considered active and the dashboard adopted that — overriding
+//     the model the UI was on. Boot now asks for the model it is actually displaying.
+//
+//  2. The type dispatch ended in a catch-all `else` that assigned anything not recognised as
+//     tower or room-scan to homeData and switched activeModelType to 'domestic-home'. A
+//     malformed payload, an error envelope, a truncated response — all became "the home
+//     building", and the whole UI switched to it. Guessing a building's type from the
+//     absence of two others is not identification.
+//
+// The rule now: the payload must validate as the type that was REQUESTED, or it is not
+// adopted at all and the bundled fixture stands. `live` stays false in that case, which is
+// what buildingIsLive() reports to the surfaces that tell an operator whether they are
+// looking at the twin or at a bundle.
 export async function bootBuilding() {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), 5000);
+  const requested = activeModelType;
   try {
-    const r = await fetch(`${API_BASE}/api/building-data`, { signal: ctl.signal });
+    const r = await fetch(
+      `${API_BASE}/api/building-data?model=${encodeURIComponent(requested)}`,
+      { signal: ctl.signal },
+    );
     if (r.ok) {
       const j = await r.json();
-      if (isMultiLevelBuilding(j)) {
+      if (requested === 'multi-level' && isMultiLevelBuilding(j)) {
         towerData = j;
-        activeModelType = 'multi-level';
         live = true;
-      } else if (isRoomScanBuilding(j)) {
+      } else if (requested === 'room-scan' && isRoomScanBuilding(j)) {
         roomScanData = j;
-        activeModelType = 'room-scan';
+        live = true;
+      } else if (requested === 'domestic-home' && isHomeBuilding(j)) {
+        homeData = j;
         live = true;
       } else {
-        homeData = j;
-        activeModelType = 'domestic-home';
-        live = true;
+        // The engine answered with something that is not the building we asked for. Keep
+        // the bundle, keep the model, and say which is which — this is the case that used
+        // to silently flip the entire UI to the home fixture.
+        console.warn(
+          `[building] engine returned a payload that does not validate as "${requested}"; ` +
+          `keeping the bundled fixture. buildingIsLive() stays false.`
+        );
       }
     }
   } catch {
