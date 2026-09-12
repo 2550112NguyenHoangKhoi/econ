@@ -27,14 +27,22 @@ conditioners back through those nodes.
 
 ## The engine, in the order data moves
 
-1. `engine.go` — `tick()` integrates a 2R1C heat balance per zone; `actuate()` decides
-   setbacks and publishes commands; `broadcast()` computes the metrics the dashboard shows.
+All of these are `server/simulation/`.
+
+1. `tick.go` — integrates a 2R1C heat balance per zone. `actuate.go` decides setbacks and
+   publishes commands; `broadcast.go` computes the metrics the dashboard shows.
+   `engine.go` itself is now a package doc — a map of which file answers which question.
 2. `dynamics.go` — recursive least squares fits each room's thermal and CO₂ balance from
    its own history. This is the differentiator: time constant, cooling authority, measured
-   air-change rate.
+   air-change rate. `rls.go` is the estimator it uses; `outlook.go` evaluates the fitted
+   coefficients forward.
 3. `baselines.go` — per (zone, metric, hour) learned normals; anomalies scored in σ.
 4. `recommend.go` — turns both models into ranked recommendations.
 5. `plugs.go` — the plug-load sweep, the end use a conventional BMS cannot see.
+
+Every file in this repo is now under ~700 lines, and the large ones were split by
+responsibility rather than by size. When a file has neighbours it was split from, its
+package doc names them — start there rather than grepping.
 
 ## Four rules this codebase actually enforces
 
@@ -75,7 +83,7 @@ prior, not the answer.
   consult it before extending something that may already be dead.
   *(`acW` and `lux` were listed here as dead. They are not, and have not been for a while:
   `acW` reaches `carbon.go` and the cooling model, `lux` drives the daylight ratio in
-  `engine.go`. Neither sensor is fitted on the pilot node, which is why they never appear in
+  `simulation/sensors.go`. Neither sensor is fitted on the pilot node, which is why they never appear in
   telemetry — an unfitted sensor and an unwired code path look identical from the dashboard,
   and that is what this entry had confused.)*
 - **Two commits' worth of history is not the whole story.** `docs/EVIDENCE.md` explains why

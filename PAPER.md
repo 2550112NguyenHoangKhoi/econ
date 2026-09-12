@@ -1110,6 +1110,8 @@ Everything outside this diagram is in A.6 or A.7.
 | `simulation/engine.go` | package doc only — a map of which file answers which question | — | **DOC** |
 | `simulation/library.go` | Loads `programme-library.json`; `Phys()`, `ProgrammeFor()`, `CriticalTypes()` | engine, plugs, fixture generator | **LIVE** |
 | `simulation/dynamics.go` | RLS per-room thermal + CO₂ identification (§7.8) | `/api/rooms/models`, setback gate | **LIVE** |
+| `simulation/rls.go` | The recursive-least-squares recursion itself — forgetting, prior leak, excitation gate | `dynamics.go` | **LIVE** |
+| `simulation/outlook.go` | Fitted coefficients evaluated forward: equilibrium, horizon, time-to-limit, setback ceiling | `actuate.go`, `recommend.go` | **LIVE** |
 | `simulation/baselines.go` | Learned per-(zone, metric, hour) normals, σ-scored (§7.10) | `recommend.go`, model export | **LIVE** |
 | `simulation/recommend.go` | Ranked recommendations from both learned models | `/api/recommendations` | **LIVE** |
 | `simulation/plugs.go` | Plug-load model, clamp override, vacancy sweep (§7.6) | `/api/plugs`, building load | **LIVE** |
@@ -1118,6 +1120,15 @@ Everything outside this diagram is in A.6 or A.7.
 | `weather.go` | Open-Meteo poller feeding $T\_{\text{out}}$ | 2R1C envelope, `/api/weather` | **LIVE** — falls back to design-day constant |
 | `blueprint.go` | Digitizer proxy, deploy, backup, rollback | `/api/digitize`, `/api/building*` | **LIVE (opt-in)** — needs `DIGITIZER_URL` |
 | `forecast.go` | LSTM proxy + TimesFM zero-shot path | `/api/forecast`, `/api/forecast/load` | **LIVE (opt-in)** — needs the Python service |
+| `forecast_compare.go` | Both engines' answers side by side, and `checkPlausible` | `/api/forecast/compare` | **LIVE (opt-in)** |
+| `forecast_graph.go` | Shapes the plotted series; owns the named fallback | `BuildForecastGraph` callers | **LIVE** |
+| `main.go` | Startup: environment, engine construction, every route, background loops | the binary | **LIVE** |
+| `websocket.go` | `/ws` and its origin check | dashboard | **LIVE** |
+| `command_http.go` | `/api/command` allow-list — a security boundary, not wiring | `/api/command` | **LIVE** |
+| `carbon.go` | Scope 2 accounting from metered draw | `/api/sustainability` | **LIVE** |
+| `carbon_market.go` | Voluntary-market price feed; every quote carries `IsLive` | `carbon.go` | **LIVE (opt-in)** — falls back to a marked static price |
+| `carbon_utilization.go` | Floor area against measured occupancy | `carbon.go` | **LIVE** |
+| `carbon_state.go` | Persistence of the two running integrals, keyed by building id | `carbon.go` | **LIVE** |
 | `precool.go` | Forecast-triggered pre-cool window | `/api/precool` | **LIVE** — forecast-triggered, not tariff-scheduled (§9.1.2) |
 | `db.go`, `db/init.sql` | TimescaleDB hypertable + continuous aggregates | `/api/history`, `/api/series` | **LIVE (opt-in)** — needs `DB_URL`; engine unaffected if absent |
 | `modelcatalog.go` | Hardware-tier matching from browser probes | `/api/model/recommend` | **LIVE** |
@@ -1182,6 +1193,26 @@ Everything outside this diagram is in A.6 or A.7.
 `sustainability.js`, `flowfield.js`, `floorGeometry.js`, `buildingStore.js`, `units.js`,
 `measured.js`, `telemetry.ts`. Boundaries: `ErrorBoundary`, `UIErrorBoundary`,
 `CanvasErrorBoundary`.
+
+**Where the large components went (2026-09-12).** Six files carried more than one job each.
+Each is now a small parent plus a directory of parts, and no behaviour changed in any of the
+moves — see §A.4.9 for the method and what it caught.
+
+| Parent | Was | Now | Its parts |
+|---|---|---|---|
+| `App.jsx` | 1,743 | 658 | `topology/` (the P&ID node vocabulary and the graph builder), `hud/` (five floating control bars), `panels/` (the left dock, the topology panel), `ZoneDrilldownHUD.jsx` |
+| `AiInsightsPanel.jsx` | 1,251 | 540 | `ai/` — `buildInsights.jsx` is the rule set itself, plus four cards |
+| `SustainabilityRecommendationsPanel.jsx` | 917 | 240 | `sustainability/` — five cards and the shared styles |
+| `BuildingModel.jsx` | 806 | 166 | `building3d/` — CSG, walls, floor plate, zone renderer, camera |
+| `MobileAIScreen.jsx` | 710 | 467 | `mobile/` — five phone-sized pieces |
+| `HardwareInspector.jsx` | 2,200 | 196 | `hardware/` — 13 tab modules (§A.4.9) |
+
+`dashboard/tools/undef_check.mjs` exists because of this work: esbuild does not resolve
+identifiers, so a component that lost an import when its code moved compiles cleanly and
+throws `ReferenceError` on render. Four such faults were produced by these splits, three
+found only by driving the UI. `npm run lint:undef` finds them in a second, and found the
+fourth — seven recharts imports missing from `ai/AfddDriftDetail.jsx` — before any operator
+could have hit it.
 
 `measured.js` is small but load-bearing for Rule 1 on the display side: `NO_VALUE` is the em
 dash the UI prints where there is no reading, `fx()` formats a number or returns that dash,
@@ -1515,6 +1546,30 @@ reports them and says it cannot change them, which is the only honest control he
 The governing rule is **omission over fabrication**: a sensor that fails to read causes the
 field to be *absent from the JSON*, never sent as zero, because a fabricated zero on a current
 clamp tells the twin the compressor is off.
+
+**One translation unit, six files (2026-09-12).** `main.cpp` was 3,117 lines. It is now 1,464
+— configuration, sensor setup, `setup()` and `loop()` — with six headers `#include`d at the
+exact points their code used to sit:
+
+| File | Lines | What it owns |
+|---|---|---|
+| `src/commands.h` | 561 | The command surface, including the bring-up diagnostics: `IR_CARRIER`, `IR_GPIO_TEST`, `IR_LOAD_TEST`, `IR_SWEEP`, `RD03_LINETEST`, `CO2_CAL` — each isolating one layer of one subsystem so a fault can be attributed rather than guessed at |
+| `src/power_sense.h` | 444 | Hardware-timed ADC acquisition and the three metered current channels |
+| `src/telemetry_publish.h` | 278 | Building the frame — the rule above, enforced at the point of transmission |
+| `src/hvac_ir.h` | 251 | Setpoint → IR frame, and whether one was really sent |
+| `src/net_provisioning.h` | 123 | WiFi credentials and broker host, both in NVS so a node can be re-pointed without a reflash |
+| `src/radar_rd03_state.h` | 90 | Rd-03 liveness, the OT2 pull test, parsed frame state |
+
+Headers rather than separate translation units, deliberately: file-scope `static`s keep
+internal linkage, include and initialisation order are untouched, and nothing needed
+promoting to `extern`. Separate `.cpp` files would have required all of that, and every one
+of those changes is a chance to alter behaviour on a device that cannot be single-stepped.
+
+The claim that nothing changed is checkable rather than asserted: the build was first
+confirmed deterministic, then `.flash.text` (733,463 B), `.flash.rodata` (171,680 B),
+`.dram0.data` and `.iram0.text` were each compared before and after and are **byte-identical**.
+`firmware.bin` differs in 65 of 1,014,832 bytes — the app descriptor's `app_elf_sha256` and
+the trailing image hash, both of which hash the ELF including its source paths.
 
 | Flag | Sensor | Publishes | Engine consumer | Status |
 |---|---|---|---|---|
