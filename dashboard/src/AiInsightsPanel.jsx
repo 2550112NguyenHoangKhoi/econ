@@ -121,7 +121,21 @@ export default function AiInsightsPanel({ simData, activeScenario, faultTarget, 
     simData, activeScenario, faultTarget, aiForecast, activeForecast, recForecast,
     hwList, hwOnline, savingsPct, savedMw, loadMw, precool, weather, plugStatus,
     recommendations, sendManualOverride, setSelectedZone, onOpenPlugs, isCritical, precoolShift,
-  }), [simData, activeScenario, faultTarget, aiForecast, hwList, hwOnline, savingsPct, savedMw, loadMw, precool, weather, plugStatus, recommendations, sendManualOverride, setSelectedZone, onOpenPlugs, isCritical, precoolShift]);
+    // Every value buildInsights() reads, and nothing it does not.
+    //
+    // activeForecast and recForecast were missing. Both are read by the forecast card, so
+    // the panel could hold a stale forecast until some UNRELATED dependency happened to
+    // change — a plug-sweep toggle or an occupancy tick would refresh the forecast card,
+    // and a quiet building would leave it showing a horizon that had already been
+    // superseded. Nothing errored; the number was simply old, which is the hardest kind of
+    // wrong to notice on a dashboard.
+    //
+    // Making the closure explicit (buildInsights takes parameters rather than closing over
+    // the component) is what surfaced it: a closure hides what it reads, an argument list
+    // cannot. Keep this list in step with that signature.
+  }), [simData, activeScenario, faultTarget, aiForecast, activeForecast, recForecast,
+       hwList, hwOnline, savingsPct, savedMw, loadMw, precool, weather, plugStatus,
+       recommendations, sendManualOverride, setSelectedZone, onOpenPlugs, isCritical, precoolShift]);
 
   // ---- Inline detail sections for the expandable cards ----
   const renderDetail = (id) => {
