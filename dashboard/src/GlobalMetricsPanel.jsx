@@ -7,12 +7,7 @@ import { useLibrary } from './useLibrary';
 import { getBuilding } from './buildingStore';
 import { money, energyCostPerDay, touPeriod, touPeriodLabel } from './tariff';
 import { powerMw, splitPowerMw } from './units';
-import {
-  FLOOR_AREA_M2, EUI_BENCHMARK, IS_IT_DOMINATED, ZONE_MIX,
-  euiRunRateFromLoadMw, euiFromMeanLoadMw, EUI_MIN_WINDOW_H,
-  carbonTonnesPerYear, carbonAvoidedTonnesPerYear, tonnesStr,
-  getFloorAreaM2, getZoneMix, getIsItDominated,
-} from './sustainability';
+import { EUI_BENCHMARK, euiRunRateFromLoadMw, euiFromMeanLoadMw, EUI_MIN_WINDOW_H, carbonTonnesPerYear, carbonAvoidedTonnesPerYear, tonnesStr, getFloorAreaM2, getZoneMix, getIsItDominated } from './sustainability';
 import { fx, hasReading } from './measured';
 
 // (Plant utilization is measured against the peak load this building has actually been

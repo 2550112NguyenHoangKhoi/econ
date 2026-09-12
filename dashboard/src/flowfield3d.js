@@ -16,7 +16,7 @@
 // Anisotropic 7-point Poisson  ∇²φ = S  (Gauss–Seidel), velocity v = ∇φ.
 // ============================================================================
 import { buildFlowField, pointInPoly, flowKeyOf } from './flowfield.js';
-import { exteriorPolygon, toWorld, ORIGIN } from './floorGeometry.js';
+import { exteriorPolygon, toWorld } from './floorGeometry.js';
 
 const toLocal = (p) => toWorld(p);
 

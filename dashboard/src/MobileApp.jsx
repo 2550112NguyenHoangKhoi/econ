@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
-import { Activity, AlertTriangle, Settings, Zap, ChevronRight, ChevronUp, ChevronDown, User, X, BarChart2, ShieldAlert, Brain, Building2 } from 'lucide-react';
+import { Activity, AlertTriangle, Settings, Zap, ChevronRight, ChevronUp, ChevronDown, X, BarChart2, ShieldAlert, Brain, Building2 } from 'lucide-react';
 import { useDigitalTwin } from './useDigitalTwin';
 import { API_BASE } from './api';
 import { useOpsStatus } from './useOpsStatus';

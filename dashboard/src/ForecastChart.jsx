@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { Activity, TrendingUp, AlertTriangle } from 'lucide-react';
+import { AlertTriangle } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 import { powerMw } from './units';
 

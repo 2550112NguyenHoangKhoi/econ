@@ -3,7 +3,7 @@ import { Canvas } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import CanvasErrorBoundary from './CanvasErrorBoundary';
 import ConstrainedAirflow3D from './ConstrainedAirflow3D';
-import { exteriorPolygon , toWorld, ORIGIN } from './floorGeometry';
+import { exteriorPolygon, ORIGIN } from './floorGeometry';
 
 // Corner resize handle, mirroring the topology panel's handle.
 function ResizeHandle({ size, setSize }) {
