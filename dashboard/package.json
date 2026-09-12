@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview --host",
     "test": "node verify_bim_switching.js && node verify_level_toggle.js && node verify_ai_actions.js",
-    "test:bim": "node verify_bim_switching.js"
+    "test:bim": "node verify_bim_switching.js",
+    "test:render": "esbuild test_render.js --bundle --platform=node --format=cjs --outfile=node_modules/.cache/test_render.cjs --loader:.js=jsx --log-level=error && node node_modules/.cache/test_render.cjs"
   },
   "dependencies": {
     "@react-three/drei": "^9.106.0",

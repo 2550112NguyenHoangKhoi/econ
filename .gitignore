@@ -88,3 +88,8 @@ build/
 .tools/
 .agents/
 .npm-cache/
+
+# Generated esbuild bundle for dashboard/test_render.js -- 1.37 MB of vendored React
+# per copy, byte-identical between the .js and .cjs, and regenerable in seconds with
+# `npm run test:render`. Two copies were tracked; neither was ever imported by anything.
+dashboard/test_render.bundle.*
