@@ -257,7 +257,7 @@ $$
 \Delta Q = -\,\frac{\sum r\,Q\,|Q|^{\,n-1}}{\sum n\,r\,|Q|^{\,n-1}},
 $$
 
-with the turbulent-duct exponent $n = 2$. This tunes the Air Handling Unit (AHU) fan to the minimum required static pressure. Because ECON's AHU→VAV layout is a purely parallel star, the network admits a closed-form equivalent-resistance solution rather than iteration; that reduction — the form actually implemented in `engine.go` — is derived in detail in §7.3.
+with the turbulent-duct exponent $n = 2$. This tunes the Air Handling Unit (AHU) fan to the minimum required static pressure. Because ECON's AHU→VAV layout is a purely parallel star, the network admits a closed-form equivalent-resistance solution rather than iteration; that reduction — the form actually implemented in `simulation/building.go` — is derived in detail in §7.3.
 
 ### 5.3 Time-Series Load Forecasting (LSTM)
 To transition from reactive cooling to proactive pre-cooling, ECON incorporates a **Long Short-Term Memory (LSTM)** network (Hochreiter & Schmidhuber, 1997). The gated cell state lets the model retain long-range dependencies in weather and occupancy without the vanishing-gradient problem that afflicts vanilla RNNs. At each timestep $t$, with input $x\_t$ and previous hidden state $h\_{t-1}$, the cell computes the forget, input, and output gates and updates its memory $c\_t$:
@@ -395,7 +395,7 @@ act on an immature one.
 
 ## 7. Mathematical Foundations & Physics Engine Rationale
 
-To ensure ECON operates as a deterministic, physical Digital Twin rather than a superficial dashboard, the Go backend (`econ/server/simulation/engine.go`) implements a strict state-space thermodynamic and fluid dynamics model. 
+To ensure ECON operates as a deterministic, physical Digital Twin rather than a superficial dashboard, the Go backend (`econ/server/simulation/`) implements a strict state-space thermodynamic and fluid dynamics model. 
 
 ### 7.1 The 2R1C Lumped-Capacitance Thermodynamic Model
 While purely data-driven models often fail out-of-distribution during critical HVAC faults or thermal-runaway events, a physical 2-Resistor / 1-Capacitor (2R1C) equivalent-circuit model guarantees first-law (energy-conservation) consistency by construction. Following the simplified RC building-model formulation reviewed by Kramer et al. (2012) and the ASHRAE heat-balance method, each zone resolves transient heat transfer between the outdoor environment, the wall thermal mass ($C\_{\text{wall}}$), and the indoor air volume ($C\_{\text{air}}$) through an inner resistance $R\_{\text{in}}$ (air ↔ wall) and an outer resistance $R\_{\text{out}}$ (wall ↔ outdoors):
@@ -436,7 +436,7 @@ $$
 \end{bmatrix}.
 $$
 
-**Numerical integration & stability.** The engine advances the state with explicit (forward) Euler at each tick (`engine.go`, `z.Temp += dTAirDt * dt`):
+**Numerical integration & stability.** The engine advances the state with explicit (forward) Euler at each tick (`simulation/tick.go`, `z.Temp += dTAirDt * dt`):
 
 $$
 \mathbf{T}_{k+1} = (\mathbf{I} + \Delta t\,\mathbf{A})\,\mathbf{T}_k + \Delta t\,\mathbf{b}.
@@ -1073,7 +1073,7 @@ blueprint ──▶ digitizer (FastAPI) ──▶ building-data.json ──▶ �
 ESP32 / Pico / CV node ──▶ MQTT ──▶ mqtt.go ──▶ Engine.tick() │
                                                              ▼
                                    ┌──────────────────────────────────────┐
-                                   │  engine.go   2R1C + Hardy Cross + COP│
+                                   │  tick.go/building.go  2R1C + Hardy  │
                                    │  library.go  programme-library.json  │
                                    │  dynamics.go RLS identification      │
                                    │  baselines.go per-(zone,metric,hour) │
@@ -1095,7 +1095,19 @@ Everything outside this diagram is in A.6 or A.7.
 
 | Module | Role | Consumed by | Status |
 |---|---|---|---|
-| `simulation/engine.go` | 2R1C integration, `actuate()`, `broadcast()`, hardware ingest | everything | **LIVE** |
+| `simulation/tick.go` | the simulation loop and the 2R1C integration | everything | **LIVE** |
+| `simulation/building.go` | construction, fixture loading, Hardy Cross airflow network | everything | **LIVE** |
+| `simulation/telemetry.go` | inbound measurements and zone resolution | hardware ingest | **LIVE** |
+| `simulation/actuate.go` | setback, lighting and damper decisions | actuation | **LIVE** |
+| `simulation/broadcast.go` | the flatbuffer frame the dashboard receives | dashboard | **LIVE** |
+| `simulation/commands.go` | outbound commands, manual-override latch | actuation | **LIVE** |
+| `simulation/state.go`, `fixture.go` | live state types; the digitizer's JSON shapes | everything | **LIVE** |
+| `simulation/sensors.go` | per-sensor freshness, outdoor, supply air, solar | ingest, physics | **LIVE** |
+| `simulation/plant.go` | plant COP, CO₂ balance, hardware binding, pre-cool | physics | **LIVE** |
+| `simulation/models.go` | learned baselines and room dynamics, persistence | recommendations | **LIVE** |
+| `simulation/loadhistory.go` | observed building load, the forecasters' input series | forecast | **LIVE** |
+| `simulation/hardware.go`, `clients.go` | hardware node view; websocket clients, scenarios | dashboard | **LIVE** |
+| `simulation/engine.go` | package doc only — a map of which file answers which question | — | **DOC** |
 | `simulation/library.go` | Loads `programme-library.json`; `Phys()`, `ProgrammeFor()`, `CriticalTypes()` | engine, plugs, fixture generator | **LIVE** |
 | `simulation/dynamics.go` | RLS per-room thermal + CO₂ identification (§7.8) | `/api/rooms/models`, setback gate | **LIVE** |
 | `simulation/baselines.go` | Learned per-(zone, metric, hour) normals, σ-scored (§7.10) | `recommend.go`, model export | **LIVE** |
@@ -1159,13 +1171,23 @@ Everything outside this diagram is in A.6 or A.7.
 **Live:** `main.jsx` → `Root.jsx` (viewport split + `ErrorBoundary`) → `App.jsx` (desktop) or
 `MobileApp.jsx` (< 768 px). Panels: `BuildingModel`, `TelemetryPanel`, `TelemetryLogs`,
 `GlobalMetricsPanel`, `MaintenanceDrawer`, `BlueprintImportPanel`, `AiInsightsPanel`,
-`PlugLoadPanel`, `AirflowWindow` → `ConstrainedAirflow3D` → `flowfield3d.js` (§5.4),
-`FloorInfrastructure`, `LiveWeatherBackground`, `MobileEnergyScreen`, `MobileImpactScreen`,
-`MobileAIScreen`, `RecommendationEvidence`. Hooks: `useDigitalTwin`, `usePlugs`,
-`useRecommendations`, `useOpsStatus`, `useLocalModel`, `useMeanLoad`, `useLibrary`,
-`useRoomModels`, `useForecastCompare`. Libraries: `api.js`, `tariff.js`, `sustainability.js`,
-`flowfield.js`, `floorGeometry.js`, `buildingStore.js`, `telemetry.ts`. Boundaries:
-`ErrorBoundary`, `UIErrorBoundary`, `CanvasErrorBoundary`.
+`PlugLoadPanel`, `SustainabilityRecommendationsPanel`, `AirflowWindow` →
+`ConstrainedAirflow3D` → `flowfield3d.js` (§5.4), `FloorInfrastructure`,
+`LiveWeatherBackground`, `ForecastChart`, `ZoneProfileRows`, `StreamStatus`,
+`OperatorTokenBar`, `MobileEnergyScreen`, `MobileImpactScreen`, `MobileAIScreen`,
+`RecommendationEvidence`, and `HardwareInspector` → `hardware/` (§A.4.9). Hooks:
+`useDigitalTwin`, `usePlugs`, `useRecommendations`, `useOpsStatus`, `useLocalModel`,
+`useMeanLoad`, `useLibrary`, `useRoomModels`, `useForecastCompare`, `useSustainability`,
+`useOperationMode`, `useSteadyRows`, `useStatePersistence`. Libraries: `api.js`, `tariff.js`,
+`sustainability.js`, `flowfield.js`, `floorGeometry.js`, `buildingStore.js`, `units.js`,
+`measured.js`, `telemetry.ts`. Boundaries: `ErrorBoundary`, `UIErrorBoundary`,
+`CanvasErrorBoundary`.
+
+`measured.js` is small but load-bearing for Rule 1 on the display side: `NO_VALUE` is the em
+dash the UI prints where there is no reading, `fx()` formats a number or returns that dash,
+and `hasReading()` is the guard a panel uses before drawing anything at all. The alternative
+— `parseFloat(x) || 24.0` — puts a plausible number on screen for a zone that reported
+nothing, which is Rule 1 violated in the one place an operator will believe it.
 
 **Removed — earlier airflow iterations, deleted 2026-09-12 (1,171 lines):**
 
@@ -1206,7 +1228,7 @@ screen; none of them announced that it had stopped meaning anything.
 | `MaintenanceDrawer` reversed its series | `/api/history` returns oldest-first; the drawer reversed it, plotting the last ten minutes backwards **and inverting the least-squares slope**, so a recovering room was labelled CLIMBING | Reorder removed |
 | Mobile savings donut floored both slices at 0.001 | With the engine down the chart drew a confident half-green ring around a "0.0%" label | Empty state |
 | `floor.geometry.exteriorPolygon` | `housify_fixture.py` emitted `outline`; the read threw and `AirflowWindow`'s throw reached the **root** error boundary, replacing the entire desktop console. `BuildingModel`'s was swallowed by the canvas boundary and simply rendered no building | Generator emits the canonical fields; `floorGeometry.js` reads either spelling and answers null rather than throwing |
-| `/(server|data|it)/i` IT-programme test | The bare `it` matched `kitchen`, so a kitchen-dominated house would have declared itself IT-dominated and suppressed its own EUI benchmark | Token-boundary match |
+| `/(server\|data\|it)/i` IT-programme test | The bare `it` matched `kitchen`, so a kitchen-dominated house would have declared itself IT-dominated and suppressed its own EUI benchmark | Token-boundary match |
 | Plug-sweep toggle discarded its result | On a token-protected engine the mobile toggle silently did nothing | Shared operator token; refusals surfaced |
 
 Three coefficients that describe the building — the per-°C HVAC fraction, the pre-cool shift
@@ -1434,6 +1456,47 @@ Finally, the loop had been silent on success — it logged only when it opened a
 on a building whose forecast never crosses the trigger there was no way to confirm from
 outside which model the automation was consulting. Which model that is turned out to be the
 most important fact about this loop, so it now says so.
+
+**A.4.9 `HardwareInspector.jsx` split, 2026-09-12 (2,200 → 196 lines).** The hardware panel
+had accreted every per-node control, every diagnostic tab and the radar polar plot into one
+file, and the file had become the reason nobody read it — which is how the dead controls of
+§A.4.7 survived as long as they did. It is now a router: `HardwareInspector.jsx` holds the
+tab state, the node list and the layout, and each tab is its own module under
+`dashboard/src/hardware/`. No behaviour was changed in the split; the defects listed below it
+were fixed separately and are recorded where they were found.
+
+| Module | Role | Lines |
+|---|---|---|
+| `HardwareInspector.jsx` | Tab state, node selection, layout | 196 |
+| `hardware/DeviceControls.jsx` | Per-node actuator controls — relay, AC setpoint, IR, LED | 634 |
+| `hardware/Radar.jsx` | Rd-03 / LD2410 range-gate polar plot and gate table | 282 |
+| `hardware/UsbTab.jsx` | WebSerial console, flash and command entry | 242 |
+| `hardware/SustainabilityTab.jsx` | Per-node energy and carbon attribution | 185 |
+| `hardware/ForecastTab.jsx` | LSTM / TimesFM comparison for the selected node's zone | 155 |
+| `hardware/DeviceCard.jsx` | One node's summary card — freshness, channels, last frame | 136 |
+| `hardware/shared.js` | Formatting, freshness thresholds, channel metadata | 82 |
+| `hardware/QualityTab.jsx` | Per-channel sensor quality and stale reasons | 79 |
+| `hardware/ConfigTab.jsx` | Node build flags and reported configuration | 69 |
+| `hardware/StaleAgeControl.jsx` | Staleness threshold slider | 60 |
+| `hardware/ControlsTab.jsx` | Hosts `DeviceControls` per selected node | 59 |
+| `hardware/Spark.jsx` | Inline sparkline for a channel's recent history | 47 |
+| `hardware/EventsTab.jsx` | Node event log | 38 |
+
+The click-to-edit GPIO pin table did not survive the split, and should not have. It POSTed
+`CONFIG:PIN_REMAP:<dashboard-id>=<pin>`. The `CONFIG:` route is real — the engine strips the
+prefix and republishes the remainder to `econ/config/<node>` — but `handleConfig()`
+deserialises that payload as JSON keyed by *firmware field name* (`pinIrAc`,
+`pinPlugRelay`), and `PIN_REMAP:ir_blaster=25` is neither JSON nor a field name, so every
+node rejected it. Three separate mechanisms hid that: the POST returned 200 because the
+*engine* had accepted the command, `.catch(() => {})` discarded transport errors, and the
+new pin was written to `localStorage` and redrawn regardless — so the cell displayed a pin
+the node had explicitly refused, on that one browser, indefinitely.
+
+Fixing the message would not have been enough. `IRac` and `IRsend` capture their pin in the
+constructor and expose no way to move it, so the IR row cannot be remapped at runtime by any
+message; `main.cpp` warns when a configured `pinIrAc` disagrees with the compiled one for
+exactly this reason. Pins are a build-time property of `platformio.ini`. The table now
+reports them and says it cannot change them, which is the only honest control here.
 
 | Other node | Role | Status |
 |---|---|---|

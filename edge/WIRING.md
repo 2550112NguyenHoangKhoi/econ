@@ -19,7 +19,7 @@ pin physically sits on the board changes.
 | **21** | I²C SDA | SHT30 · ACD1200 (via level shifter) | `USE_SHT30` / `USE_CO2` | Shared bus |
 | **22** | I²C SCL | SHT30 · ACD1200 (via level shifter) | `USE_SHT30` / `USE_CO2` | Shared bus |
 | **26** | out | **SRD-05VDC-SL-C** relay IN — switches the **power strip** | `USE_PLUG` | Firmware drives **active HIGH**, boots energized. ⚠️ Check your module's polarity — see §4 |
-| **25** | out | IR emitter driver (transistor base) | `USE_IR_AC` | ⚠️ **must not** move to GPIO22 |
+| **25** | out | IR emitter — 2 × 15 Ω then two 940 nm LEDs in series to GND, no transistor (§3.1) | `USE_IR_AC` | ⚠️ **must not** move to GPIO22 |
 | **23** | out | Lighting relay IN (SSR CH1) | `RELAY_PIN` | **Not fitted on this node** — flag undefined, firmware skips it |
 | **13** | in | Rd-03 **#1** `OT2` (pin 5) | `USE_MMWAVE` | 3.3 V logic, no shifter. Full GPIO — both internal pulls, so an open wire is detectable |
 | **14** | in | Rd-03 **#2** `OT2` (pin 5) | `MMWAVE2_PIN` | 3.3 V logic. Full GPIO — both internal pulls |
@@ -71,12 +71,12 @@ flowchart LR
   LS["Level shifter<br/>BSS138"] -- "I²C 3.3V" --> E
   CO2["ACD1200 NDIR<br/>CO₂ · 0x2A · 5V"] -- "I²C 5V" --> LS
   LUX["BH1750 lux<br/>0x23 · optional"] -- "I²C 3.3V" --> E
-  RAD["Rd-03 radar ×2<br/>presence · 3.3V"] -- "GPIO34 / GPIO15" --> E
+  RAD["Rd-03 radar ×2<br/>presence · 3.3V"] -- "OT2 GPIO13/14 · UART GPIO16,17 / 4,18" --> E
   DS["DS18B20 MKE-S15<br/>supply T · 5V · NOT FITTED"] -- "GPIO27 1-Wire" --> E
   CT["SCT-013 plug clamp<br/>94R burden + bias"] -- "GPIO33 ADC1" --> E
   E -- "GPIO23 → CH1 (not fitted)" --> SSR["2-ch SSR G3MB-202P<br/>lights + socket"]
   E -- "GPIO26" --> RLY["SRD-05VDC-SL-C relay<br/>→ power strip"]
-  E -- "GPIO25 → 500R → 2N2222A" --> IR["IR LED 940nm<br/>5V rail → split AC"]
+  E -- "GPIO25 → 30R" --> IR["IR LED 940nm ×2 in series<br/>direct drive → split AC"]
   E -- "WiFi / MQTT" --> BR["Mosquitto broker<br/>→ Go engine"]
 ```
 
@@ -108,8 +108,8 @@ device that is only present when that build flag is set.
       ▼                                                                                ║
  ═══╦═╩═══╦═══════╦═══════════╦═══════════╦═══════════╦═══════════ 3V3 RAIL           ║
     ║     ║       ║           ║           ║           ║                                ║
-  SHT30 Rd-03  BH1750    shifter BVCC   R4 (bias)   R2 → IR LED anode                  ║
-   VCC   VCC    VCC          VCC                      R6, R7 pull-ups                  ║
+  SHT30 Rd-03  BH1750    shifter BVCC   R4 (bias)   R6, R7 pull-ups                  ║
+   VCC   VCC    VCC          VCC                    (IR emitter is on GPIO25, not a rail) ║
     ║     ║       ║           ║           ║           ║           ║                    ║
     ╚═════╩═══════╩═══════════╩═══════════╩═══════════╩═══════════╩═══ all GND ════════╝
                         ⚠ every ground common, including both breadboard rails
@@ -133,8 +133,8 @@ device that is only present when that build flag is set.
    GPIO26 ────────────────────► SRD-05VDC-SL-C ──► COM/NO in SERIES with LIVE ── power strip
           └─ boots HIGH: fail-energized                        [USE_PLUG]
 
-   GPIO25 ──[R1 500R]► B  2N2222A     5V  ──[R2 15R]──►│IR LED 940nm│──► C
-                          E ──► GND                                       [USE_IR_AC]
+   GPIO25 ──[R2a 15R]──[R2b 15R]──►│IR LED 940nm│──►│IR LED 940nm│──► GND
+          direct drive, ~25 mA, no transistor — §3.1              [USE_IR_AC]
 
    ── Sensor inputs ────────────────────────────────────────────────────────────────
    GPIO13 ◄──────────────────── Rd-03 #1 OT2 (pin 5)   3.3 V logic   [USE_MMWAVE]
@@ -143,13 +143,13 @@ device that is only present when that build flag is set.
                └──[R6 4.7k]──► 3V3
    GPIO4  ◄────┬─────────────── DHT11/22 DATA                    [USE_DHT] fallback
                └──[R7 10k]───► 3V3
-   GPIO32 ◄──────────────────── bare jumper (touch T9 demo)
+   GPIO32 ◄──────────────────── ACS712 OUT via 10k/10k divider    [USE_STRIP]
 
    ── Analog front ends (ADC1 only — ADC2 is dead while WiFi is up) ────────────────
                 3V3 ──[R4 10k]──┬── 1.65 V bias ──[C1 0.1µ]── GND
                                 │
-   GPIO34 ◄─────────────────────┼── CT tip     ⎫
-                GND ──[R5 10k]──┘              ⎬ R3 33R burden across tip↔sleeve
+   GPIO33 ◄─────────────────────┼── CT tip     ⎫
+                GND ──[R5 10k]──┘              ⎬ R3 94R burden across tip↔sleeve
                                    CT sleeve   ⎭ clamp LIVE conductor ONLY  [USE_PLUG]
 
    GPIO35 ◄──── identical front end: R3′/R4′/R5′/C1′, 2nd CT on the AC's own supply
@@ -161,7 +161,7 @@ device that is only present when that build flag is set.
 Three things this drawing is trying to make un-missable, each of which has its own section
 below: the **level shifter is the only 5 V thing on the I²C bus** (§2), the **SSR output pair
 goes in series with live** rather than to a COM/NO contact (§4), and the **bias divider is
-what holds GPIO34 at a defined voltage** — those pins have no internal pull-ups (§5).
+what holds GPIO33 at a defined voltage** — nothing else does (§5).
 
 ---
 
@@ -178,25 +178,31 @@ a **number**, identical on the 30-pin DevKit and the 38-pin NodeMCU-32S.
 | ESP32 pin | Dir | Net | Wires to | Flag |
 |---|---|---|---|---|
 | VIN / 5V | pwr in | 5V | PSU +5 V; SSR DC+; shifter **AVCC**; ACD1200; **DS18B20 (MKE-S15)**; (PIR VCC) | — |
-| 3V3 | pwr out | 3V3 | SHT30 (brown), Rd-03, BH1750; shifter **BVCC**; both bias dividers; IR-LED anode via R2 | — |
+| 3V3 | pwr out | 3V3 | SHT30 (brown), Rd-03, BH1750; shifter **BVCC**; both bias dividers | — |
 | GND | pwr | GND | PSU −, SSR DC−, every sensor GND, both bias dividers | — |
 | GPIO21 | I²C SDA | SDA | SHT30 SDA (**yellow**) · BH1750 SDA · shifter **BSDA** | `USE_SHT30`/`USE_CO2`/`USE_LUX` |
 | GPIO22 | I²C SCL | SCL | SHT30 SCL (**blue**) · BH1750 SCL · shifter **BSCL** | same |
 | GPIO26 | out | — | **SRD-05VDC-SL-C** coil driver IN — switches the power strip; boots HIGH | `USE_PLUG` |
-| GPIO25 | out | — | **R1 500 Ω** (2 × 1 kΩ ∥) → 2N2222A base (IR); LED anode on **5 V** | `USE_IR_AC` |
+| GPIO25 | out | — | **R2a + R2b = 2 × 15 Ω in series** → two 940 nm LEDs in series → GND. Direct drive, no transistor (§3.1) | `USE_IR_AC` |
 | GPIO23 | out | — | SSR **CH1** (lighting) — *not fitted* | `RELAY_PIN` |
+| GPIO16 | in | — | Rd-03 **#1 OT1/TX** — the ESP32 listens here (`MMWAVE_UART_RX=16`) | `USE_MMWAVE_UART` |
+| GPIO17 | out | — | Rd-03 **#1 RX** — the ESP32 sends gate config here (`MMWAVE_UART_TX=17`) | `USE_MMWAVE_UART` |
+| GPIO18 | out | — | Rd-03 **#2 RX** — gate config (`MMWAVE2_UART_TX=18`) | `USE_MMWAVE2_UART` |
 | GPIO19 | — | — | **free** — nothing wired here | — |
 | GPIO13 | in | — | Rd-03 **#1 OT2** (pin 5) | `USE_MMWAVE` |
 | GPIO14 | in | — | Rd-03 **#2 OT2** (pin 5) | `MMWAVE2_PIN` |
 | GPIO33 | ADC1 in | — | plug CT tip / bias node (SCT-013) | `USE_PLUG` |
 | GPIO35 | ADC1 in | — | AC-clamp CT tip / bias node (input-only) | `USE_AC_CLAMP` |
 | GPIO27 | 1-Wire | — | DS18B20 DATA (+ **R6 4.7 kΩ** to 3V3) — *not fitted* | `USE_SUPPLY_TEMP` |
-| GPIO4 | in/out | — | DHT22/11 DATA (+ **R7 10 kΩ** to 3V3) | `USE_DHT` (fallback) |
+| GPIO4 | in | — | Rd-03 **#2 OT1/TX** — the ESP32 listens here (`MMWAVE2_UART_RX=4`) | `USE_MMWAVE2_UART` |
 | GPIO32 | ADC1 in | — | ACS712 strip sensor OUT (via 10k/10k divider) | `USE_STRIP` |
 | GPIO2 | out | — | onboard LED (MQTT link status) | *(always)* |
 
-> ADC note: GPIO34 and GPIO35 are **input-only** and both on **ADC1** — deliberate, because
-> ADC2 is dead whenever WiFi is up. Never move a clamp to an ADC2 pin (0, 2, 4, 12–15, 25–27).
+> ADC note: the clamps sit on **GPIO33 (plug) and GPIO32 (strip)** — both **ADC1**, which is
+> the part that matters: ADC2 is dead whenever WiFi is up. Never move a clamp to an ADC2 pin
+> (0, 2, 4, 12–15, 25–27). GPIO34/35 are also ADC1 and are input-only, which is safer still,
+> but they carry no internal pulls at all, so the bias divider is doing *all* the work there
+> — see §5 and the pull-test caution in §6.
 
 ### Sensors & modules — pin by pin
 
@@ -226,6 +232,17 @@ the bare sensor — and three of them do — the module wins, because that is wh
   I²C; low = 1200-baud UART, which the firmware doesn't speak). Average draw < 45 mA,
   120 s warm-up, refreshes every 2 s. **Its real range is 400–5000 ppm** — narrower than the
   firmware's 300–10000 ppm sanity window, so the sensor, not the filter, is the limit.
+
+  **Calibration.** NDIR cells drift, and the twin's measured air-change rate is identified
+  from this channel — a 200 ppm offset propagates straight into ACH and from there into every
+  ventilation recommendation. `CO2_CAL=<ppm>` performs the single-point calibration
+  (command `0x5204`) against a known reference: outdoor air on a breezy day is ~420 ppm and
+  is the usual one. The target must be 380–2000 ppm, and the firmware then **refuses** the
+  write unless it gets ≥ 20 of 30 valid reads over a 60 s sample whose spread is ≤ 50 ppm,
+  and the implied correction is under 800 ppm. Stability alone is not enough — a closed,
+  occupied room is also stable, and that is exactly when someone impatient destroys the
+  sensor's zero — so a correction larger than baseline drift explains needs
+  `CO2_CAL=<ppm>,FORCE`. Take the sensor outside, stand back, and let it settle first.
 - **BSS138 level shifter** (with ACD1200) — ⚠️ **ships with its headers loose in the bag,
   not soldered.** The board is bare through-holes; two 4-pin strips come with it and must be
   soldered on before it connects to anything. Solder them **pointing down** so the board
@@ -245,19 +262,31 @@ the bare sensor — and three of them do — the module wins, because that is wh
   This is the only thing on the bus that is 5 V: the ACD1200 pulls I²C to 5 V and the ESP32
   is not 5 V tolerant.
 - **Rd-03 radar ×2** `[USE_MMWAVE + MMWAVE2_PIN]`: VCC→3.0–3.6 V · GND→GND ·
-  head **#1 OT2 (pin 5)→GPIO34**, head **#2 OT2 (pin 5)→GPIO15**. Firmware ORs the two into
+  head **#1 OT2 (pin 5)→GPIO13**, head **#2 OT2 (pin 5)→GPIO14**. Firmware ORs the two into
   `occupancy` and also publishes each head separately as `radar1`/`radar2`, so one head stuck
-  high stays visible instead of disappearing into the OR. Two pin cautions:
-  **GPIO34 is input-only with no internal pull-up or pull-down** — fine for OT2, which is a
-  push-pull output, but it means an open pin cannot be detected by pulling on it (the firmware
-  falls back to checking whether the reading is steady or noisy). **GPIO15 is a strapping pin
-  (MTDO)** with an internal pull-up, so an *unconnected* GPIO15 reads a convincing HIGH — which
-  is why the firmware pull-tests it at boot and prints `DRIVEN` vs `FLOATS BOTH WAYS`. Holding
-  GPIO15 low at reset only silences the ROM boot banner; it is otherwise safe. DIP-5,
-  on-board antenna, ±60°, up to 5 m. 3.3 V throughout, no shifter; its UART (115200 default)
-  is only for tuning gates and is unused here. ⚠️ **Ai-Thinker specify a supply able to
-  deliver ≥ 200 mA** — see the power budget in §1, because that figure does not fit
-  comfortably on the ESP32's onboard regulator.
+  high stays visible instead of disappearing into the OR.
+
+  **Both OT2 pins are ordinary full GPIOs, and that is the whole point.** They used to be
+  GPIO34 and GPIO15, and both were wrong. GPIO34 is input-only with no internal pull-up or
+  pull-down, so an open wire cannot be detected by pulling on it — the firmware had to fall
+  back to guessing from whether the reading looked steady or noisy. GPIO15 is a strapping pin
+  (MTDO) carrying an external pull-up on DevKit boards, so an *unconnected* GPIO15 reads a
+  convincing HIGH: a head that was never wired reports a permanently occupied room. On 13 and
+  14 the boot-time pull test is conclusive — the firmware drives each pin both ways and
+  prints `DRIVEN` (something is holding it) or `FLOATS BOTH WAYS` (nothing is on this pin).
+  See the caution in §6; this cost a full day of misdiagnosis before the pins moved.
+
+  **The UART is wired too, and it is not optional here.** Each head's `OT1` pad is its UART
+  TX — there is no pad marked TX on the DIP-5 — and the range gates this build sets
+  (`RD03_SET_MIN_GATE`/`MAX_GATE`/`DELAY_S`/`FRAME_FILTERS`) are configured over it at boot.
+  Head #1: `OT1→GPIO16`, `RX←GPIO17`. Head #2: `OT1→GPIO4`, `RX←GPIO18`. A head whose OT1
+  wire is open keeps its factory gates and reports nothing on the range-gate panel while OT2
+  still works — which is exactly how it presents, so check §6's `RD03_LINETEST` before
+  assuming the module is dead.
+
+  DIP-5, on-board antenna, ±60°, up to 5 m. 3.3 V throughout, no shifter. ⚠️ **Ai-Thinker
+  specify a supply able to deliver ≥ 200 mA** — that is a *source* requirement, not a draw;
+  the measured figure and why the budget closes are in §1.
 - **BH1750 lux** (`0x23`) `[USE_LUX]`: VCC→3V3 (module takes 3.3–5 V; use 3V3 for the same
   pull-up reason as the SHT30) · GND→GND · SDA→GPIO21 · SCL→GPIO22 · ADDR→GND. Returns lux
   directly — no conversion maths. Shares the I²C bus, no shifter.
@@ -314,25 +343,28 @@ This node does **not** use the SSR for the switched circuit. GPIO26 drives a Son
   GPIO33 (`plugW`) and this relay are on **different circuits** — do not read one as the other.
 - **Output (mains, each pair in SERIES with LIVE):** A1–B1 → live ↔ luminaire; A2–B2 → live ↔ socket. **No COM/NO/NC.** Neutral stays common to both loads. Full detail and the 0.1–2 A / AC-only caveats are in [§4 Option B](#4-relays--lighting-and-sockets).
 
-### IR AC driver `[USE_IR_AC]`
+### IR AC driver `[USE_IR_AC]` — as built
 
 ```
-   GPIO25 ──[ R1 500 Ω ]──► B (base)
-                                2N2222A (NPN, TO-92)
-   5V ──[ R2 15 Ω ]───►|IR LED 940nm|──► C (collector)
-                        (anode)  (cathode)
-   GND ───────────────────────────────► E (emitter)
+   GPIO25 ──[ R2a 15 Ω ]──[ R2b 15 Ω ]──►|IR LED 940nm|──►|IR LED 940nm|──► GND
+                                          (anode)(cath.)   (anode)(cath.)
 
-   100 µF + 100 nF across 5V ↔ GND, close to the LED
+   No transistor, no 5 V rail, no reservoir capacitor.
 ```
 
-IR LED is the caka **"Led Phát"** 940 nm emitter. **Run the anode from 5 V, not 3V3** — from
-3V3 the same resistor delivers about a third of the current and the AC stops responding
-past a metre or so. **Fit ONE.** A second emitter widens coverage but costs reach if it ends
-up in series — two forward drops leave under a volt across the burden — and in parallel it
-needs its own 15 Ω plus more base drive than the standard 500 Ω supplies. The base resistor scales with the collector current you are asking for; the
-arithmetic, and when to reach for a MOSFET instead, is in
-[§3 IR emitter](#3-ir-emitter--real-ac-control). Aim at the indoor unit's receiver window.
+IR LEDs are the caka **"Led Phát"** 940 nm emitters, **two in series** off the pin through
+**30 Ω total**. ~25 mA through both. This is the circuit on the bench and the one that
+identified the AC's protocol, at 10–30 cm from the receiver window.
+
+⚠️ **Never fit a single 15 Ω here.** `(3.3 − 1.4) / 15 = 127 mA` is over three times GPIO25's
+absolute maximum and damages the pin. The single 15 Ω belongs only in the transistor version.
+
+Series rather than parallel is deliberate and the reasoning inverts with the supply: off a
+pin, current is the scarce resource and series makes both emitters share it; behind a
+transistor on 5 V, headroom is scarce and parallel wins. For room-scale range — ~2.8× this,
+since range goes as √current — build the transistor driver in
+[§3.2](#32-the-transistor-driver--range-at-the-cost-of-a-rail). Aim at the indoor unit's
+receiver window either way.
 
 ### Plug CT front end — SCT-013-000 `[USE_PLUG]`
 
@@ -369,15 +401,16 @@ Electrically **identical** to the plug front end but read on **GPIO35**, with it
 
 ## Passive components — the resistors and capacitor to buy
 
-All resistors **1/4 W** (5 % is fine) **except R2**, which carries the IR LED's pulse current
-and should be 0.5 W; values come from the caka *"Điện Trở Vạch 1/4W"* list, and the 0.1 µF caps
-from the hshop ceramic kit. Per node:
+All resistors **1/4 W**, 5 % is fine; values come from the caka *"Điện Trở Vạch 1/4W"* list,
+and the 0.1 µF caps from the hshop ceramic kit. Per node. The **R1 / C2** rows are needed
+only if you build the transistor driver of §3.2 — the as-built node (§3.1) is two 15 Ω and
+nothing else:
 
 | Ref | Value | Qty | Tol. | Where it goes | Purpose | Flag |
 |---|---|---|---|---|---|---|
-| **R1** | **500 Ω** = **2 × 1 kΩ in parallel** | 2 | 333 Ω (3 in parallel) if you want margin. caka's ¼ W list jumps 100 Ω → 1 kΩ, so parallel is how you land between | GPIO25 → 2N2222A base | Base drive. Must be small enough to *saturate* the transistor at the collector current you want — a single 1 kΩ gives 2.4 mA and will not, above ~50 mA | `USE_IR_AC` |
-| **R2** | **15 Ω** | 1 | ¼ W is enough · **8.2–22 Ω**, see §3. *Not 10 Ω — caka's ¼ W list skips it* | **5 V** → IR-LED anode | IR-LED current limit (~190 mA pulse from 5 V; only ~60 mA from 3V3). 0.47 W *peak* but ~20 % duty inside a frame, so ~0.09 W average — a ¼ W part is fine | `USE_IR_AC` |
-| **C2** | **100 µF** electrolytic | 1 | ≥ 10 V · 22 µF is the minimum worth fitting | 5V ↔ GND, next to the IR LED | Local reservoir for the LED's current bursts, so a transmit does not brown out the radio. **Not in the hshop ceramic kit** (that tops out at 0.1 µF) — salvage one from a dead charger or buy separately | `USE_IR_AC` |
+| **R2a, R2b** | **15 Ω** | **2** | ¼ W · *Not 10 Ω — caka's ¼ W list skips it* | **GPIO25** → IR-LED string, **in series** (30 Ω total) | IR-LED current limit for the as-built direct drive: ~25 mA through two emitters in series. ⚠️ Fitting only one is 127 mA — three times the pin's absolute maximum | `USE_IR_AC` **§3.1** |
+| R1 | 333 Ω = **3 × 1 kΩ in parallel** | 3 | 250 Ω (4 ∥) for two LEDs. caka's ¼ W list jumps 100 Ω → 1 kΩ, so parallel is how you land between | GPIO25 → 2N2222 base | Base drive **for the §3.2 driver only**. Must saturate the transistor at the collector current you want — a single 1 kΩ gives 2.3 mA and will not, above ~80 mA | `USE_IR_AC` **§3.2** |
+| C2 | 100 µF electrolytic | 1 | ≥ 10 V · 22 µF is the minimum worth fitting | 5V ↔ GND, next to the IR LED | Reservoir for the LED's current bursts **in the §3.2 driver only**, so a transmit does not brown out the radio. The 25 mA of §3.1 needs none. **Not in the hshop ceramic kit** (that tops out at 0.1 µF) — salvage one from a dead charger or buy separately | `USE_IR_AC` **§3.2** |
 | **R3** | **94 Ω** (2 × 47 Ω) | 2 | **1 % preferred** · substitutable | across SCT-013 (plug) | Burden: current → voltage; sets the **22.1 A/V** scale this node is calibrated at. 33 Ω (60.6 A/V) is the nominal design value; any burden works if the flag matches it | `USE_PLUG` |
 | **R4, R5** | **10 kΩ** | 2 | **matched pair** | 3V3–node–GND divider (plug) | 1.65 V ADC mid-rail bias | `USE_PLUG` |
 | **C1** | **0.1 µF** | 1 | any | bias node → GND (plug) | Steadies the mid-rail | `USE_PLUG` |
@@ -387,16 +420,16 @@ from the hshop ceramic kit. Per node:
 | C1′ | 0.1 µF | 1 | any | 2nd bias node → GND | Steadies the mid-rail | `USE_AC_CLAMP` |
 | R7 | 10 kΩ | 1 | any | DHT DATA → 3V3 | DHT pull-up | `USE_DHT` (fallback) |
 
-**Minimum resistor buy for Build D (plug + IR, no 2nd clamp):**
-**2 × 1 kΩ, 1 × 15 Ω, 2 × 47 Ω, 2 × 10 kΩ** — plus one 0.1 µF from the ceramic kit.
+**Minimum resistor buy for Build D (plug + IR as built, no 2nd clamp):**
+**2 × 15 Ω, 2 × 47 Ω, 2 × 10 kΩ** — plus one 0.1 µF from the ceramic kit. Add **3 × 1 kΩ**
+and a 100 µF electrolytic only if you are building the §3.2 transistor driver.
 Buy each value once (caka sells ~a bag per value at ~3.000₫), which leaves spares. The I²C
 and most sensor breakouts already carry their own 4.7 kΩ pull-ups — don't add more.
 
-Two 1 kΩ rather than one, and 15 Ω rather than 10 Ω: caka's ¼ W list runs
-8.2/15/22/27/39/47/68/100 Ω then jumps to 1 kΩ, so **neither 10 Ω nor the ~300 Ω the IR
-base wants is a part you can buy there.** Two 1 kΩ in parallel is 500 Ω, which is enough
-drive for the ~190 mA a 15 Ω sets — same two breadboard rows, no extra SKU. The same trick
-covers the 94 Ω burden with two 47 Ω in series.
+15 Ω rather than 10 Ω, and 1 kΩ in parallel rather than a single part: caka's ¼ W list runs
+8.2/15/22/27/39/47/68/100 Ω then jumps to 1 kΩ, so **neither 10 Ω nor the ~333 Ω the §3.2
+base wants is a part you can buy there.** Three 1 kΩ in parallel is 333 Ω — same breadboard
+rows, no extra SKU. The same trick covers the 94 Ω burden with two 47 Ω in series.
 
 ### Reading the hshop ceramic kit
 
@@ -416,8 +449,9 @@ zeros, in picofarads. One- and two-digit markings are plain pF.
 
 ⚠️ **Nothing in this kit is a reservoir capacitor.** 104 is its largest part, and the whole
 kit paralleled — every value, one of each — comes to **0.225 µF**, still 62× short of the
-~14 µF the IR driver's C2 needs. Ceramics of that size do not come in a through-hole
-assortment; C2 has to be an electrolytic bought or salvaged separately.
+~14 µF the §3.2 IR driver's C2 needs. Ceramics of that size do not come in a through-hole
+assortment; C2 has to be an electrolytic bought or salvaged separately. The as-built §3.1
+emitter draws 25 mA and needs no reservoir at all, so on this node the kit is enough.
 
 **Which tolerances actually matter.** Only two rows care:
 
@@ -452,9 +486,9 @@ rail mistake is exactly what a colour convention makes visible from across the d
 | **Black** | GND | Every ground, no exceptions |
 | **Yellow** | I²C SDA | GPIO21 |
 | **Green** | I²C SCL | GPIO22 |
-| **Blue** | Digital in (sensors → ESP32) | GPIO34, 15, 26, 4 |
-| **White** | Digital out (ESP32 → actuators) | GPIO23, 25, 19 |
-| **Purple** | Analog (CT tip, bias node) | GPIO34, 35 — keep these short |
+| **Blue** | Digital in (sensors → ESP32) | GPIO13, 14 (OT2) · GPIO16, 4 (radar OT1/TX) |
+| **White** | Digital out (ESP32 → actuators) | GPIO23, 25, 26 · GPIO17, 18 (radar RX) |
+| **Purple** | Analog (CT tip, bias node) | GPIO33, 32 — keep these short |
 | **Brown/Live · Blue/N · G-Y/Earth** | Mains | Vietnamese/IEC convention. Never on the breadboard |
 
 ### Board zoning
@@ -471,9 +505,9 @@ that single hole.
    │ ▓▓ GND rail ────────────────────── │   │ ▓▓ GND rail ───────────────────── │
    │                                    │   │                                   │
    │  ┌──────────────┐                  │   │   R4 ┐                            │
-   │  │              │  R1 ─ 2N2222     │   │      ├─ bias node ─ C1 ─ GND      │
+   │  │              │  R2a─R2b         │   │      ├─ bias node ─ C1 ─ GND      │
    │  │    ESP32     │       │          │   │   R5 ┘      │                     │
-   │  │  (straddles  │       R2 ─ IRLED │   │             └──► GPIO34  (purple, │
+   │  │  (straddles  │    IRLED─IRLED   │   │             └──► GPIO33  (purple, │
    │  │   the centre │                  │   │   R3 burden across CT leads       │
    │  │   channel)   │  ── SSR ribbon ──┼───┼─► (SSR lives OFF-board, in its    │
    │  │              │     GPIO23/25    │   │    own enclosure — see §4)        │
@@ -485,11 +519,13 @@ that single hole.
 
 **Why the split is not arbitrary.** The bias node is a ~5 kΩ source impedance (two 10 kΩ in
 parallel) sitting on a high-input-impedance ADC pin. That is precisely the kind of node that
-capacitively picks up a neighbour — and its neighbours here would be an IR driver slamming
-100 mA on and off, and an SSR gate line. Keep the CT front end and its purple analog runs on
-the far side of the layout from the IR transistor. If you only have one board, put the
-analog front end at one end and the IR driver at the other, and run a black ground jumper
-between the two ground rails to keep the return path short.
+capacitively picks up a neighbour — and its neighbours here are an IR string switching at
+38 kHz and an SSR gate line. The as-built emitter only slams 25 mA, so the coupling is far
+weaker than it would be behind the §3.2 driver's 190 mA — but the rule is the same and costs
+nothing to follow. Keep the CT front end and its purple analog runs on the far side of the
+layout from the IR string. If you only have one board, put the analog front end at one end
+and the IR driver at the other, and run a black ground jumper between the two ground rails
+to keep the return path short.
 
 Three placement rules worth following exactly:
 
@@ -536,9 +572,9 @@ that actually bites).
 | SHT30 | ~1.5 mA | Peak while measuring; ~0.2 µA idle |
 | BH1750 | ~0.12 mA | |
 | 2 × bias dividers | ~0.33 mA | 3.3 V across 20 kΩ, each |
-| IR LED pulse | ~100 mA | **Bursty**, tens of ms per command, not continuous |
+| IR LED string | ~25 mA | Off GPIO25, **bursty** — tens of ms per command, not continuous. The §3.2 transistor driver would put ~190 mA on the **5 V** rail instead |
 | **Continuous total** | **≈ 347 mA** | ~70 % of the regulator |
-| **Worst-case coincident** | **≈ 447 mA** | WiFi TX *and* an IR burst at once — inside budget, with little to spare |
+| **Worst-case coincident** | **≈ 372 mA** | WiFi TX *and* an IR burst at once — comfortably inside budget on the as-built emitter |
 
 > ✅ **This budget closes, and the resolution is documented rather than assumed.** Ai-Thinker
 > publish two different numbers for the Rd-03 and they measure different things:
@@ -548,7 +584,7 @@ that actually bites).
 > | `Rd-03_V2 Specification V2.0.0`, §2 | "power supply current **≥ 200 mA**" | A requirement on the **source** — the rail must be *able* to deliver 200 mA, i.e. headroom for transmit peaks |
 > | `Rd-03_V2 Power Consumption Test Report`, 2025-03-14 (Keysight N6705C, 3.3 V, 25 °C) | **47.3 mA average**, human-presence detection | The actual **draw** |
 >
-> Two heads therefore average ~95 mA, not ~400 mA, and the 3V3 rail sits at roughly 70 % of
+> Two heads therefore average ~95 mA, not ~400 mA, and the 3V3 rail sits at roughly 75 % of
 > the regulator with both heads and the IR emitter fitted. The node has run both heads off
 > the onboard rail without a brownout, which agrees with the measured figure.
 >
@@ -604,7 +640,7 @@ which is still comfortable.
 > only good for 500 mA total. Bench-test on a proper PSU before blaming the code.
 
 > The **Rd-03** is a 3.3 V part throughout, which is one fewer rail to think about. An
-> LD2410C, if you have one, wants 5 V but its `OUT` is 3.3 V logic and still feeds GPIO34/15
+> LD2410C, if you have one, wants 5 V but its `OUT` is 3.3 V logic and still feeds GPIO13/14
 > directly.
 
 ---
@@ -652,9 +688,64 @@ The one circuit where getting it wrong costs hardware.
 
 ## 3. IR emitter — real AC control
 
-Until recently the firmware only pulsed this pin; it now sends genuine vendor IR frames
-(`-DUSE_IR_AC=1`). That makes the driver circuit necessary rather than decorative: an ESP32
-GPIO sources ~12 mA, and an IR LED needs ~100 mA of pulse current to reach across a room.
+The firmware sends genuine vendor IR frames (`-DUSE_IR_AC=1`), not bare carrier pulses, so
+this circuit is load-bearing: if the emitter does not reach the indoor unit, every setback
+the engine credits is a no-op while `acReal` reports true.
+
+Two circuits are documented here. **§3.1 is what is built and confirmed working on this
+node.** §3.2 is the higher-range driver, and it is written down because it is the right
+answer for a room-scale install — but it has never been proven to emit on this bench, and
+the honest record of that is in §3.3.
+
+### 3.1 As built — two LEDs in series, straight off the pin
+
+Confirmed 2026-09-12. This is the circuit that identified the AC's protocol: with the
+emitters held 10–30 cm from the indoor unit's receiver window, each of the six send-supported
+Hitachi variants was given a distinct setpoint over MQTT, and the unit obeyed `HITACHI_AC`
+at 17 °C. That result is what `-DIR_AC_PROTOCOL=HITACHI_AC` in `platformio.ini` records.
+
+```
+   GPIO25 ──[ 15 Ω ]──[ 15 Ω ]──►|LED 1|──►|LED 2|──► GND
+              R2a       R2b       940nm     940nm
+                                   ↑          ↑
+                    the short leg of LED 1 goes to the long leg of LED 2
+```
+
+Two 15 Ω **in series** (30 Ω total), then both emitters nose-to-tail — anode, cathode,
+anode, cathode, ground. No transistor, no 5 V rail, no reservoir capacitor. Aim both at the
+receiver window.
+
+| | |
+|---|---|
+| Current | ~25 mA, through **both** LEDs |
+| Pin load | ~25 mA — inside the ESP32's 40 mA absolute maximum |
+| Working range | **10–30 cm.** Enough to command the unit across a desk, not across a room |
+| Parts | 2 × 15 Ω, 2 × 940 nm emitter. That is the whole bill |
+
+**Series, not parallel — and the reason inverts with the supply.** Driven from a transistor
+on 5 V (§3.2), current is cheap and *voltage headroom* is the scarce resource, so two
+emitters go in parallel, each with its own burden. Driven straight off a 3.3 V pin the
+constraint flips: the pin's current is a hard ceiling *shared* by everything hanging on it.
+Two LEDs in parallel each get half of it, and two emitters at 12 mA radiate exactly what one
+at 25 mA does. In series both carry the *same* current, so the pin supplies 25 mA once and
+**both** emitters run at 25 mA — twice the radiated power for the same pin budget.
+
+⚠️ **Never go below 30 Ω total here, and never fit the single 15 Ω of §3.2 on its own.**
+`(3.3 − 1.4) / 15 = 127 mA` is over three times the pin's absolute maximum and damages
+GPIO25 permanently. The 15 Ω belongs in the circuit only when a transistor is carrying the
+current.
+
+**The one way this fails.** Series off 3.3 V has almost no margin. Two emitters drop
+~2.4–2.5 V between them, leaving ~0.7 V across the burden. If your parts happen to sit at
+the high end of the 940 nm forward-voltage spread (some are 1.5 V), you are left with 0.2 V
+and get ~7 mA instead of 25 — visibly dim on a camera, and useless past a few centimetres.
+If that happens, series will not work from 3.3 V: go back to one LED, or to §3.2.
+
+### 3.2 The transistor driver — range, at the cost of a rail
+
+`√current` is the whole story: received power falls as 1/r², so **range scales as the square
+root of emitter current.** 25 mA → 190 mA is 7.6× the current and about **2.8× the
+distance** — the difference between a desk and a room.
 
 ```
    5V (VIN) ─────────┐                  ← NOT 3V3. See "Run it from 5 V" below.
@@ -666,7 +757,7 @@ GPIO sources ~12 mA, and an IR LED needs ~100 mA of pulse current to reach acros
                     ▽
                      │
                      ├──────────── C (collector)
-   GPIO25 ─[2×1kΩ∥]─ B (base)         2N2222A / S8050 (NPN)
+   GPIO25 ─[3×1kΩ∥]─ B (base)         2N2222 / S8050 (NPN)
                      ├──────────── E (emitter)
                      │
    GND ──────────────┘
@@ -676,9 +767,8 @@ GPIO sources ~12 mA, and an IR LED needs ~100 mA of pulse current to reach acros
 
 #### Run it from 5 V, and size the base resistor for the current you want
 
-If the AC responds at 30 cm but not across the room, the frame is correct and the **emitter
-is starving**. Two things in the older 3V3 + 1 kΩ version of this circuit hold the current
-down, and both are easy to miss because each looks fine on its own:
+Two things in the older 3V3 + 1 kΩ version of this circuit hold the current down, and both
+are easy to miss because each looks fine on its own:
 
 **The 3V3 rail has almost no headroom left.** The `V_f ≈ 1.5 V` in the formula below is a
 datasheet figure at 20 mA. A 940 nm emitter's forward voltage climbs steeply with current —
@@ -705,20 +795,17 @@ currents:
 | 200 Ω = 5 × 1 kΩ | 11.5 mA | 403 mA | two LEDs in full |
 
 11.5 mA is still inside the ESP32's 20 mA comfortable per-pin budget, so five in parallel is
-allowed; past that
+allowed.
 
 Parallel 1 kΩ resistors are how you land in that range at all — caka's ¼ W list has nothing
 between 100 Ω and 1 kΩ, and identical resistors across the same two breadboard rows need no
-extra SKU. **Three for one LED, five for two.** Below ~150 Ω you are asking the GPIO for more than it should
-give, and the right answer is a **logic-level N-channel MOSFET** (AO3400, IRLML2502) instead
-of the bipolar — a gate draws no steady current at all, and `R_DS(on)` under 0.1 Ω hands the
-whole rail to the LED rather than dropping 0.3–0.5 V across a `V_ce(sat)`.
+extra SKU. **Three for one LED, five for two.** Below ~150 Ω you are asking the GPIO for
+more than it should give, and the right answer is a **logic-level N-channel MOSFET**
+(AO3400, IRLML2502) instead of the bipolar — a gate draws no steady current at all, and
+`R_DS(on)` under 0.1 Ω hands the whole rail to the LED rather than dropping 0.3–0.5 V across
+a `V_ce(sat)`.
 
-**Received power falls as 1/r², so range scales as √current.** 90 mA → 270 mA is 3× the
-current and therefore about **1.7× the distance** — the difference between reaching the far
-wall and not.
-
-**Add the reservoir capacitor.** 270 mA of switched pulses on a rail shared with the ESP32's
+**Add the reservoir capacitor.** 190 mA of switched pulses on a rail shared with the ESP32's
 radio is how a board browns out mid-transmit. Size it from the charge one carrier pulse
 draws: 270 mA for ~13 µs is 3.5 µC, so holding the droop under 0.25 V needs `C = Q/ΔV` ≈
 **14 µF**. 22 µF is the floor, 100 µF electrolytic is comfortable — and a 0.1 µF ceramic in
@@ -726,26 +813,52 @@ parallel for the switching edges. **The 0.1 µF alone is not a reservoir:** 3.5 
 0.1 µF is a 35 V droop, i.e. it holds up nothing at the burst envelope. Fit it anyway, but
 if the board resets or WiFi drops when a frame goes out, the missing electrolytic is why.
 
-- **Aim it at the indoor unit's receiver window.** These are line-of-sight; a few metres,
-  or a bounce off a light-coloured ceiling, is usually fine. A bounce costs range — budget
-  for it.
-- **A second LED buys coverage, not reach — and in series it costs you both.** Two 940 nm
-  emitters drop ~3.8 V between them, which from a 5 V rail leaves under a volt across the
-  burden: ~85 mA, no better than the 3V3 build this replaced. If you fit two, they go in
-  *parallel*, each with its own 15 Ω, and the base network has to grow to match the doubled
-  collector current (4 × 1 kΩ = 250 Ω). One emitter on the standard values is the right
-  default.
+**Two LEDs go in parallel here, each with its own 15 Ω** — the opposite of §3.1, for the
+reason given there. In series from 5 V they drop ~3.8 V between them, leaving under a volt
+across the burden: ~85 mA, no better than the 3V3 build this replaces. Parallel doubles the
+collector current, so the base network grows to match (4 × 1 kΩ = 250 Ω).
+
+### 3.3 What was actually observed, and the order to debug in
+
+This node's transistor build never emitted. The fault was in the transistor block itself,
+not the frame, the pin, or the emitters — the LEDs proved good the moment they were driven
+directly, which is how §3.1 came to be the built circuit. Recording that here so the next
+person does not repeat the evening: **prove the emitter before you debug the driver.**
+
+Four firmware commands exist for exactly this, each isolating one layer. Send them over
+MQTT, or over USB with `node-cmd.py`:
+
+| Command | Proves | Reads out as |
+|---|---|---|
+| `IR_GPIO_TEST` | The **pin** toggles — bit-banged 38 kHz with the IR library out of the path | Camera glow, or nothing |
+| `IR_CARRIER` / `IR_CARRIER=<s>` | The **emitter** lights — unmodulated 38 kHz, up to 10 s, long enough to get a camera on it | Camera glow, or nothing |
+| `IR_LOAD_TEST` | **Current is flowing** — uses the ACS712 on the same 5 V rail as a voltmeter and reports the sag | `CURRENT IS FLOWING` / `NO MEASURABLE CURRENT` / `RAIL COLLAPSE, NOT A LOAD` |
+| `IR_SWEEP` | Which **protocol** the unit answers — every `IRac`-supported protocol, 2 s apart | The AC responds, or it doesn't |
+
+`IR_LOAD_TEST` is the one that settles a transistor fault, and only the §3.2 build can run
+it: the direct-drive circuit of §3.1 is not on the 5 V rail, so the ACS712 cannot see it.
+For §3.1 the camera is the instrument.
+
+- **Aim it at the indoor unit's receiver window.** These are line-of-sight; a bounce off a
+  light-coloured ceiling works but costs range — budget for it. On the §3.1 build there is
+  no range to spend, so aim directly.
+- **A phone camera sees 940 nm as a faint violet flicker.** Dark room, camera against the
+  LEDs. Use the **front** camera if the rear shows nothing — rear cameras often have an
+  IR-cut filter that selfie cameras lack.
 - **The firmware sends each frame twice** — `-DIR_AC_REPEATS=n` to change it. There is no
-  acknowledgement on an IR link, so a burst lost to
-  sunlight or a fluorescent ballast is a command lost silently. Repeating is safe only
-  because these are absolute-state protocols — every frame carries the full power/mode/
-  temperature state, so the second copy sets what the first one set.
+  acknowledgement on an IR link, so a burst lost to sunlight or a fluorescent ballast is a
+  command lost silently. Repeating is safe only because these are absolute-state protocols:
+  every frame carries the full power/mode/temperature state, so the second copy sets what
+  the first one set.
 - Verify before trusting it: the serial monitor prints
-  `[hvac] IR frame sent x2: COOLIX -> 24.0 C`, and telemetry carries **`acReal:true`**. Without
-  `USE_IR_AC` the node publishes `acReal:false` and the twin knows the setpoint reached
-  nothing — a setback that saves no energy is never counted as if it had.
-- A phone camera sees 940 nm as a faint violet flicker: point the emitter at one to confirm
-  it is firing at all.
+  `[hvac] IR frame sent x2: HITACHI_AC -> 24.0 C`, and telemetry carries **`acReal:true`**.
+  A send the library **refuses** — an unsupported protocol, a bad frame — is reported as
+  `REFUSED` rather than counted as sent. Without `USE_IR_AC` the node publishes
+  `acReal:false` and the twin knows the setpoint reached nothing; a setback that saves no
+  energy is never counted as if it had.
+- **GPIO25 is fixed at build time.** `IRac` and `IRsend` capture their pin in the
+  constructor, so no runtime message can move it. Changing it means editing
+  `-DIR_PIN=` in `platformio.ini` and reflashing.
 
 ---
 
@@ -973,7 +1086,7 @@ plug intact, but their pin patterns are not 2.54 mm and do not seat cleanly in a
 ### Put the front end on its own mini board
 
 The bias divider, burden and cap belong on a **SYB-170 mini breadboard (6.000₫)**, not on
-the main board, with three jumpers back to it — 3V3, GND, GPIO34.
+the main board, with three jumpers back to it — 3V3, GND, GPIO33.
 
 Two reasons. It costs zero space on the main breadboards, which matters more than it sounds:
 an ESP32 DevKit v1 is 22.9–25.4 mm between pin rows against a breadboard's 27.9 mm a→j span,
@@ -992,10 +1105,16 @@ with `{"plugCalAPerV":30.0}` on `econ/config/<zone>` as above.
 
 ### ⚠️ The bias divider is not optional
 
-GPIO34 and GPIO35 are **input-only pins with no internal pull-up or pull-down at all** —
-that is a silicon limitation of the ESP32's input-only pins, not a configuration choice.
-Leave the ADC node floating and it reads drifting noise that *looks* like a small load.
-R4/R5 are what hold the pin at a defined 1.65 V; they are the only thing doing so.
+Nothing else holds the ADC node. The clamp sits on **GPIO33**, and although that pin *does*
+have internal pulls, the firmware never enables them — a pull-up would sit on top of the
+signal and skew every reading. Leave the node floating and the pin reads drifting noise that
+*looks* like a small load: mid-rail DC with 50 Hz hum on it, which the DSP correctly
+identifies as periodic and publishes as kilowatts that do not exist. R4/R5 are what hold the
+pin at a defined 1.65 V; they are the only thing doing so.
+
+The same applies doubly to **GPIO34/35** if you ever move a clamp there: those are
+input-only pins with **no internal pull-up or pull-down at all**, a silicon limitation rather
+than a configuration choice, so there is not even a fallback to disable.
 
 Mid-rail also matters for accuracy, not just polarity. The ESP32's SAR ADC is meaningfully
 non-linear in the bottom ~150 mV and near the top of its range; biasing to half scale keeps
@@ -1135,7 +1254,7 @@ cannot be split this way — that one really does wait for the distribution boar
 Worth knowing before you calibrate, because it explains both the noise floor and what a
 "starved window" means in the logs.
 
-`readPlugAmps()` samples GPIO34 flat out for **100 ms** — about **5 full cycles** at 50 Hz —
+`readPlugAmps()` samples GPIO33 flat out for **100 ms** — about **5 full cycles** at 50 Hz —
 then takes the window's **mean as the DC bias** and RMSes the residue around it. Three
 consequences:
 
@@ -1198,14 +1317,15 @@ two to wire as well.
 > per person, φ₀ in ppm/hr per person) quietly become per-*room* instead. Pick one per zone:
 > the camera where the head count matters, the radar everywhere else.
 
-Neither radar needs a level shifter. Their UART pins are only for tuning gates and
-thresholds and are unused here.
+Neither radar needs a level shifter. Their UART pins **are** used on this node — the range
+gates in `platformio.ini` are pushed over UART at boot — so both heads need four wires, not
+two. See "Tuning a head that never reports clear" below.
 
 > ⚠️ **Do not compile `USE_MMWAVE` / define `MMWAVE2_PIN` without that head actually attached.**
 > The firmware sets `pinMode(pin, INPUT)` — a plain input, no pull-down. A floating pin picks
 > up ambient noise and crosses the logic threshold at random, so the zone reports occupancy
-> that flickers on nothing; on GPIO15, which has an internal pull-up, it does something worse
-> and reads a steady, convincing HIGH. Because presence is OR-ed, one bad pin is enough to
+> that flickers on nothing; on a pin carrying a pull-up it does something worse and reads a
+> steady, convincing HIGH. Because presence is OR-ed, one bad pin is enough to
 > hold a zone permanently "occupied", and the twin will dutifully cool an empty room all
 > night. Either wire the head, or leave its flag at 0.
 >
@@ -1213,14 +1333,15 @@ thresholds and are unused here.
 > rather than trusting the level:
 >
 > ```
-> [mmwave] RD03-1 GPIO34 input-only; 64/64 high (steady -> driven)
-> [mmwave] RD03-2 GPIO15 pull test: pulldown=HIGH pullup=high -> DRIVEN (head connected)
+> [mmwave] RD03-1 GPIO13 pull test: pulldown=HIGH pullup=high -> DRIVEN (head connected)
+> [mmwave] RD03-2 GPIO14 pull test: pulldown=HIGH pullup=high -> DRIVEN (head connected)
 > ```
 >
-> `FLOATS BOTH WAYS` or `noisy -> OPEN` means nothing is on that pin. Note GPIO34–39 are
-> input-only with no internal pulls, so they cannot be pull-tested — there the evidence is
-> only that the reading is steady rather than noisy. If you must bench-test a flag with no
-> sensor, tie the pin to GND through a 10 kΩ resistor.
+> `FLOATS BOTH WAYS` or `noisy -> OPEN` means nothing is on that pin. On GPIO13/14 this is
+> conclusive, which is why the heads live there; had they stayed on GPIO34–39 the test would
+> be impossible (no internal pulls) and the evidence only that the reading looked steady
+> rather than noisy. If you must bench-test a flag with no sensor, tie the pin to GND through
+> a 10 kΩ resistor.
 
 > The radar needs roughly **30 s after power-up** to settle before its output means anything.
 
@@ -1250,18 +1371,29 @@ the two heads take the ESP32's other two hardware UARTs. No software serial, so 
 timing depends on the other:
 
 ```
-   Rd-03 #1 (OT2 on GPIO34)          Rd-03 #2 (OT2 on GPIO15)
-     TX ──────────► GPIO16 (RX2)       TX ──────────► GPIO18 (RX1)
-     RX ◄────────── GPIO17 (TX2)       RX ◄────────── GPIO19 (TX1)
+   Rd-03 #1 (OT2 on GPIO13)          Rd-03 #2 (OT2 on GPIO14)
+    OT1 ──────────► GPIO16 (RX2)      OT1 ──────────► GPIO4  (RX1)
+     RX ◄────────── GPIO17 (TX2)       RX ◄────────── GPIO18 (TX1)
     GND ─────────── already common     GND ─────────── already common
     3V3 ─────────── already wired      3V3 ─────────── already wired
+
+   ⚠️ The module's transmit pad is labelled OT1, not TX. There is no pad marked TX on the
+      DIP-5 as fitted — see the pad-order table below.
 ```
 
 ⚠️ **They cross.** Module TX → ESP32 *receive* pin. Swapped is the most common failure and it
 announces itself as `no ACK on open-command-mode` in the boot log.
 
-⚠️ **GPIO16/17/18/19 were camera D3–D6.** The camera is off in firmware, but if those jumpers
+⚠️ **GPIO16/17/18 were camera D3–D5.** The camera is off in firmware, but if those jumpers
 are still on the OV7670 its data pins will fight the UART. Pull them before wiring the radars.
+
+**When a head's range-gate panel stays empty, suspect this wire first.** OT2 and OT1 are
+separate conductors: a head with OT2 intact and OT1 open still reports presence, still passes
+the boot pull test, and still shows as connected — while silently keeping its factory gates,
+because the configuration frames the ESP32 sends are acknowledged on a line nobody is
+listening to. That is exactly how RD03-1 presented here. `RD03_LINETEST` over serial
+pull-tests each head's UART pins and dumps whatever bytes arrive as both hex and ASCII; a
+transmitter idles HIGH, so an open OT1 shows up as FLOATING against a wired head's DRIVEN.
 
 ⚠️ **Read the silkscreen, not the pin number — and do not trust the label on pad 3.** At least
 three pad orders are in the wild. The datasheet shows two; the modules actually fitted here are
@@ -1347,7 +1479,7 @@ zone and fight over its commands:
 build_flags =
   -DZONE_TOPIC_OVERRIDE=\"zone_2\"
   -DZONE_LABEL_OVERRIDE=\"Level 5 East\"
-  -DUSE_SHT30=1 -DUSE_MMWAVE=1 -DUSE_IR_AC=1 -DIR_AC_PROTOCOL=COOLIX
+  -DUSE_SHT30=1 -DUSE_MMWAVE=1 -DUSE_IR_AC=1 -DIR_AC_PROTOCOL=HITACHI_AC
 ```
 
 > Set these in **`platformio.ini`**, not via `PLATFORMIO_BUILD_FLAGS`, when a label contains
@@ -1435,10 +1567,10 @@ before you have any diagnostic to read.
 | **1** | Power rails only — **no devices yet** | Meter: 5 V rail **4.75–5.25 V**; 3V3 rail **3.20–3.40 V**; rail-to-rail GND continuity beeps |
 | **2** | SHT30 → I²C | Serial: `[i2c] bus up on SDA=GPIO21 SCL=GPIO22`. Warm it by hand → temp follows, `tempReal:true` |
 | **3** | Level shifter, **then** ACD1200 | Meter LV = 3.3 V and HV = 5 V *before* the ACD1200 goes in. Then wait out 120 s preheat → ppm appears |
-| **4** | Rd-03 ×2 → GPIO34 / GPIO15 | Meter each OT2: **0 V** empty room, **3.3 V** occupied — and unlike a PIR it stays high while you sit still. Boot log pull-tests both heads (`DRIVEN` vs `FLOATS BOTH WAYS`); telemetry carries `radar1`/`radar2` per head plus the ORed `occupancy` |
+| **4** | Rd-03 ×2 → GPIO13 / GPIO14 | Meter each OT2: **0 V** empty room, **3.3 V** occupied — and unlike a PIR it stays high while you sit still. Boot log pull-tests both heads (`DRIVEN` vs `FLOATS BOTH WAYS`); telemetry carries `radar1`/`radar2` per head plus the ORed `occupancy` |
 | **5** | SSR — **low-voltage side only, no mains** | Channel LEDs follow `LIGHTS_ON`/`LIGHTS_OFF`. GPIO23 measures 3.3 V HIGH / 0 V LOW |
 | **6** | IR driver | Phone camera sees the LED flicker; serial prints `IR frame sent`; the AC's own display changes |
-| **7** | Bias divider — **CT not connected yet** | Meter GPIO34: **1.60–1.70 V**, steady. This is the stage most worth not skipping |
+| **7** | Bias divider — **CT not connected yet** | Meter GPIO33: **1.60–1.70 V**, steady. This is the stage most worth not skipping |
 | **8** | CT + burden, clamped on a **known load** | `plugW` tracks the load; calibrate per §5 |
 | **9** | Mains side of the SSR | **Electrician.** Enclosure closed, bench-tested on a lamp first |
 
@@ -1461,7 +1593,7 @@ nothing actuated.
 | Shifter LV / HV | 3.3 V / 5 V | Swapped is the failure that damages the ESP32 — check before the ACD1200 goes in |
 | Rd-03 OT2 | 0 V vacant, 3.3 V occupied | Always 3.3 V: still in its power-on settling window, give it ~30 s |
 | DS18B20 DATA | ~3.3 V idle | 0 V: R6 pull-up missing — the bus cannot idle high without it |
-| 2N2222 base (through R1) | ~0.7 V while pulsing | 0 V: R1 open, or GPIO19 not driving |
+| IR string, across R2a+R2b | ~0.7 V average while pulsing | 0 V: a resistor is open, an LED is reversed, or GPIO25 is not driving. **§3.2 build:** meter the 2N2222 base through R1 instead — ~0.7 V while pulsing, 0 V means R1 open |
 
 > **Reading the bias node in software.** The firmware never prints raw ADC counts, so if the
 > meter says 1.65 V and `plugW` still looks wrong, flash this three-line sketch to see what
@@ -1489,7 +1621,7 @@ Work down this list; each step proves the one below it is worth attempting.
    hand → the dashboard follows within seconds and `tempReal:true`.
 4. **CO₂.** Wait out the 120 s preheat, then breathe near the sensor → ppm climbs. Failed
    CRCs are logged and the field is **omitted**, never faked.
-5. **IR.** Serial prints `[hvac] IR AC control ACTIVE: COOLIX on GPIO19` at boot and
+5. **IR.** Serial prints `[hvac] IR AC control ACTIVE: HITACHI_AC on GPIO25` at boot and
    `IR frame sent` per command; **the AC's own display changes**. Telemetry: `acReal:true`.
 6. **Relays.** `LIGHTS_OFF` clicks relay 1. Power-cycle the node → the plug relay comes back
    **closed**.
@@ -1510,13 +1642,13 @@ Work down this list; each step proves the one below it is worth attempting.
 | SHT30 responds but temperature lags badly | Expected — the probe's τ is 8 s. Give it 10–20 s |
 | SSR triggers erratically when ESP32 is USB-powered and the rail is adaptor-powered | Grounds not tied together. The trigger has no return path (§1) |
 | `plugW` reads a plausible but wrong constant multiple | The CT may have an internal burden — measure across its leads (§ "Sensors & modules"); if a few tens of Ω, omit R3 |
-| `plugW` jitters with nothing plugged in | Bias node floating — R4/R5 missing or mis-seated. GPIO34/35 have **no internal pull-ups at all**; the divider is the only thing holding the pin |
+| `plugW` jitters with nothing plugged in | Bias node floating — R4/R5 missing or mis-seated. The firmware never enables GPIO33's internal pulls (they would skew the reading), so the divider is the only thing holding the pin |
 | `plugW` noisy but roughly right | C1 too far from the bias node, or the analog front end sitting next to the IR driver. See the layout section |
-| Occupancy stuck "occupied" in an empty room | First check the boot log's per-head pull test: `FLOATS BOTH WAYS` / `noisy -> OPEN` means the flag is compiled with nothing on that pin (GPIO15 in particular floats to a convincing HIGH on its internal pull-up). Wire it, drop the flag, or pull the pin down through 10 kΩ. If both heads report `DRIVEN`, the radar is probably right and you are: unlike a PIR it holds high for a **motionless** occupant. Cross-check `radar1`/`radar2` in telemetry against CO₂ — a falling CO₂ trend is a room actually emptying |
+| Occupancy stuck "occupied" in an empty room | First check the boot log's per-head pull test: `FLOATS BOTH WAYS` / `noisy -> OPEN` means the flag is compiled with nothing on that pin. Wire it, drop the flag, or pull the pin down through 10 kΩ. If both heads report `DRIVEN`, the radar is probably right and you are: unlike a PIR it holds high for a **motionless** occupant. Cross-check `radar1`/`radar2` in telemetry against CO₂ — a falling CO₂ trend is a room actually emptying |
 | Occupancy "occupied" for ~30 s after boot, then clears | Expected — the radar's settling window |
 | `plugW` and `acW` disagree by ~4.5 % on the same load | `PLUG_MAINS_V` (230) ≠ `AC_MAINS_V` (220). Pin both explicitly |
 | Every reading sane but all watts off by one constant factor | Burden resistor is not the value `PLUG_CAL_A_PER_V` was built for — recompute as `2000 ÷ R` (§5) |
-| SHT30 reads fine until a setpoint command, then fails | IR emitter on GPIO22 (the I²C clock). It belongs on GPIO19 |
+| SHT30 reads fine until a setpoint command, then fails | IR emitter on GPIO22 (the I²C clock). It belongs on GPIO25 |
 | CO₂ always omitted | 120 s preheat not elapsed, missing level shifter, or Pin 5 pulled low (UART mode) |
 | CO₂ reads plausibly but drifts low over weeks | ABC calibration on in a 24/7 space — build `-DCO2_ABC_OFF=1` |
 | `plugW` ≈ 0 with a load running | Clamp around both conductors instead of the live only |

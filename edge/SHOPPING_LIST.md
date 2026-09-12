@@ -59,7 +59,7 @@ machine. Build **D** is what the plug-load case study (26.4% of office energy) n
 | # | Part | Qty | Firmware flag | Notes | ≈ VND |
 |---|---|---|---|---|---|
 | 6 | [**SHT30-IIC** temp + humidity](https://hshop.vn/cam-bien-do-am-nhiet-do-sht30-sht30-iic-temperature-humidity-sensor) (0x44) `HS2214V` | 1 | `-DUSE_SHT30=1` | ±0.2 °C. **Buy this, not a DHT11** — ±2 °C is meaningless against a 2 °C deadband, and it is also what makes a 300-second temperature *slope* readable at all (see the fitness table below) | ✓ **135.000₫** |
-| 7 | [**Ai-Thinker Rd-03** 24 GHz mmWave presence](https://hshop.vn/cam-bien-hien-dien-mmwave-24ghz-human-presence-sensing-rd-03-ai-thinker) `HS1779` | 1 | `-DUSE_MMWAVE=1` | Detects a **stationary** person — the single biggest accuracy upgrade for an office, and the fix for the PIR problem below. 3.3 V supply, **OT2 (pin 5) → GPIO18**, no level shifter | ✓ **70.000₫** |
+| 7 | [**Ai-Thinker Rd-03** 24 GHz mmWave presence](https://hshop.vn/cam-bien-hien-dien-mmwave-24ghz-human-presence-sensing-rd-03-ai-thinker) `HS1779` | 1 | `-DUSE_MMWAVE=1` | Detects a **stationary** person — the single biggest accuracy upgrade for an office, and the fix for the PIR problem below. 3.3 V supply, **OT2 (pin 5) → GPIO13**, plus **OT1 → GPIO16** and **RX ← GPIO17** for the UART that sets its range gates. No level shifter. Buy **two** for a room that needs coverage from both ends | ✓ **70.000₫** |
 | 7b | *(alt, unbuyable)* HLK-LD2410B / C / S | — | same | Back on the site with prices (98k / 105k / 105k) but **all three still out of stock on 22 Jul**, a week after they went. Same "output high when sensing" contract, so the firmware treats them identically if you source one elsewhere. The Rd-03 is cheaper anyway | — |
 | 8 | [**ASAIR ACD1200** NDIR CO₂](https://hshop.vn/cam-bien-khi-co2-acd1200-ndir-carbon-dioxide-sensor-chinh-hang-asair) (0x2A) `HS2167V` | 1 | `-DUSE_CO2=1` | True NDIR, 400–5000 ppm, ±(50 ppm + 5%). What makes demand-controlled ventilation defensible to a tenant, and the **only** input the engine will accept for the air-change model — `roomConditions()` refuses to train the CO₂ balance on a modelled value | ✓ **243.000₫** |
 | 9 | [**I²C level shifter** (BSS138)](https://hshop.vn/mach-chuyen-muc-ton-hieu-i2c) `HS0667` | 1–2 | with #8 | **Mandatory, not optional.** Two BSS138 MOSFETs with 10 kΩ pull-ups — the correct I²C topology. At 10.000₫, buy a spare | ✓ **10.000₫** |
@@ -71,30 +71,40 @@ machine. Build **D** is what the plug-load case study (26.4% of office energy) n
 |---|---|---|---|---|---|
 | 11 | [**2-channel SSR, 5 V (G3MB-202P)**](https://hshop.vn/module-2-relay-ran-ssr-5vdc) `HS0996` | 1 | default + `-DUSE_PLUG=1` | **In stock — buy this.** One board, both actuators: `CH1 → GPIO23` lights, `CH2 → GPIO25` socket. Trigger input is TTL 3.3–5 V (drives straight from the ESP32), high-level trigger (matches the firmware), DC+ on 5 V. **AC-only, 0.1–2 A** — a lamp needs ≥ ~25 W to clear the SSR's minimum, and a real socket circuit needs a contactor. Full wiring + specs in [WIRING §4 Option B](WIRING.md). | ✓ **59.000₫** |
 | 11b | *(mechanical, out of stock)* [2-ch opto relay High/Low](https://hshop.vn/module-2-relay-voi-opto-coch-ly-koch-h-l-5vdc) `HS0998C` | 1 | same | Dry contacts (COM/NO/NC), 10 A, switches AC **or** DC. Cheaper and no minimum-load quirk — buy it instead **when the 5 VDC variant restocks** (both it and `HS0997` were *Hết hàng* on 23 Jul 2026). Jumper to HIGH, coils on 5 V. | ✓ 35.000₫ |
-| 12 | **IR LED 940 nm, 5 mm** | 1–2 | `-DUSE_IR_AC=1` | Drives the split unit. Two in series widens coverage in a large room | 5–10k |
-| 13 | **NPN transistor** 2N2222 / S8050 / PN2222 | 1 | with #12 | **Required.** A GPIO sources ~12 mA; an IR LED wants ~100 mA of pulse current for useful range. Straight off the pin you get about a metre | 3–5k |
-| 14 | Resistors: **2 × 1 kΩ** (transistor base, wired in parallel = 500 Ω), **15 Ω** ¼ W (LED current) | 1 ea | with #12 | See the driver circuit in WIRING.md, and [§4a](#4a-resistors--which-caka-sku-actually-has-the-values) for which caka SKU to buy | ~1k ea |
+| 12 | **IR LED 940 nm, 5 mm** | **2** | `-DUSE_IR_AC=1` | Drives the split unit. The built circuit runs **two in series** off GPIO25, so both emitters carry the same current — the pin's budget is the scarce resource, not voltage | 5–10k |
+| 13 | Resistors: **2 × 15 Ω** ¼ W, wired **in series** (30 Ω total) | 1 pair | with #12 | The whole driver. ⚠️ **Not one 15 Ω** — a single one pulls 127 mA, three times GPIO25's absolute maximum, and damages the pin. [§4a](#4a-resistors--which-caka-sku-actually-has-the-values) has the caka SKU | ~1k ea |
+| 13b | *(range upgrade)* **NPN transistor** 2N2222 / S8050 / PN2222 + **3 × 1 kΩ** + **100 µF** electrolytic | 1 set | with #12 | **Optional, and not built here.** The direct-drive circuit above reaches 10–30 cm; a transistor on the 5 V rail reaches across a room (~2.8×, since range goes as √current). The 1 kΩs parallel to 333 Ω for base drive, the 100 µF is the reservoir. See [WIRING §3.2](WIRING.md) — including the honest note that this build never emitted on our bench | 3–5k + ~2k |
 
-> ⚠️ **hshop does not stock items 12–14, and this pass confirmed it.** Searches for a 940 nm
+> ⚠️ **hshop does not stock items 12–13b, and this pass confirmed it.** Searches for a 940 nm
 > emitter, a discrete NPN and a ¼ W resistor assortment all come back with nothing usable —
-> the hits are reflective *sensor* modules, not emitters. Buy these three at a general
+> the hits are reflective *sensor* modules, not emitters. Buy these at a general
 > component shop (Nhật Tảo) or online. They are the cheapest items on the whole list and
 > the only ones that will cost you a second trip, so put them in the same order.
 
-> **Which IR protocol?** Build with `-DUSE_IR_AC=1 -DIR_AC_PROTOCOL=COOLIX` first — it
-> covers many budget/OEM splits. For Daikin / Panasonic / Mitsubishi / LG / Samsung /
-> Toshiba / Gree (Casper and Nagakawa are often Gree-compatible) set the matching protocol;
-> all eight are verified to compile. If the unit ignores you, capture its handset with
-> IRremoteESP8266's `IRrecvDumpV3` example and use whatever it decodes to.
+> **Which IR protocol?** On this bench it is **`HITACHI_AC`**, and that was established by
+> measurement rather than from the badge: each of the six send-supported Hitachi variants was
+> given a distinct setpoint over MQTT and the unit obeyed `HITACHI_AC` at 17 °C. The build
+> flag records the result. For a different unit, start with `-DIR_AC_PROTOCOL=COOLIX` — it
+> covers many budget/OEM splits — then set the matching protocol for Daikin / Panasonic /
+> Mitsubishi / LG / Samsung / Toshiba / Gree (Casper and Nagakawa are often Gree-compatible);
+> all eight are verified to compile. Faster than guessing: send `IR_SWEEP` and let the node
+> walk every supported protocol 2 s apart while you watch the indoor unit. If nothing
+> responds, capture its handset with IRremoteESP8266's `IRrecvDumpV3` and use what it decodes
+> to.
+>
+> ⚠️ **Getting this wrong is silent.** The node logs every setback and reports `acReal:true`
+> whether or not the unit listened, so a mismatched protocol means every AC saving credited
+> on that node is a no-op. It was `ELECTRA_AC` here for a while, and that is exactly what
+> happened.
 
 ## 4. Plug-load metering (build D)
 
 | # | Part | Qty | Notes | ≈ VND |
 |---|---|---|---|---|
-| 15 | [**SCT-013** split-core CT, 100 A](https://hshop.vn/cam-bien-dong-dien-hall-100a-yhdc) `HS0186` | 1 | **The credibility item.** Clips over insulation — no mains contact, no electrician, no permit. Reads true-RMS on GPIO34 and publishes `plugW`, replacing the modelled plug draw. Current-output, so it needs the burden below — and see the ⚠️ open-circuit warning in [WIRING.md §5](WIRING.md). ⚠️ **hshop lists it as `STC013`, not `SCT-013`** — searching the correct part number returns *nothing at all*, which is why this sat on the "still to buy" list longer than it needed to. The product slug also says `hall`, which it is not; it is a current transformer (YHDC) | ✓ **102.000₫** |
+| 15 | [**SCT-013** split-core CT, 100 A](https://hshop.vn/cam-bien-dong-dien-hall-100a-yhdc) `HS0186` | 1 | **The credibility item.** Clips over insulation — no mains contact, no electrician, no permit. Reads true-RMS on GPIO33 and publishes `plugW`, replacing the modelled plug draw. Current-output, so it needs the burden below — and see the ⚠️ open-circuit warning in [WIRING.md §5](WIRING.md). ⚠️ **hshop lists it as `STC013`, not `SCT-013`** — searching the correct part number returns *nothing at all*, which is why this sat on the "still to buy" list longer than it needed to. The product slug also says `hall`, which it is not; it is a current transformer (YHDC) | ✓ **102.000₫** |
 | 15b | *(alt)* **SCT-013-030** (30 A : 1 V) | 1 | Voltage-output — **skip the burden**, and it has no open-circuit hazard. Build `-DPLUG_CAL_A_PER_V=30.0`. **Not found at hshop or caka (checked 2026-07-25)** — searched both for `SCT-013`, `STC013`, `cảm biến dòng`, `biến dòng`. Plan around the `-000` | — |
 | 15c | **CH-2 spring wire clamp**, [caka](https://caka.vn/kep-noi-day-dien-ch-2-domino-2p-dang-lo-xo) | 2 | Joins the CT's stranded lead to a solid-core jumper **off the board** — no solder, no breadboard holes. See the note below | **2.000₫** ea |
-| 15d | **SYB-170 mini breadboard**, [caka](https://caka.vn/breadboard-syb-170-de-cam-mach-mini-170-lo) | 1 | Carry the whole CT front end (burden + bias divider + cap) on its own board; three jumpers back to 3V3/GND/GPIO34. Costs zero space on the main boards, and keeps a high-impedance 1.65 V divider away from the ESP32's switching and the SSR line | **6.000₫** |
+| 15d | **SYB-170 mini breadboard**, [caka](https://caka.vn/breadboard-syb-170-de-cam-mach-mini-170-lo) | 1 | Carry the whole CT front end (burden + bias divider + cap) on its own board; three jumpers back to 3V3/GND/GPIO33. Costs zero space on the main boards, and keeps a high-impedance 1.65 V divider away from the ESP32's switching and the SSR line | **6.000₫** |
 | 15e | *(alt clamp)* [**5 A ring CT**, hshop](https://hshop.vn/cam-bien-dong-dien-ac-current-transformer-sensor-5a) `HS1275` | 1 | **Better instrument for per-appliance work than a 100 A jaw.** 1000:1, linear to 10 A on a 100 Ω burden ⇒ ~2.2 kW headroom on a domestic socket, with far better resolution on a 60 W fan. Solid ring, so the conductor threads through — the same zip-cord split you were doing anyway. Calibration 10 A/V | ✓ **18.000₫** |
 | 16 | [Ceramic capacitor assortment](https://hshop.vn/bo-23-loai-tu-gom-thong-dung-6pf-0-1uf-23-kind-ceramic-capacitor) `HS0093` | 1 | A **0.1 µF** from this kit ties the bias node to ground. (OpenEnergyMonitor specifies 10 µF; 0.1 µF is fine at the ESP32's sampling rate, and the kit is what hshop actually stocks. The listing now reads "22 loại" where it used to read 23 — same kit, same range, same price) | ✓ **40.000₫** |
 | 17 | **33 Ω** burden + 2× **10 kΩ** bias resistors, ¼ W | 1 set | The burden sets the scale (`-DPLUG_CAL_A_PER_V=60.6`); the 10 kΩ pair forms the 1.65 V mid-rail. Not stocked at hshop — buy at caka, [§4a](#4a-resistors--which-caka-sku-actually-has-the-values). **If 33 Ω is unavailable, any value works** — the flag becomes `2000 ÷ R` | ~5k |
@@ -165,12 +175,18 @@ still seats in a breadboard.
 ### What to actually order
 
 **Order 1 — one SKU covers everything (recommended):**
-the **¼ W 5 % strip** at 3.000₫ a value, buying `10 Ω · 33 Ω · 1 kΩ · 2 × 10 kΩ`
-plus `39 Ω` and `47 Ω` as burden fallbacks. Six values ≈ **21.000₫**, and you leave with a
-working node whichever of them the shop actually has.
+the **¼ W 5 % strip** at 3.000₫ a value, buying `15 Ω · 47 Ω · 10 kΩ` — that is the
+as-built node: **2 × 15 Ω** in series for the IR string, **2 × 47 Ω** in series for the 94 Ω
+burden, **2 × 10 kΩ** for the bias divider. Add `39 Ω` as a burden fallback and `1 kΩ` if you
+intend to build the §3.2 transistor driver. Three values ≈ **9.000₫**, five ≈ **15.000₫**.
 
-**Order 2 — if the ¼ W bin is empty for a value:** take that one value from the **½ W
-10-con** SKU (it has both 10 Ω and 33 Ω) or the **1 W / 2 W** SKUs (10 Ω and 47 Ω, 1.000₫).
+⚠️ **Neither 10 Ω nor 33 Ω is a part caka sells.** The ¼ W list runs
+8.2/15/22/27/39/47/68/100 Ω then jumps straight to 1 kΩ, which is why the burden is two 47 Ω
+in series rather than one 33 Ω, and why the IR limiter is 15 Ω rather than 10 Ω. Earlier
+revisions of this list asked for both and neither could be bought.
+
+**Order 2 — if the ¼ W bin is empty for a value:** take that one value from the **1 W / 2 W**
+SKUs (15 Ω and 47 Ω, 1.000₫) or the **½ W 10-con** SKU.
 
 **Order 3 — the accuracy upgrade:** take the burden from the **1 % strip** as **47 Ω**, and
 build `-DPLUG_CAL_A_PER_V=42.6`. This is *better* than the nominal 33 Ω on both counts that
@@ -190,7 +206,13 @@ two places** — the SCT-013-000 is a 2000:1 CT, so:
 | **39 Ω** | `-DPLUG_CAL_A_PER_V=51.3` | 60 A | 41 mA |
 | **47 Ω** | `-DPLUG_CAL_A_PER_V=42.6` | 50 A | 34 mA |
 | 68 Ω | `-DPLUG_CAL_A_PER_V=29.4` | 34 A | 24 mA |
+| **94 Ω** (2 × 47 Ω) | **`22.1`** — the firmware default | **24 A** | **17 mA** |
 | 100 Ω | `-DPLUG_CAL_A_PER_V=20.0` | 23 A | 16 mA |
+
+**94 Ω is what is fitted here**, and 22.1 is not the nominal 2000 ÷ 94 = 21.3 — it is the
+value *identified* against a known load, which is why it is the firmware default. Derive the
+flag from the table when you first wire a burden; replace it with an identified figure once
+you have run the calibration in [WIRING §5](WIRING.md).
 
 Or make 33 Ω from values you did get: **3 × 100 Ω in parallel = 33.3 Ω** (`=60.0`), or
 **10 Ω + 22 Ω in series = 32 Ω** (`=62.5`). Full derivation, plus the 8.2–22 Ω substitution
@@ -279,7 +301,7 @@ One instrumented floor: three standard office nodes plus one plug-load node, on 
 | SHT30-IIC @135k | 4 | 540k |
 | Rd-03 mmWave radar @70k | 4 | 280k |
 | 2-channel SSR @59k *(mechanical relay out of stock)* | 4 | 236k |
-| IR LED + transistor + resistors (off-site) | 4 | ~60k |
+| IR LEDs ×2 + 2 × 15 Ω (off-site) | 4 | ~20k |
 | Breadboard + jumper ribbon @65k | 4 | 260k |
 | ACD1200 + level shifter @253k | 2 | 506k |
 | SCT-013 + capacitor kit + passives | 1 | ~147k |
@@ -347,7 +369,7 @@ the software is already waiting.
 
 | Part | SKU | ≈ VND | Flag | Turns this assumption into a measurement |
 |---|---|---|---|---|
-| [DS18B20 waterproof probe](https://hshop.vn/cam-bien-nhiet-do-chong-nuoc-mke-s15-ds18b20-waterproof-temperature-sensor) | `HS2243V` | ✓ **75.000₫** | `-DUSE_SUPPLY_TEMP=1` → **GPIO26** | `T_supply`, today a 12 °C constant. Cable-tie it in the indoor unit's discharge louvre and the cooling regressor is referenced to the real discharge. Its gap to room temperature is also a better "is the compressor running" signal than `acReal`, which only says the firmware *sent* an IR frame |
+| [DS18B20 waterproof probe](https://hshop.vn/cam-bien-nhiet-do-chong-nuoc-mke-s15-ds18b20-waterproof-temperature-sensor) | `HS2243V` | ✓ **75.000₫** | `-DUSE_SUPPLY_TEMP=1` → **GPIO27** | `T_supply`, today a 12 °C constant. Cable-tie it in the indoor unit's discharge louvre and the cooling regressor is referenced to the real discharge. Its gap to room temperature is also a better "is the compressor running" signal than `acReal`, which only says the firmware *sent* an IR frame |
 | A second [SCT-013](https://hshop.vn/cam-bien-dong-dien-hall-100a-yhdc) on the AC supply | `HS0186` | ✓ **102.000₫** | `-DUSE_AC_CLAMP=1` → **GPIO35** | `flow`, today the twin's own simulated VAV. The compressor's power draw *is* the cooling drive term. ADC1, input-only, same front end as the plug clamp |
 | [BH1750 ambient light](https://hshop.vn/cam-bien-cuong-do-onh-song-lux-bh1750) | `HS0159V` | ✓ **35.000₫** | `-DUSE_LUX=1` → I²C `0x23` | Solar gain, today a static per-zone multiplier with no time-of-day or cloud response. A lux reading is a real irradiance proxy and the precondition for daylight-linked dimming. Shares the existing I²C bus, 3.3 V, no shifter |
 
@@ -449,7 +471,7 @@ the build flag it needs.
 | `occupancy` | Rd-03 (or PIR) | `USE_MMWAVE` / `USE_PIR` | **Yes** — setback, lighting, per-occupant gain |
 | `co2` | ACD1200 **+ level shifter** | `USE_CO2` | **Yes** — CO₂ balance, measured air-change rate |
 | `plugW` | SCT-013 + burden + bias divider | `USE_PLUG` | **Yes** — APLC sweep, avoided-energy counter |
-| `acReal` | IR LED + NPN + R1/R2 | `USE_IR_AC` | **Yes** — gates whether a setback is booked as a saving |
+| `acReal` | 2 × IR LED + 2 × 15 Ω on GPIO25 | `USE_IR_AC` | **Yes** — gates whether a setback is booked as a saving |
 | lights / socket state | **SSR** (the actuator) | *(default)* / `USE_PLUG` | **Yes** — the only parts that change the building |
 | `supplyC` | DS18B20 in the louvre | `USE_SUPPLY_TEMP` | **Yes** — supersedes the 12 °C constant in the cooling fit |
 | `acW` | 2nd SCT-013 + 2nd front end | `USE_AC_CLAMP` | **No** — stored, never read |
