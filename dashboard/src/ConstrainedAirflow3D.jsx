@@ -181,7 +181,17 @@ function HvacFixtures({ field }) {
     diffusers.forEach((d, i) => {
       dummy.position.set(d.x, d.y, d.z);
       dummy.rotation.set(0, 0, 0);
-      dummy.scale.set(1, 1, 1);
+      // A ceiling diffuser is a 1 x 1 m plate blowing straight down, and that is what the
+      // geometry above is. A wall-mounted split is neither: it is ~0.9 m long, ~0.3 m deep,
+      // and sits ON a wall — drawn at plate size it overhangs its own wall by half a metre
+      // and reads as clipping through to the outside. Squash it to the unit's real
+      // proportions, thin across the wall and shallow in the throw.
+      if (d.type === 'wall-split') {
+        const alongX = Math.abs(d.dirX || 0) > Math.abs(d.dirY || 0);
+        dummy.scale.set(alongX ? 0.30 : 0.90, 1.4, alongX ? 0.90 : 0.30);
+      } else {
+        dummy.scale.set(1, 1, 1);
+      }
       dummy.updateMatrix();
       plateRef.current.setMatrixAt(i, dummy.matrix);
       coneRef.current.setMatrixAt(i, dummy.matrix);

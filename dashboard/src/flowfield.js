@@ -216,46 +216,13 @@ export function buildFlowField(floor, simState, opts = {}) {
 
   const diffusers = [];
   let supplyTotal = 0;
-
-  // A floor may declare where its air actually enters. The default below — one supply at
-  // each zone's centroid — describes a ceiling-diffuser VAV system, which is right for the
-  // tower and wrong for a room conditioned by wall-mounted splits: those blow horizontally
-  // from one side, and modelling them as a plume in the middle of the room inverts the
-  // circulation the operator is looking at. When airflowDomain.hvacUnits is present it is
-  // the authority, because someone recorded where the units are.
-  const declaredUnits = Array.isArray(floor?.airflowDomain?.hvacUnits)
-    ? floor.airflowDomain.hvacUnits
-    : null;
-
-  if (declaredUnits && declaredUnits.length) {
-    // Share the zone's flow across the units serving it, so two heads do not each inject
-    // the whole zone's supply and double the air entering the room.
-    const served = zones.filter((zn) => zn.type !== 'corridor');
-    const flowSum = served.reduce((a, zn) => a + Math.min(zn.flow, 14), 0);
-    const alert = served.some((zn) => zn.alert);
-    const per = (0.5 + 0.85 * (flowSum / Math.max(1, served.length)) / 14) * (alert ? 2.6 : 1)
-      / declaredUnits.length;
-    for (const u of declaredUnits) {
-      // Nudge the source one cell off the wall: a source sitting exactly on a solid cell is
-      // discarded by isFlow() and the room ends up with no supply at all.
-      const ux = u.x + (u.dirX || 0) * h;
-      const uz = u.y + (u.dirY || 0) * h;
-      const ci = Math.floor((ux - minX) / h), cj = Math.floor((uz - minZ) / h);
-      diffusers.push({ x: ux, z: uz, strength: per, type: 'wall-split', alert });
-      if (ci >= 0 && cj >= 0 && ci < nx && cj < nz && isFlow(type[idx(ci, cj)])) {
-        S[idx(ci, cj)] += per;
-        supplyTotal += per;
-      }
-    }
-  } else {
-    for (const zn of zones) {
-      if (zn.type === 'corridor') continue; // the corridor is the return path, not supplied
-      const ci = Math.floor((zn.cx - minX) / h), cj = Math.floor((zn.cz - minZ) / h);
-      if (ci < 0 || cj < 0 || ci >= nx || cj >= nz) continue;
-      const strength = (0.5 + 0.85 * Math.min(zn.flow, 14) / 14) * (zn.alert ? 2.6 : 1);
-      diffusers.push({ x: zn.cx, z: zn.cz, strength, type: zn.type, alert: zn.alert });
-      if (isFlow(type[idx(ci, cj)])) { S[idx(ci, cj)] += strength; supplyTotal += strength; }
-    }
+  for (const zn of zones) {
+    if (zn.type === 'corridor') continue; // the corridor is the return path, not supplied
+    const ci = Math.floor((zn.cx - minX) / h), cj = Math.floor((zn.cz - minZ) / h);
+    if (ci < 0 || cj < 0 || ci >= nx || cj >= nz) continue;
+    const strength = (0.5 + 0.85 * Math.min(zn.flow, 14) / 14) * (zn.alert ? 2.6 : 1);
+    diffusers.push({ x: zn.cx, z: zn.cz, strength, type: zn.type, alert: zn.alert });
+    if (isFlow(type[idx(ci, cj)])) { S[idx(ci, cj)] += strength; supplyTotal += strength; }
   }
 
   // Returns: along the interior of the corridor/core. Fall back to the floor centre.
