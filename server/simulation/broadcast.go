@@ -23,6 +23,13 @@ func (e *Engine) broadcast() {
 	// ---- Live global metrics (all derived from current zone state) ----
 	totalHeatW := 0.0 // total thermal load the plant must remove (W)
 	totalOccupants := 0
+	// ventOccupants is the headcount the fresh-air load is actually sized against: real
+	// occupancy where a zone is demand-controlled, rated occupancy where it is not.
+	// dcvAvoidedOccupants is the difference the DCV loop is responsible for -- the people
+	// a constant-volume system would have ventilated for and this one does not.
+	ventOccupants := 0
+	dcvVentOccupants := 0
+	dcvAvoidedOccupants := 0
 	comfortSum := 0.0     // Σ per-zone thermal-comfort score (report §4.5 discomfort model)
 	strainSum := 0.0      // sum of how far zones sit above setpoint (drives plant COP)
 	savedLightingW := 0.0 // lighting cut on vacant (set-back) zones
@@ -55,6 +62,37 @@ func (e *Engine) broadcast() {
 		totalHeatW += qi
 		totalOccupants += z.Occupancy
 		condFloorM2 += z.AreaM2
+		// Fresh-air bookkeeping, per zone, because the answer depends on whether THIS zone
+		// can actually be demand-controlled.
+		//
+		//   measured zone   -> the DCV loop is running, so outdoor air tracks the people
+		//                      actually present. This is what the whole building used to
+		//                      be credited with.
+		//   unmeasured zone -> nothing here responds to CO2, so the system ventilates for
+		//                      the occupancy the space is RATED for, not the occupancy it
+		//                      has. That is what a constant-volume system does.
+		//
+		// Before ventilation.go existed the model applied the measured case everywhere,
+		// which under-reported fresh-air load on every zone without an NDIR sensor and
+		// silently credited a control loop that was not running.
+		dcvHere := z.Vent.Measured
+		occForVent := z.Occupancy
+		if !dcvHere {
+			// DesignOccupancy returns 0 for programmes with no density basis (a corridor,
+			// a plant room). Such a space is ventilated for whoever is actually in it --
+			// inventing a rated headcount would load the plant for people who are not
+			// there, which is the mirror image of the bug above.
+			if d := DesignOccupancy(z.Type, z.AreaM2); d > z.Occupancy {
+				occForVent = d
+			}
+		}
+		ventOccupants += occForVent
+		if dcvHere {
+			dcvVentOccupants += z.Occupancy
+			if d := DesignOccupancy(z.Type, z.AreaM2); d > z.Occupancy {
+				dcvAvoidedOccupants += d - z.Occupancy
+			}
+		}
 		// A zone with a live AC clamp reports the electrical power its air conditioner is
 		// actually drawing. Its thermal load and occupancy are tracked alongside so the
 		// modelled COP can be lifted off exactly the portion of the building that is
@@ -127,11 +165,28 @@ func (e *Engine) broadcast() {
 	// Fresh air. In Ho Chi Minh City, dehumidifying outdoor air to a supply condition is
 	// the LARGEST single cooling term in an office and it is mostly latent — omitting it
 	// is why a twin calibrated on internal gains alone under-reports a Vietnamese
-	// building by roughly a third. Scales with the people actually present, so it falls
-	// away out of hours exactly as a real demand-controlled AHU would let it.
-	ventW = float64(totalOccupants) * (ph.OutdoorAirLPerSPerPerson / 1000.0) *
+	// building by roughly a third.
+	//
+	// The headcount it is sized against is ventOccupants, not totalOccupants, and the
+	// difference is the point. A zone with a live NDIR sensor is genuinely
+	// demand-controlled (simulation/ventilation.go), so its outdoor air falls away with
+	// its real occupancy. A zone without one is ventilated for the occupancy it is RATED
+	// for, because nothing in that zone can respond to how many people are actually in it.
+	//
+	// This used to be totalOccupants for the whole building, which assumed a DCV loop
+	// everywhere and therefore under-reported the load of every unmeasured zone. If this
+	// number jumps when you fit a CO2 sensor, that is the correction landing, not a bug.
+	wPerPerson := (ph.OutdoorAirLPerSPerPerson / 1000.0) *
 		ph.AirDensityKgPerM3 * ph.VentilationEnthalpyKjPerKg * 1000.0
+	ventW = float64(ventOccupants) * wPerPerson
 	totalHeatW += ventW
+
+	// What the DCV loop is worth, in fresh-air cooling avoided. Measured zones only: this
+	// is the gap between ventilating for a zone's rated occupancy and ventilating for the
+	// people in it, and only a zone with a sensor is allowed to close that gap. A building
+	// with no NDIR sensors reports 0 here, which is the truth rather than a missing value.
+	e.dcvAvoidedVentW = float64(dcvAvoidedOccupants) * wPerPerson
+	_ = dcvVentOccupants // reserved: per-zone attribution of the saving
 
 	coolingOutputMW := totalHeatW / 1e6 // thermal cooling delivered (MW)
 
@@ -143,8 +198,12 @@ func (e *Engine) broadcast() {
 	// With no clamp fitted anywhere, meteredAcW is 0 and this reduces exactly to the
 	// previous coolingOutputMW/plantCop.
 	meteredVentW := 0.0
-	if totalOccupants > 0 {
-		meteredVentW = ventW * float64(meteredOccupants) / float64(totalOccupants)
+	if ventOccupants > 0 {
+		// Attribution is by the SAME headcount ventW was sized against. Using
+		// totalOccupants here while ventW is sized on ventOccupants would apportion a
+		// load by a denominator that did not produce it, and the clamped zones' share
+		// would drift as soon as any zone became demand-controlled.
+		meteredVentW = ventW * float64(meteredOccupants) / float64(ventOccupants)
 	}
 	meteredCoolingW := meteredHeatW + meteredVentW
 	unmeteredCoolingW := math.Max(0, totalHeatW-meteredCoolingW)
@@ -380,6 +439,17 @@ func (e *Engine) broadcast() {
 				stripW = z.HwStripW
 			}
 			Telemetry.ZoneDataAddStripW(builder, float32(stripW))
+			// Demand-controlled ventilation, as computed by the last actuation pass
+			// (simulation/ventilation.go). Two fields rather than one on purpose: the
+			// floor alone cannot be read honestly, because the same number means
+			// "a sensor asked for this" and "nobody asked, here is the fixed minimum".
+			//
+			// Debugging: if ventMeasured is false on a zone whose node publishes co2,
+			// the reading is stale rather than missing -- ventDemand() gates on
+			// co2Fresh(), so check the node's publish interval against staleAfter
+			// before suspecting the loop.
+			Telemetry.ZoneDataAddVentFloor(builder, float32(z.Vent.Floor))
+			Telemetry.ZoneDataAddVentMeasured(builder, z.Vent.Measured)
 			zoneOffsets = append(zoneOffsets, Telemetry.ZoneDataEnd(builder))
 		}
 	}
@@ -443,6 +513,10 @@ func (e *Engine) broadcast() {
 	// the network model landed and never left the engine, so the topology view's AHU card
 	// has been showing a hardcoded 500 Pa placeholder instead of the solver's answer.
 	Telemetry.GlobalDataAddAhuPressurePa(builder, float32(e.AhuPressure))
+	// Demand-controlled ventilation totals. Both are zero on a building with no NDIR
+	// sensors, which is the honest answer rather than a missing one -- see ventilation.go.
+	Telemetry.GlobalDataAddDcvZones(builder, int32(e.dcvZones))
+	Telemetry.GlobalDataAddDcvAvoidedKw(builder, float32(e.dcvAvoidedVentW/1000.0))
 	globalPos := Telemetry.GlobalDataEnd(builder)
 
 	// Build SimState
@@ -455,6 +529,7 @@ func (e *Engine) broadcast() {
 
 	builder.Finish(simStatePos)
 	buf := builder.FinishedBytes()
+	e.lastFrame = buf
 
 	conns := make([]*websocket.Conn, 0, len(e.Clients))
 	for c := range e.Clients {
@@ -481,4 +556,20 @@ func (e *Engine) broadcast() {
 			WSForget(c)
 		}
 	}
+}
+
+// BuildFrameForTest runs one broadcast pass and returns the exact bytes the websocket
+// clients received, so the wire format can be asserted against the engine's own state.
+//
+// It exists because the FlatBuffers accessors in schema/Telemetry are generated code that
+// has been hand-extended (flatc is not installed here), and the characteristic failure of a
+// hand-extended vtable is not a crash but a plausible zero. Round-tripping a real frame is
+// the only check that catches a slot-number mistake. See broadcast_dcv_test.go.
+//
+// Not a general debugging hook: it drives a full broadcast, including the websocket writes.
+func (e *Engine) BuildFrameForTest() []byte {
+	e.broadcast()
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.lastFrame
 }

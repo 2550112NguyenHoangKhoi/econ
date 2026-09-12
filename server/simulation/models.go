@@ -33,6 +33,10 @@ func (e *Engine) Recommendations(topN int) RecommendationReport {
 			zr.Co2 = z.HwCo2
 			zr.Co2Live = true
 		}
+		// What the ventilation loop is currently asking of this zone's damper. Carried on
+		// the reading so the recommender can tell "nobody is ventilating this" apart from
+		// "the loop is flat out and losing", which look identical from the ppm alone.
+		zr.VentFloor, zr.VentMeasured = z.Vent.Floor, z.Vent.Measured
 		readings = append(readings, zr)
 		// What this zone's hardware can actually do, gathered in the same pass and under
 		// the same lock as the readings it will be used to judge. See capability.go.

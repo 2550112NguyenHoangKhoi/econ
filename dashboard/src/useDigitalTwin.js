@@ -46,7 +46,7 @@ export const FAULT_ZONES = buildFaultZones();
 export const DEFAULT_FAULT_TARGET = FAULT_ZONES[0]?.id || '';
 
 export const getInitialSimData = (targetBuilding = getBuilding()) => {
-  const data = { scenario: 'peak', ahuPressure: 0, buildingLoadMw: 0, systemHealth: 100, totalOccupants: 0, coolingOutputMw: 0, plantCop: 3.2, energySavedMw: 0, bessDischargeMw: 0, bessSocPct: 0, zonesInSetback: 0, autoPilot: true, vavs: {}, zones: {}, logs: [] };
+  const data = { scenario: 'peak', ahuPressure: 0, buildingLoadMw: 0, systemHealth: 100, totalOccupants: 0, coolingOutputMw: 0, plantCop: 3.2, energySavedMw: 0, bessDischargeMw: 0, bessSocPct: 0, zonesInSetback: 0, autoPilot: true, dcvZones: 0, dcvAvoidedKw: 0, vavs: {}, zones: {}, logs: [] };
   const b = targetBuilding || getBuilding();
   (b?.floors || []).forEach(floor => {
     (floor?.zones || []).forEach(z => {
@@ -380,6 +380,19 @@ export function useDigitalTwin(onUpdate) {
               // whether a probe measured it. Panels that turn airflow into delivered
               // cooling need the real number, not the design constant they assumed.
               supplyC: z.supplyC(), supplyReal: z.supplyReal(),
+              // Demand-controlled ventilation (server/simulation/ventilation.go). ventFloor
+              // is the damper position this zone's FRESH-AIR demand asks for; the damper
+              // actually runs at max(thermal demand, ventFloor), so a low ventFloor does
+              // NOT mean a closed damper. ventMeasured is the one that matters for honesty:
+              // false means no NDIR sensor reports here and ventFloor is just the fixed
+              // ASHRAE minimum, so nothing about this zone is demand-controlled and the UI
+              // must not imply it is.
+              //
+              // Both are optional-chained: an engine built before ventilation.go landed has
+              // no such accessor, and the dashboard should degrade to "not demand-
+              // controlled" rather than throwing on an older server.
+              ventFloor: z.ventFloor ? z.ventFloor() : 0,
+              ventMeasured: z.ventMeasured ? z.ventMeasured() : false,
             };
         }
       }
@@ -420,6 +433,13 @@ export function useDigitalTwin(onUpdate) {
         // Static pressure from the engine's Hardy-Cross network solve. The topology AHU
         // card used to render the literal 500 that getInitialSimData seeded, forever.
         newSimData.ahuPressure = g.ahuPressurePa();
+        // Demand-controlled ventilation, building-wide. dcvZones is how many zones are
+        // having their damper positioned from a live CO2 reading; dcvAvoidedKw is the
+        // fresh-air cooling those zones are not carrying as a result. Both are 0 on a
+        // building with no NDIR sensors, and that is a real answer rather than a missing
+        // one — the UI says "no zones are demand-controlled", never "0 kW saved".
+        newSimData.dcvZones = g.dcvZones ? g.dcvZones() : 0;
+        newSimData.dcvAvoidedKw = g.dcvAvoidedKw ? g.dcvAvoidedKw() : 0;
         // The engine is authoritative: if its flag ever disagrees with the local toggle
         // (reconnect, another operator, a rejected send), adopt the engine's truth.
         if (g.autoPilot() !== autoPilotRef.current) {

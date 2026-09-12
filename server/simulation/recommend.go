@@ -25,17 +25,24 @@ import (
 // handed to the (independently-locked) baseline model for scoring — so the recommendation
 // path never holds both locks at once.
 type ZoneReading struct {
-	Zone        string
-	Label       string
-	Type        string
-	Temp        float64
-	Setpoint    float64
-	Occupancy   int
-	Co2         float64 // ppm; only meaningful when Co2Live
-	Co2Live     bool    // a fresh NDIR sensor is measuring this zone right now
-	CameraEvent *string
-	PirState    *bool
-	IrState     *string
+	Zone      string
+	Label     string
+	Type      string
+	Temp      float64
+	Setpoint  float64
+	Occupancy int
+	Co2       float64 // ppm; only meaningful when Co2Live
+	Co2Live   bool    // a fresh NDIR sensor is measuring this zone right now
+	// VentFloor / VentMeasured come from the demand-controlled ventilation loop
+	// (ventilation.go). They change what a high CO2 reading MEANS: before DCV existed,
+	// high CO2 meant "an operator should purge this zone"; now it means "the loop is
+	// already purging", and a zone that is at full open and still high is a ventilation
+	// CAPACITY fault, which is a different finding with a different fix.
+	VentFloor    float64
+	VentMeasured bool
+	CameraEvent  *string
+	PirState     *bool
+	IrState      *string
 }
 
 // Recommendation is one ranked, actionable insight. The structured fields (Baseline,
@@ -183,17 +190,37 @@ func (b *Baselines) Recommend(readings []ZoneReading, loadMw float64, now time.T
 
 		// CO2: learned when the sensor's baseline is established, else the ASHRAE standard
 		// floor — clearly labelled which basis fired.
+		//
+		// What these recommendations ASK FOR changed when ventilation.go landed. The damper
+		// now responds to measured CO2 on its own, so "purge this zone" is no longer advice
+		// an operator can act on -- the loop is already doing it. The genuinely useful
+		// finding is the one below: a zone whose loop is at full open and still above the
+		// guideline cannot ventilate its way out, which is a capacity fault (a starved box,
+		// a shut manual balancing damper, an undersized VAV) and not something more
+		// commanding will fix. That diagnosis is unavailable from the ppm alone, which is
+		// why it is worth carrying VentFloor onto the reading to get it.
 		if zr.Co2Live {
-			spec := metricSpecs["co2"]
+			spec, _ := specFor("co2")
 			sc := b.score(zr.Zone, "co2", zr.Co2, now, spec)
+			atCapacity := zr.VentMeasured && zr.VentFloor >= MaxDamperPos-1e-6
 			switch {
+			case atCapacity && zr.Co2 > spec.standardHi:
+				recs = append(recs, Recommendation{
+					Id: "co2:" + zr.Zone, Zone: zr.Zone, Label: zr.Label, Metric: "co2",
+					Severity: "critical", Basis: "measured",
+					Title: "Ventilation At Capacity And Losing",
+					Message: fmt.Sprintf("%s reads %.0f ppm with its demand-controlled damper already at 100%%. The loop is doing everything it can and the zone is still above the %.0f ppm guideline, so this is a delivery problem rather than a control one: check the box for a starved duct, a shut manual balancing damper, or a VAV undersized for the occupancy this room now carries. Commanding more ventilation will not help — it is already commanded.",
+						zr.Label, zr.Co2, spec.standardHi),
+					Value: zr.Co2, Unit: "ppm", Limit: spec.standardHi, Samples: sc.count,
+					Score: 3.0 + (zr.Co2/spec.standardHi - 1.0),
+				})
 			case sc.mature && sc.z >= spec.zAlert:
 				recs = append(recs, Recommendation{
 					Id: "co2:" + zr.Zone, Zone: zr.Zone, Label: zr.Label, Metric: "co2",
 					Severity: severityFor(sc.z), Basis: "learned",
 					Title: "CO₂ Anomaly vs Learned Normal",
-					Message: fmt.Sprintf("%s reads %.0f ppm from its NDIR sensor — %.1fσ above its usual %s level of %.0f±%.0f ppm (learned from %d samples). Ventilation isn't matching occupancy; purge the zone.",
-						zr.Label, zr.Co2, sc.z, hourLabel(sc.hour), sc.mean, sc.std, sc.count),
+					Message: fmt.Sprintf("%s reads %.0f ppm from its NDIR sensor — %.1fσ above its usual %s level of %.0f±%.0f ppm (learned from %d samples). Ventilation is not matching occupancy — the demand-controlled loop has opened this zone's damper to %.0f%% in response; watch whether that brings it back before intervening.",
+						zr.Label, zr.Co2, sc.z, hourLabel(sc.hour), sc.mean, sc.std, sc.count, zr.VentFloor*100),
 					Value: zr.Co2, Unit: "ppm", Baseline: sc.mean, Sigma: sc.std, Deviation: sc.z,
 					Samples: sc.count, Hour: sc.hour, Action: spec.action, Score: sc.z,
 				})
@@ -202,8 +229,8 @@ func (b *Baselines) Recommend(readings []ZoneReading, loadMw float64, now time.T
 					Id: "co2:" + zr.Zone, Zone: zr.Zone, Label: zr.Label, Metric: "co2",
 					Severity: "warning", Basis: "standard",
 					Title: "CO₂ Above ASHRAE Guideline",
-					Message: fmt.Sprintf("%s reads %.0f ppm (comfort guideline ≤ %.0f ppm). This zone's baseline is still learning (%d/%d samples), so this is the recognized-standard check, not a learned anomaly. Purge the zone.",
-						zr.Label, zr.Co2, spec.standardHi, sc.count, baselineMature),
+					Message: fmt.Sprintf("%s reads %.0f ppm (comfort guideline ≤ %.0f ppm). This zone's baseline is still learning (%d/%d samples), so this is the recognized-standard check, not a learned anomaly. The demand-controlled loop has this zone's damper at %.0f%%.",
+						zr.Label, zr.Co2, spec.standardHi, sc.count, baselineMature, zr.VentFloor*100),
 					Value: zr.Co2, Unit: "ppm", Samples: sc.count, Action: spec.action,
 					Limit: spec.standardHi,
 					Score: 2.0 + (zr.Co2/spec.standardHi - 1.0),
@@ -411,7 +438,8 @@ func (d *Dynamics) PredictiveRecommendations(conds []RoomCondition, now time.Tim
 
 		// --- ventilation: does this room's measured air-change rate cope with its load? ---
 		if zd.co2Usable() && c.Co2Live {
-			limit := metricSpecs["co2"].standardHi
+			spec, _ := specFor("co2")
+			limit := spec.standardHi
 			look := d.co2OutlookLocked(c, limit, predictHorizonSec)
 			if look.Ok && look.Equilibrium > limit && c.Co2 < limit {
 				eta := look.SecsToLimit

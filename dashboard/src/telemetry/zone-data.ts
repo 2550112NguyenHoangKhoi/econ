@@ -84,8 +84,30 @@ stripW():number {
   return offset ? this.bb!.readFloat32(this.bb_pos + offset) : 0.0;
 }
 
+// Demand-controlled ventilation. ventFloor is the damper position this zone's FRESH-AIR
+// demand requires, in [0,1]; the damper actually runs at max(thermal demand, ventFloor).
+//
+// Debugging note: 0 here means the field is absent, which happens when the dashboard is
+// talking to an engine built before simulation/ventilation.go landed. The loop itself never
+// returns below MinVentDamperFloor (0.15), so a genuine 0 is impossible -- if you see 0
+// while the engine is current, the vtable slot numbering is wrong, not the physics.
+// Slot 12 -> vtable offset 4 + 12*2 = 28.
+ventFloor():number {
+  const offset = this.bb!.__offset(this.bb_pos, 28);
+  return offset ? this.bb!.readFloat32(this.bb_pos + offset) : 0.0;
+}
+
+// True only when a live NDIR reading produced ventFloor. When false, ventFloor is the fixed
+// ASHRAE area minimum and nothing about this zone is demand-controlled -- any UI that shows
+// the number without this flag is presenting a constant as a measurement.
+// Slot 13 -> vtable offset 4 + 13*2 = 30.
+ventMeasured():boolean {
+  const offset = this.bb!.__offset(this.bb_pos, 30);
+  return offset ? !!this.bb!.readInt8(this.bb_pos + offset) : false;
+}
+
 static startZoneData(builder:flatbuffers.Builder) {
-  builder.startObject(12);
+  builder.startObject(14);
 }
 
 static addId(builder:flatbuffers.Builder, idOffset:flatbuffers.Offset) {

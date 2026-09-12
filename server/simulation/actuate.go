@@ -67,6 +67,18 @@ func (e *Engine) actuateWithDt(dt float64) {
 	tOutForSetback, _ := e.outdoorNow()
 	setback := 0
 
+	// Drivers for the demand-controlled ventilation loop, gathered once. roomConditions()
+	// is a whole-building pass; calling it per zone would be O(zones²) on a 735-zone
+	// fixture, which is the shape of regression this project has already paid for once.
+	condByZone := make(map[string]RoomCondition, len(e.Zones))
+	for _, c := range e.roomConditions() {
+		condByZone[c.Zone] = c
+	}
+	// dcvZones is recounted every pass. The avoided-load figure that pairs with it is NOT
+	// computed here: it belongs beside the fresh-air load in broadcast(), so the two can
+	// never disagree about what headcount they were sized against.
+	e.dcvZones = 0
+
 	updatedVavs := make(map[*VavSim]bool, len(e.Vavs))
 
 	for id, z := range e.Zones {
@@ -99,6 +111,7 @@ func (e *Engine) actuateWithDt(dt float64) {
 		if IsCritical(z.Type) {
 			z.Setpoint = z.BaseSetpoint
 			z.LightsOn = true
+			z.Vent = z.ventDemand(e.dynamics, condByZone[id])
 			if v != nil {
 				v.TargetDamperPos = MaxDamperPos
 				v.TargetPosition = MaxDamperPos
@@ -141,6 +154,21 @@ func (e *Engine) actuateWithDt(dt float64) {
 		}
 		z.Setpoint = desiredSp
 		z.LightsOn = desiredLights
+
+		// Demand-controlled ventilation. The damper serves two masters -- cooling and fresh
+		// air -- and it has to satisfy whichever asks for more, so the two demands are
+		// computed separately and combined with max() rather than one overwriting the other.
+		//
+		// targetDamper above is the thermal demand. vent.Floor is the fresh-air demand, and
+		// for a zone with no NDIR sensor it is exactly the fixed MinVentDamperFloor this
+		// code used before, so an unmeasured zone behaves identically to before DCV existed.
+		thermalDamper := math.Max(MinVentDamperFloor, math.Min(MaxDamperPos, targetDamper))
+		vent := z.ventDemand(e.dynamics, condByZone[id])
+		z.Vent = vent
+		if vent.Measured {
+			e.dcvZones++
+		}
+		targetDamper = math.Max(thermalDamper, vent.Floor)
 
 		if v != nil {
 			v.TargetDamperPos = math.Max(MinVentDamperFloor, math.Min(MaxDamperPos, targetDamper))

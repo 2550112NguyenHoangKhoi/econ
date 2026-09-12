@@ -102,6 +102,8 @@
     "outdoorCo2Note": "Ambient outdoor CO2. The floor every indoor concentration is measured from; an urban Vietnamese site runs a little above the global background, so recalibrate from a sensor left outdoors rather than assuming the textbook 420.",
     "co2PpmPerOccupantSteady": 15.0,
     "co2PpmPerOccupantNote": "Steady-state CO2 rise per occupant in a zone ventilated at outdoorAirLPerSPerPerson. Used ONLY to display a modelled concentration where no NDIR sensor reports, and every surface that shows it must label it as modelled — a fabricated ppm on a channel that implies measurement is exactly what rule 1 forbids.",
+    "co2ComfortPpm": 1000.0,
+    "co2ComfortNote": "ASHRAE 62.1 / TCVN indoor-air guideline for an office. Two consumers read it: the baseline scorer uses it as the honest fixed threshold while a zone's own normal is still learning, and the demand-controlled ventilation loop modulates the damper from outdoor air up to it. Raising it relaxes both at once, which is the point -- they should never disagree about what counts as under-ventilated.",
     "nonHvacBaseWPerM2": 9.0,
     "nonHvacBaseNote": [
       "Lighting + fans + lifts + pumps as a floor-area-scaled baseline, replacing a fixed",

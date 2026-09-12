@@ -233,8 +233,38 @@ func (rcv *GlobalData) MutateAhuPressurePa(n float32) bool {
 	return rcv._tab.MutateFloat32Slot(34, n)
 }
 
+// DcvZones is how many zones are having their damper positioned from a live NDIR reading.
+// Slot 16 -> vtable offset 4 + 16*2 = 36. Zero is a real state (no CO2 sensors fitted),
+// indistinguishable from an absent field -- which is correct, because both mean "no zone is
+// demand-controlled" and the UI should say the same thing either way.
+func (rcv *GlobalData) DcvZones() int32 {
+	o := flatbuffers.UOffsetT(rcv._tab.Offset(36))
+	if o != 0 {
+		return rcv._tab.GetInt32(o + rcv._tab.Pos)
+	}
+	return 0
+}
+
+func (rcv *GlobalData) MutateDcvZones(n int32) bool {
+	return rcv._tab.MutateInt32Slot(36, n)
+}
+
+// DcvAvoidedKw is the fresh-air cooling load the demand-controlled zones are not carrying,
+// computed only over zones with a live sensor. Slot 17 -> vtable offset 4 + 17*2 = 38.
+func (rcv *GlobalData) DcvAvoidedKw() float32 {
+	o := flatbuffers.UOffsetT(rcv._tab.Offset(38))
+	if o != 0 {
+		return rcv._tab.GetFloat32(o + rcv._tab.Pos)
+	}
+	return 0.0
+}
+
+func (rcv *GlobalData) MutateDcvAvoidedKw(n float32) bool {
+	return rcv._tab.MutateFloat32Slot(38, n)
+}
+
 func GlobalDataStart(builder *flatbuffers.Builder) {
-	builder.StartObject(16)
+	builder.StartObject(18)
 }
 func GlobalDataAddBuildingLoadMw(builder *flatbuffers.Builder, buildingLoadMw float32) {
 	builder.PrependFloat32Slot(0, buildingLoadMw, 0.0)
@@ -283,6 +313,12 @@ func GlobalDataAddZonesInSetback(builder *flatbuffers.Builder, zonesInSetback in
 }
 func GlobalDataAddAhuPressurePa(builder *flatbuffers.Builder, ahuPressurePa float32) {
 	builder.PrependFloat32Slot(15, ahuPressurePa, 0.0)
+}
+func GlobalDataAddDcvZones(builder *flatbuffers.Builder, dcvZones int32) {
+	builder.PrependInt32Slot(16, dcvZones, 0)
+}
+func GlobalDataAddDcvAvoidedKw(builder *flatbuffers.Builder, dcvAvoidedKw float32) {
+	builder.PrependFloat32Slot(17, dcvAvoidedKw, 0.0)
 }
 func GlobalDataEnd(builder *flatbuffers.Builder) flatbuffers.UOffsetT {
 	return builder.EndObject()

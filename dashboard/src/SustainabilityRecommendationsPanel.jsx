@@ -193,6 +193,8 @@ export default function SustainabilityRecommendationsPanel({
         breakdown={breakdown}
         plugW={plugW} stripW={stripW} acW={acW}
         endUse={endUse}
+        dcvZones={simData?.dcvZones || 0}
+        dcvAvoidedKw={simData?.dcvAvoidedKw || 0}
         acMeteredZones={acMeteredZones}
         stripMeteredZones={stripMeteredZones}
         plugMeteredZones={plugMeteredZones}

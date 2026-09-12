@@ -17,7 +17,15 @@ table ZoneData {
   // never travels on a channel that implies it was measured.
   supplyC: float = 0;       // appended: degC, 0 = engine reported none
   supplyReal: bool = false; // appended: true only when a live probe measured it
-  stripW: float = 0;        // appended: measured power-strip draw in W (ACS712)
+  stripW: float = 0;
+  // Demand-controlled ventilation, per zone. ventFloor is the damper position this zone's
+  // FRESH-AIR demand requires, in [0,1] -- distinct from the thermal demand, because the
+  // damper serves both and runs at whichever is larger. ventMeasured says whether a live
+  // NDIR reading produced it: false means ventFloor is the fixed ASHRAE minimum and nothing
+  // about it was demand-controlled. A UI that shows ventFloor without ventMeasured would
+  // present a constant as a measurement.
+  ventFloor: float = 0;        // appended
+  ventMeasured: bool = false;  // appended        // appended: measured power-strip draw in W (ACS712)
 }
 
 table VavData {
@@ -65,6 +73,15 @@ table GlobalData {
   // topology view's AHU card showed a literal 500 Pa placeholder for the life of the
   // project. Zero means the solver has not run yet.
   ahuPressurePa: float = 0;    // appended
+  // Demand-controlled ventilation (simulation/ventilation.go). dcvZones is how many zones
+  // are having their damper positioned from a LIVE NDIR reading right now; a building with
+  // no CO2 sensors reports 0 and the dashboard must say "not demand-controlled" rather than
+  // implying a loop that is not running. dcvAvoidedKw is the fresh-air cooling load those
+  // zones are NOT carrying because their measured CO2 permitted a lower damper than the
+  // design occupancy rate -- it is only ever computed over measured zones, so it can be
+  // shown as a saving without breaching rule 3.
+  dcvZones: int = 0;           // appended
+  dcvAvoidedKw: float = 0;     // appended
 }
 
 table SimState {

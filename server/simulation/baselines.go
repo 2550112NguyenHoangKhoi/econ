@@ -65,10 +65,12 @@ type metricSpec struct {
 }
 
 var metricSpecs = map[string]metricSpec{
-	// CO2: NDIR only (the engine feeds it only fresh sensor readings). ASHRAE/TCVN put
-	// the comfort/ventilation guideline at ~1000 ppm — a real standard, so it is the
-	// honest floor while the per-zone baseline is still learning.
-	"co2": {minSigma: 40, zAlert: 3.0, hiIsBad: true, standardHi: 1000, action: "purge", unit: "ppm", label: "CO₂"},
+	// CO2: NDIR only (the engine feeds it only fresh sensor readings). The comfort guideline
+	// is a property of the building standard, not of this code, so standardHi is left zero
+	// here and filled from Phys().Co2ComfortPpm at read time — see specFor. The same number
+	// modulates the DCV damper in ventilation.go, so the two can never disagree about what
+	// counts as under-ventilated.
+	"co2": {minSigma: 40, zAlert: 3.0, hiIsBad: true, action: "purge", unit: "ppm", label: "CO₂"},
 	// Room temperature: a zone running many σ hotter than its own hourly normal is a
 	// developing thermal problem (starved VAV, load spike) before it crosses any fixed
 	// deadband. No universal fixed limit — this is a purely learned signal.
@@ -107,10 +109,25 @@ type ModelSpec struct {
 	Metrics          map[string]MetricSpecPublic `json:"metrics"`
 }
 
+// specFor returns a metric's spec with any building-standard number resolved from the
+// programme library rather than from a literal in this file. Only CO2 has one today; the
+// indirection exists so the next one cannot quietly become a constant here (rule 2).
+func specFor(metric string) (metricSpec, bool) {
+	s, ok := metricSpecs[metric]
+	if !ok {
+		return metricSpec{}, false
+	}
+	if metric == "co2" {
+		s.standardHi = Phys().Co2ComfortPpm
+	}
+	return s, true
+}
+
 // BaselineModelSpec renders the current model parameters + metric specs for export.
 func BaselineModelSpec() ModelSpec {
 	m := make(map[string]MetricSpecPublic, len(metricSpecs))
-	for k, s := range metricSpecs {
+	for k := range metricSpecs {
+		s, _ := specFor(k)
 		m[k] = MetricSpecPublic{
 			MinSigma: s.minSigma, ZAlert: s.zAlert, HiIsBad: s.hiIsBad,
 			StandardHi: s.standardHi, Action: s.action, Unit: s.unit, Label: s.label,

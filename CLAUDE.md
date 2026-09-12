@@ -39,6 +39,11 @@ All of these are `server/simulation/`.
 3. `baselines.go` — per (zone, metric, hour) learned normals; anomalies scored in σ.
 4. `recommend.go` — turns both models into ranked recommendations.
 5. `plugs.go` — the plug-load sweep, the end use a conventional BMS cannot see.
+6. `ventilation.go` — demand-controlled ventilation. The damper serves cooling AND fresh
+   air, so `actuate.go` runs it at `max(thermal demand, ventilation demand)`. Only a live
+   NDIR reading may move the ventilation side: a zone with no sensor keeps the fixed ASHRAE
+   floor, and the fresh-air load model ventilates it for its *rated* occupancy rather than
+   assuming a control loop it does not have. This is rule 1 applied to actuation.
 
 Every file in this repo is now under ~700 lines, and the large ones were split by
 responsibility rather than by size. When a file has neighbours it was split from, its

@@ -12,6 +12,8 @@ export default function Scope2Card({
   stripW,
   acW,
   endUse,
+  dcvZones,
+  dcvAvoidedKw,
   acMeteredZones,
   stripMeteredZones,
   plugMeteredZones,
@@ -147,6 +149,46 @@ export default function Scope2Card({
         })()}
       </div>
     </div>
+
+    {/* Demand-controlled ventilation.
+        Rendered only when at least one zone is actually being ventilated from a live CO2
+        reading. A row reading "0 zones · 0 kW avoided" would look like a result -- as if the
+        loop ran and found nothing -- when the truth is that no zone has an NDIR sensor and
+        the loop is not running at all. That absence belongs in the sensor-coverage story,
+        not here, so this row simply does not appear.
+
+        Outdoor air is the largest single cooling term in a tropical office and it is mostly
+        latent, which is why trimming it is worth showing beside the end-use split rather
+        than buried in the AI panel. */}
+    {dcvZones > 0 && (
+      <div
+        data-testid="dcv-summary"
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          background: 'rgba(16, 185, 129, 0.10)',
+          border: '1px solid rgba(16, 185, 129, 0.35)',
+          padding: '8px 10px',
+          borderRadius: '6px',
+          fontSize: '11px',
+          marginBottom: '8px',
+          color: 'var(--text-secondary, #cbd5e1)',
+        }}
+      >
+        <span title="Zones whose damper is positioned from a live NDIR reading rather than a fixed rate. Zones without a CO2 sensor are unaffected and still ventilate for their rated occupancy.">
+          💨 <b>{dcvZones}</b> zone{dcvZones === 1 ? '' : 's'} demand-controlled
+        </span>
+        <span
+          title="Fresh-air cooling avoided by ventilating for the people actually present instead of the occupancy each zone is rated for. Computed only over zones with a live sensor — an unmeasured zone cannot have earned this."
+          style={{ color: '#34d399', fontWeight: 700 }}
+        >
+          {dcvAvoidedKw >= 1
+            ? `${dcvAvoidedKw.toFixed(1)} kW`
+            : `${(dcvAvoidedKw * 1000).toFixed(0)} W`} fresh-air load avoided
+        </span>
+      </div>
+    )}
 
     {/* Environmental Equivalents */}
     <div

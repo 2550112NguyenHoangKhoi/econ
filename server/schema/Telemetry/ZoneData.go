@@ -181,8 +181,39 @@ func (rcv *ZoneData) MutateStripW(n float32) bool {
 	return rcv._tab.MutateFloat32Slot(26, n)
 }
 
+// VentFloor is the damper position this zone's FRESH-AIR demand requires, in [0,1].
+// Slot 12 -> vtable offset 4 + 12*2 = 28. Reading 0 means either "the field is absent"
+// (an older engine build) or "the floor really is zero", which cannot happen -- the loop
+// never returns below MinVentDamperFloor. So 0 here reliably means an absent field.
+func (rcv *ZoneData) VentFloor() float32 {
+	o := flatbuffers.UOffsetT(rcv._tab.Offset(28))
+	if o != 0 {
+		return rcv._tab.GetFloat32(o + rcv._tab.Pos)
+	}
+	return 0.0
+}
+
+func (rcv *ZoneData) MutateVentFloor(n float32) bool {
+	return rcv._tab.MutateFloat32Slot(28, n)
+}
+
+// VentMeasured reports whether a live NDIR reading produced VentFloor. False means the
+// floor is the fixed ASHRAE minimum and this zone is not demand-controlled.
+// Slot 13 -> vtable offset 4 + 13*2 = 30.
+func (rcv *ZoneData) VentMeasured() bool {
+	o := flatbuffers.UOffsetT(rcv._tab.Offset(30))
+	if o != 0 {
+		return rcv._tab.GetBool(o + rcv._tab.Pos)
+	}
+	return false
+}
+
+func (rcv *ZoneData) MutateVentMeasured(n bool) bool {
+	return rcv._tab.MutateBoolSlot(30, n)
+}
+
 func ZoneDataStart(builder *flatbuffers.Builder) {
-	builder.StartObject(12)
+	builder.StartObject(14)
 }
 func ZoneDataAddId(builder *flatbuffers.Builder, id flatbuffers.UOffsetT) {
 	builder.PrependUOffsetTSlot(0, flatbuffers.UOffsetT(id), 0)
@@ -219,6 +250,12 @@ func ZoneDataAddSupplyReal(builder *flatbuffers.Builder, supplyReal bool) {
 }
 func ZoneDataAddStripW(builder *flatbuffers.Builder, stripW float32) {
 	builder.PrependFloat32Slot(11, stripW, 0.0)
+}
+func ZoneDataAddVentFloor(builder *flatbuffers.Builder, ventFloor float32) {
+	builder.PrependFloat32Slot(12, ventFloor, 0.0)
+}
+func ZoneDataAddVentMeasured(builder *flatbuffers.Builder, ventMeasured bool) {
+	builder.PrependBoolSlot(13, ventMeasured, false)
 }
 func ZoneDataEnd(builder *flatbuffers.Builder) flatbuffers.UOffsetT {
 	return builder.EndObject()

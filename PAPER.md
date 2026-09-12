@@ -1115,6 +1115,7 @@ Everything outside this diagram is in A.6 or A.7.
 | `simulation/baselines.go` | Learned per-(zone, metric, hour) normals, σ-scored (§7.10) | `recommend.go`, model export | **LIVE** |
 | `simulation/recommend.go` | Ranked recommendations from both learned models | `/api/recommendations` | **LIVE** |
 | `simulation/plugs.go` | Plug-load model, clamp override, vacancy sweep (§7.6) | `/api/plugs`, building load | **LIVE** |
+| `simulation/ventilation.go` | Demand-controlled ventilation: damper floor from measured CO₂, with a predictive term from the identified CO₂ balance | `actuate.go`, `broadcast.go` | **LIVE** — only on zones with a live NDIR sensor |
 | `simulation/bess.go` | Battery SoC integration and TOU dispatch | `broadcast()`, dashboard | **LIVE** — no ageing model (§9.1.3) |
 | `mqtt.go` | Broker client; telemetry in, commands out | engine | **LIVE** |
 | `weather.go` | Open-Meteo poller feeding $T\_{\text{out}}$ | 2R1C envelope, `/api/weather` | **LIVE** — falls back to design-day constant |

@@ -333,6 +333,35 @@ export function buildInsights({
     });
   }
 
+  // 5b. Demand-controlled ventilation. Only ever a card when at least one zone is being
+  // ventilated from a LIVE CO2 reading -- a building with no NDIR sensors has no DCV loop
+  // running, and a card saying "0 zones demand-controlled / 0 kW saved" would read as a
+  // result rather than an absence. The absence is stated in the sensor-coverage card
+  // instead, where "what the twin cannot see" belongs.
+  //
+  // The two branches matter more than they look. A loop that is trimming is saving; a loop
+  // that is pinned at full open on several zones is NOT saving, it is losing, and calling
+  // both "DCV active" would hide the second inside the first.
+  const dcvZones = simData.dcvZones || 0;
+  const dcvKw = simData.dcvAvoidedKw || 0;
+  if (dcvZones > 0) {
+    const zoneVals = Object.values(simData.zones || {});
+    const pinned = zoneVals.filter((z) => z.ventMeasured && (z.ventFloor || 0) >= 0.999).length;
+    const losing = pinned > 0;
+    generated.push({
+      id: 'dcv',
+      type: losing ? 'warning' : 'success',
+      expandable: true,
+      icon: <Wind size={18} color={losing ? 'var(--accent-yellow)' : 'var(--accent-green)'} />,
+      title: losing ? 'Ventilation At Capacity' : 'Demand-Controlled Ventilation Active',
+      badge: 'MEASURED',
+      message: losing
+        ? `${pinned} of ${dcvZones} demand-controlled zone${pinned === 1 ? ' is' : 's are'} at 100% fresh air and still above the comfort guideline. The loop has nothing left to give, so this is a delivery problem — a starved duct, a shut balancing damper, or a box undersized for the occupancy the room now carries. More commanding will not fix it.`
+        : `${dcvZones} zone${dcvZones === 1 ? '' : 's'} ${dcvZones === 1 ? 'is' : 'are'} having ${dcvZones === 1 ? 'its' : 'their'} damper positioned from a live CO₂ reading rather than a fixed rate. That avoids ${powerKw(dcvKw)} of fresh-air cooling — outdoor air is the largest single cooling term in a tropical office, and this is the portion not being conditioned for occupants who are not there. Zones without an NDIR sensor are unaffected and still ventilate for rated occupancy.`,
+      action: 'VIEW MODEL METRICS'
+    });
+  }
+
   // 6. Autonomous operations status (always present) — real engine state.
   const apOn = simData.autoPilot !== false;
   const inSetback = simData.zonesInSetback || 0;

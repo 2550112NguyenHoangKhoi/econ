@@ -102,8 +102,29 @@ ahuPressurePa():number {
   return offset ? this.bb!.readFloat32(this.bb_pos + offset) : 0.0;
 }
 
+// How many zones are having their damper positioned from a LIVE NDIR reading right now.
+//
+// Debugging note: 0 is a real, expected state -- a building with no CO2 sensors fitted has
+// no demand-controlled zones -- and it is indistinguishable from an absent field. That is
+// deliberate: both mean "nothing here is demand-controlled", which is the same thing to say
+// on screen. If you need to tell them apart, check the engine log for "[dcv]" at startup.
+// Slot 16 -> vtable offset 4 + 16*2 = 36.
+dcvZones():number {
+  const offset = this.bb!.__offset(this.bb_pos, 36);
+  return offset ? this.bb!.readInt32(this.bb_pos + offset) : 0;
+}
+
+// The fresh-air cooling load the demand-controlled zones are NOT carrying, in kW, because
+// their measured CO2 permitted a lower damper than the design occupancy rate would have.
+// Computed only over zones with a live sensor, so it can be shown as a saving without
+// crediting a mechanism that did not run. Slot 17 -> vtable offset 4 + 17*2 = 38.
+dcvAvoidedKw():number {
+  const offset = this.bb!.__offset(this.bb_pos, 38);
+  return offset ? this.bb!.readFloat32(this.bb_pos + offset) : 0.0;
+}
+
 static startGlobalData(builder:flatbuffers.Builder) {
-  builder.startObject(16);
+  builder.startObject(18);
 }
 
 static addBuildingLoadMw(builder:flatbuffers.Builder, buildingLoadMw:number) {

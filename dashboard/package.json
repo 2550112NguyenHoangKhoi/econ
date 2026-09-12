@@ -10,7 +10,9 @@
     "test": "node verify_bim_switching.js && node verify_level_toggle.js && node verify_ai_actions.js",
     "test:bim": "node verify_bim_switching.js",
     "test:render": "esbuild test_render.js --bundle --platform=node --format=cjs --outfile=node_modules/.cache/test_render.cjs --loader:.js=jsx --log-level=error && node node_modules/.cache/test_render.cjs",
-    "lint:undef": "node tools/undef_check.mjs $(find src -name '*.js' -o -name '*.jsx' | grep -v __tests__)"
+    "lint:undef": "node tools/undef_check.mjs $(find src -name '*.js' -o -name '*.jsx' | grep -v __tests__)",
+    "check:wire": "esbuild tools/decode_frame.mjs --bundle --platform=node --format=esm --outfile=node_modules/.cache/decode_frame.mjs --log-level=error && node node_modules/.cache/decode_frame.mjs",
+    "check:dcv-ui": "esbuild tools/render_dcv.jsx --bundle --platform=node --format=cjs --jsx=automatic --define:import.meta.env={} --outfile=node_modules/.cache/render_dcv.cjs --loader:.js=jsx --log-level=error && node node_modules/.cache/render_dcv.cjs"
   },
   "dependencies": {
     "@react-three/drei": "^9.106.0",

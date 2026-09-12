@@ -105,6 +105,12 @@ type ZoneSim struct {
 	AdjacentZones []string
 	// Dynamic mass balance CO2 concentration (ppm) when NDIR sensor is omitted
 	Co2Sim float64
+	// Vent is why this zone's damper is where it is on the FRESH-AIR side, recomputed every
+	// actuation pass. Measured=false means no NDIR sensor reports here and the floor is the
+	// fixed ASHRAE minimum -- nothing about it was demand-controlled, and the dashboard must
+	// not imply otherwise. See ventilation.go.
+	Vent VentDemand
+
 	// Actuator & manual override twin states
 	DamperPos float64 // manual or actuated damper position in [0.0, 1.0]
 	CpuStrain bool    // test flag: forced CPU strain offload fallback active
@@ -229,6 +235,18 @@ type Engine struct {
 	// energy-saving setback — the genuine backing for the "autonomous action" UI.
 	AutoPilot      bool
 	zonesInSetback int
+	// Demand-controlled ventilation, recomputed every actuation pass (ventilation.go).
+	// dcvZones counts the zones whose damper is being positioned from a LIVE NDIR reading;
+	// dcvAvoidedVentW is the fresh-air cooling load those zones are not carrying because
+	// their measured CO2 permitted a lower damper than the design occupancy rate. Both are
+	// zero for a building with no CO2 sensors, which is the honest answer -- an unmeasured
+	// zone cannot have earned a demand-controlled saving.
+	dcvZones        int
+	dcvAvoidedVentW float64
+	// lastFrame is the most recent serialized broadcast, kept only so a test can assert the
+	// wire format against the state that produced it (BuildFrameForTest). Nothing in the
+	// running engine reads it.
+	lastFrame []byte
 	// Live outdoor conditions from the weather poller (main.go). Same freshness
 	// philosophy as the zone sensors: outdoorAt records when the value arrived, and a
 	// value the poller has not refreshed within outdoorStaleAfter stops driving the

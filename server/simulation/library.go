@@ -77,6 +77,12 @@ type Physics struct {
 	// values, in three dashboard files. A surface that renders them must say "modelled".
 	OutdoorCo2Ppm           float64 `json:"outdoorCo2Ppm"`
 	Co2PpmPerOccupantSteady float64 `json:"co2PpmPerOccupantSteady"`
+	// Co2ComfortPpm is the concentration at which a zone is considered under-ventilated.
+	// One number, two consumers: baselines.go scores anomalies against it while a zone's
+	// own normal is still learning, and ventilation.go modulates the damper up to it. It
+	// described the building and used to sit in Go as a literal 1000 in metricSpecs, which
+	// is precisely what rule 2 exists to prevent.
+	Co2ComfortPpm float64 `json:"co2ComfortPpm"`
 	// Air-side sizing. SupplyAirDesignAch gives every VAV a design flow from its own
 	// zone's volume; AhuDesignPressurePa is the static those resistances are referenced
 	// to and the operating point the fan curve is scaled to reach.
@@ -218,6 +224,7 @@ func defaultLibrary() libraryDoc {
 		PrecoolShiftFraction:       0.05,
 		OutdoorCo2Ppm:              400.0,
 		Co2PpmPerOccupantSteady:    15.0,
+		Co2ComfortPpm:              1000.0,
 		SupplyAirDesignAch:         6.0,
 		AhuDesignPressurePa:        480.0,
 		AcRunningThresholdW:        50.0,
@@ -302,6 +309,7 @@ func loadLibrary() {
 	mergeF(&p.PrecoolShiftFraction, base.PrecoolShiftFraction)
 	mergeF(&p.OutdoorCo2Ppm, base.OutdoorCo2Ppm)
 	mergeF(&p.Co2PpmPerOccupantSteady, base.Co2PpmPerOccupantSteady)
+	mergeF(&p.Co2ComfortPpm, base.Co2ComfortPpm)
 	mergeF(&p.SupplyAirDesignAch, base.SupplyAirDesignAch)
 	mergeF(&p.AhuDesignPressurePa, base.AhuDesignPressurePa)
 	mergeF(&p.AcRunningThresholdW, base.AcRunningThresholdW)

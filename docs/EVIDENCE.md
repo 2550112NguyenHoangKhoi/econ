@@ -122,7 +122,7 @@ part of this table to argue with:
 |---|---|---|---|---|
 | Plug loads | 26.4 % | Metered sweep of non-critical sockets outside occupied hours | 25 % | **6.6 %** |
 | Air-conditioning | 25.1 % | Per-room learned setback, bounded by identified recovery | 12 % | **3.0 %** |
-| ~~Ventilation~~ | 15.3 % | **Not claimed.** CO₂ is measured and each room's air-change rate is identified, but no ventilation control loop exists, so there is nothing here to credit. | — | — |
+| Ventilation | 15.3 % | Demand-controlled: the damper is positioned from the zone's own measured CO₂ (`simulation/ventilation.go`). **Credited per zone that has an NDIR sensor, not building-wide** — see below. | 15 % *of covered zones* | **0 % today** |
 | Indoor lighting | 9.1 % | Presence-driven switching | 25 % | **2.3 %** |
 | Outdoor lighting, elevators, pumps | 24.1 % | not addressed | — | — |
 | | | | **Total** | **≈ 11.9 %** |
@@ -130,12 +130,27 @@ part of this table to argue with:
 That lands inside the 10–20 % band Source E asks for, and it is derived from the metered
 end-use split of a real Vietnamese office tower rather than from a product datasheet.
 
-An earlier version of this table claimed a further 2.3 % from demand-controlled
-ventilation. It was withdrawn: the twin measures CO₂ and identifies each room's air-change
-rate, but nothing acts on either, and a saving from a control loop that does not exist is
-exactly the kind of claim the rest of this document is written to avoid. DCV remains the
-single largest unclaimed opportunity on the list — 15.3 % of the building's energy sitting
-behind a loop that has not been built.
+**The ventilation row, and why it credits zero.** An earlier version of this table claimed
+2.3 % from demand-controlled ventilation. It was withdrawn because nothing acted on the CO₂
+the twin measured. The loop now exists — `simulation/ventilation.go` positions each damper
+from that zone's own measured concentration, and `docs/ROADMAP.md` no longer lists it as a
+gap. The claim has *not* simply been restored, because a second condition applies that did
+not before:
+
+> **DCV only runs where an NDIR sensor is fitted.** A zone without one keeps the fixed
+> ASHRAE minimum, exactly as before, and the engine ventilates it for its *rated* occupancy
+> rather than its actual one. The saving is therefore proportional to CO₂ sensor coverage,
+> and coverage today is **one zone on one pilot node**.
+
+So the building saving is 0 %, and will stay 0 % until sensors are installed. What the code
+now supports is the *rate*: on a fully covered building, 15 % of the ventilation end use is
+2.3 % of the building, which is the figure withdrawn earlier — now backed by a mechanism
+instead of an intention. The engine reports what it is actually achieving as
+`dcvAvoidedKw`, computed only over zones with a live sensor, so this row can be checked
+against the running system rather than argued about.
+
+The distinction matters more than the number. "We built a DCV loop" and "this building is
+saving 2.3 % from DCV" are different claims, and only the first one is true today.
 
 The air-conditioning assumption is the one with independent support: Source C *measured*
 8–11 % from setpoint reset alone on central plant. 12 % from per-room control that also knows

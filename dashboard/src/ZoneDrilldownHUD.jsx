@@ -1,6 +1,12 @@
 import { Wind, Zap, Activity, Lightbulb, Users } from 'lucide-react';
 import { API_BASE } from './api';
 import { money, rateNow, touPeriodLabel, touPeriod } from './tariff';
+// fx() prints a number or the em dash. Used here rather than .toFixed() because a zone can
+// legitimately arrive with a field missing -- a frame that lands mid building-switch carries
+// telemetry for zones the new fixture has not been adopted for yet -- and .toFixed() on
+// undefined throws, taking the whole HUD down through the error boundary. An em dash for one
+// frame is the correct failure; a blank panel is not.
+import { fx } from './measured';
 
 // The drill-down HUD: everything the operator sees after clicking a zone -- live hardware
 // provenance, CO2 with its measured/modelled marker, cost at the live TOU band, the manual
@@ -9,6 +15,12 @@ import { money, rateNow, touPeriodLabel, touPeriod } from './tariff';
 //
 // Rendered only when a zone is selected AND that zone is present in the frame -- App keeps
 // that guard, so this component can assume `simData.zones[selectedZone]` exists.
+//
+// It does NOT assume that zone has a label. Labels come from the building fixture at init;
+// a zone that first appears on the websocket -- which happens during a building switch,
+// before the new fixture has been adopted -- has telemetry but no label yet, and
+// `label.toUpperCase()` on undefined would take the whole HUD down through the error
+// boundary for a frame or two. Falling back to the id is ugly for that frame and correct.
 export default function ZoneDrilldownHUD({
   selectedZone,
   setSelectedZone,
@@ -32,7 +44,7 @@ export default function ZoneDrilldownHUD({
           boxShadow: '0 0 40px rgba(0, 163, 224, 0.15)'
         }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', borderBottom: '1px solid var(--border-glass)', paddingBottom: '0.75rem' }}>
-            <h3 style={{ margin: 0, fontSize: '12px', color: 'var(--text-primary)', letterSpacing: '1px' }}>MICRO-TELEMETRY: {simData.zones[selectedZone].label.toUpperCase()}</h3>
+            <h3 style={{ margin: 0, fontSize: '12px', color: 'var(--text-primary)', letterSpacing: '1px' }}>MICRO-TELEMETRY: {(simData.zones[selectedZone].label || selectedZone.replace(/^zone-/, '')).toUpperCase()}</h3>
             <button onClick={() => setSelectedZone(null)} style={{ background: 'transparent', border: '1px solid var(--accent-red)', borderRadius: '4px', padding: '4px 8px', color: 'var(--accent-red)', cursor: 'pointer', fontSize: '10px', fontWeight: 'bold' }}>EXIT [X]</button>
           </div>
           
@@ -48,7 +60,7 @@ export default function ZoneDrilldownHUD({
               </span>
 		          {hardwareNodes[selectedZone].tempPinned && (
 		            <span style={{ fontSize: '9px', color: 'var(--text-secondary)', fontFamily: 'monospace' }}>
-		              sensor {hardwareNodes[selectedZone].hwTemp.toFixed(1)}°C
+		              sensor {fx(hardwareNodes[selectedZone].hwTemp)}°C
 		            </span>
 		          )}
 		          {/* [GEMINI IMPLEMENTATION START] */}
@@ -125,18 +137,46 @@ export default function ZoneDrilldownHUD({
               })()}
             </div>
 
+            {/* Demand-controlled ventilation. Shown only when a live NDIR reading is driving
+                it: with no sensor the damper sits at the fixed ASHRAE minimum, and printing
+                "15%" under a "Ventilation" heading would present a constant as a control
+                decision. The row also names WHY the damper is where it is, because an
+                operator looking at a wide-open box needs to know whether the room is hot or
+                stuffy — the damper serves both and runs at whichever asks for more. */}
+            {(() => {
+              const zd = simData.zones[selectedZone];
+              if (!zd.ventMeasured) return null;
+              const pct = Math.round((zd.ventFloor || 0) * 100);
+              // Thresholds mirror ventilation.go's Reason field. Kept in sync by eye rather
+              // than shared over the wire: the string is 6 bytes per zone per frame at 30 Hz
+              // and the number it is derived from is already here.
+              const atCapacity = pct >= 100;
+              const label = atCapacity ? 'PURGE' : pct > 50 ? 'BOOST' : pct > 16 ? 'TRIM' : 'FLOOR';
+              const tone = atCapacity ? 'var(--accent-red)' : pct > 50 ? 'var(--accent-yellow)' : 'var(--accent-green)';
+              return (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ color: 'var(--text-secondary)', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Wind size={14}/> Fresh air (demand-controlled)
+                  </span>
+                  <span style={{ fontFamily: 'monospace', fontWeight: 'bold', fontSize: '14px', color: tone }}>
+                    {pct}% <span style={{ fontSize: '9px', letterSpacing: '0.06em', opacity: 0.85 }}>{label}</span>
+                  </span>
+                </div>
+              );
+            })()}
+
             {simData.zones[selectedZone].humidity > 0 && (
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span style={{ color: 'var(--text-secondary)', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}><Wind size={14}/> Humidity (measured)</span>
                 <span style={{ color: 'var(--accent-blue)', fontFamily: 'monospace', fontWeight: 'bold', fontSize: '14px' }}>
-                  {simData.zones[selectedZone].humidity.toFixed(1)} %RH
+                  {fx(simData.zones[selectedZone].humidity)} %RH
                 </span>
               </div>
             )}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span style={{ color: 'var(--text-secondary)', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}><Activity size={14}/> Thermostat</span>
               <span style={{ color: 'var(--accent-blue)', fontFamily: 'monospace', fontWeight: 'bold', fontSize: '14px' }}>
-                {simData.zones[selectedZone].temp.toFixed(1)}°C / {simData.zones[selectedZone].setpoint.toFixed(1)}°C
+                {fx(simData.zones[selectedZone].temp)}°C / {fx(simData.zones[selectedZone].setpoint)}°C
               </span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
