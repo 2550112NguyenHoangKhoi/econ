@@ -20,9 +20,20 @@ export default function OperatorTokenBar({ authorized, onAuthorize }) {
 
   if (authorized) return null;
 
+  // Pasted tokens arrive wrapped in the punctuation of wherever they were copied from:
+  // surrounding quotes from a .env line or a setItem() call, a stray newline from a
+  // terminal, or a zero-width character from a chat client. The engine compares the string
+  // exactly and answers "invalid token" for any of them, which reads as a wrong credential
+  // rather than a dirty paste. Strip what is never part of the token.
+  const clean = (raw) => (raw || '')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')   // zero-width: invisible, and fatal
+    .trim()
+    .replace(/^['"`]+|['"`]+$/g, '')
+    .trim();
+
   const submit = (e) => {
     e.preventDefault();
-    const t = token.trim();
+    const t = clean(token);
     if (!t) return;
     // authorize() stores the token and re-auths the LIVE socket. If the engine rejects it,
     // wsAuthorized stays false and this bar stays up, which is the honest outcome.
