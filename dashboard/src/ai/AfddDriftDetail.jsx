@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { ResponsiveContainer, LineChart, XAxis, YAxis, Tooltip, ReferenceLine, Line } from 'recharts';
 import { API_BASE } from '../api';
 
 // Expands one fault-detection finding into the drift evidence behind it -- the baseline
