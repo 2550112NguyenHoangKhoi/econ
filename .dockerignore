@@ -1,0 +1,67 @@
+# Build context for the DIGITIZER image, whose context is the repo root.
+#
+# server/docker-compose.yml builds the digitizer with `context: ..` so the service can import
+# ai_modules/branch_b_digitization directly instead of forking a copy of it. That is the
+# right call for the code, but it means the whole repository is the build context: without
+# this file, `docker compose up --build` hands the daemon ~2 GB (node_modules, PlatformIO
+# toolchains, Python virtualenvs, training datasets, model weights) to build an image that
+# COPYs two files and one package. backend/forecasting/.dockerignore exists for the same
+# reason, and its comment records the same surprise.
+#
+# WHAT THE IMAGE ACTUALLY NEEDS (digitizer/Dockerfile):
+#   digitizer/requirements.txt
+#   digitizer/app.py
+#   ai_modules/branch_b_digitization/
+# Nothing below may exclude any of those. This is a deny-list rather than an allow-list on
+# purpose: an allow-list that is one pattern wrong fails at build time with a missing COPY,
+# and this file cannot be exercised without a running daemon.
+
+# --- version control and tooling state ---
+.git/
+.github/
+.agents/
+.claude/
+*.log
+
+# --- dependency trees and build output, all reinstallable ---
+node_modules/
+**/node_modules/
+dashboard/dist/
+dashboard/.vite/
+**/__pycache__/
+**/*.pyc
+venv/
+.venv/
+**/venv/
+**/.venv/
+
+# --- firmware toolchain and build artifacts (hundreds of MB, irrelevant here) ---
+edge/esp32/.pio/
+edge/esp32/.vscode/
+
+# --- large data that no image consumes ---
+# Training datasets, model weights and the recorded telemetry dumps. The digitizer ships
+# with its own weights inside ai_modules/branch_b_digitization; these are the raw corpora.
+recorded_data_dump.zip.part*
+measured-backup.csv
+scratch/
+ai_modules/branch_b_digitization/skeyspot/CubiCasa5k/
+ai_modules/branch_b_digitization/skeyspot/yolo_dataset/
+ai_modules/branch_b_digitization/skeyspot/mock_dataset/
+ai_modules/branch_b_digitization/skeyspot/data/
+ai_modules/branch_a_occupancy/
+
+# --- other services' sources: each has its own build context ---
+server/
+backend/
+dashboard/
+edge/
+
+# --- secrets, which must never enter an image layer even by accident ---
+**/.env
+**/wifi_secrets.h
+server/mosquitto/passwd
+
+# --- OS noise ---
+.DS_Store
+**/.DS_Store

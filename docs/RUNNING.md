@@ -18,6 +18,26 @@ The backend runs the thermodynamic simulation, serves the building data, and str
 # Navigate to the server directory
 cd server
 
+# FIRST RUN ONLY — mint broker credentials.
+#
+# docker-compose.yml mounts mosquitto/passwd and the broker will not start without it.
+# That file is gitignored (it is a credential), so a FRESH CLONE does not have one and
+# `docker compose up` fails at the mqtt service until this has been run once:
+./setup-mqtt-auth.sh
+#
+# It writes mosquitto/passwd (hashed, mounted read-only) and .env (the plaintext the
+# engine and the ESP32 nodes authenticate with). Re-run with --rotate to replace every
+# password. It uses the broker image's own mosquitto_passwd if you have no local one, so
+# Docker is the only prerequisite.
+#
+# ⚠️ If you skip it and run compose anyway, Docker creates an empty DIRECTORY at
+# mosquitto/passwd for the missing bind mount, and the script will then refuse to write
+# a file there. Fix with: rm -rf mosquitto/passwd && ./setup-mqtt-auth.sh
+#
+# No hardware attached and just want the demo? Use the anonymous broker instead:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+# which swaps in mosquitto/mosquitto.dev.conf and needs no credentials at all.
+
 # Build and start the Go backend and PostgreSQL database in detached mode
 docker-compose up -d --build
 

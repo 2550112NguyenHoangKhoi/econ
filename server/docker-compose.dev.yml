@@ -1,0 +1,41 @@
+# Anonymous-broker overlay for a demo with no hardware attached.
+#
+# WHY THIS IS A SEPARATE FILE AND NOT THE DEFAULT
+#
+# docker-compose.yml is authenticated, and stays that way: the broker it describes switches
+# mains circuits, and a broker that accepts anonymous publishers is a broker anyone on the
+# LAN can use to turn the building's sockets off. Making the insecure mode the default would
+# mean every deployment that forgot to change it is unauthenticated.
+#
+# It is also NOT docker-compose.override.yml, because Docker applies that one automatically.
+# An overlay that silently disables authentication whenever the file happens to exist is the
+# same hazard with an extra step. This file only takes effect when you name it:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+#
+# WHEN TO USE IT
+#
+# A fresh clone has no mosquitto/passwd — that file is a credential, so it is gitignored and
+# minted by ./setup-mqtt-auth.sh. If you are running the twin with no physical node attached
+# and just want it up, this overlay is the shortcut that skips credential setup entirely.
+#
+# The moment a real ESP32 connects, stop using it: run ./setup-mqtt-auth.sh, put the minted
+# username and password in the node's wifi_secrets.h, and go back to plain
+# `docker compose up`. This overlay drops mosquitto/acl along with the credentials, and the
+# ACL is what stops a sensor node publishing COMMANDS at all — it can only do that job when
+# clients are identified. Under this overlay any client on the LAN can publish anything.
+
+services:
+  mqtt:
+    # !override, not a plain list.
+    #
+    # Compose MERGES volume lists across files, matching on the container-side target. A
+    # plain list here would swap mosquitto.conf for the dev config (same target) and leave
+    # the passwd and acl mounts in place — so a fresh clone, which has no mosquitto/passwd,
+    # would still fail on the missing bind mount and the overlay would not have helped at
+    # all. Verified with `docker compose ... config` before this tag was added: passwd was
+    # still there.
+    #
+    # !override replaces the whole key, which is what "run anonymously" actually means.
+    volumes: !override
+      - ./mosquitto/mosquitto.dev.conf:/mosquitto/config/mosquitto.conf
