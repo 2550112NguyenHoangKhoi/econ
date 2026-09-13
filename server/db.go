@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	_ "github.com/lib/pq"
@@ -47,33 +48,94 @@ type reading struct {
 // initDB succeeds.
 var writeCh chan reading
 
+// initDB connects to TimescaleDB, retrying in the background until it succeeds.
+//
+// WHY THE RETRY EXISTS — this was found by actually running `docker compose up`.
+//
+// The engine used to Ping() once at startup and, on failure, set DB = nil and never try
+// again. Under Docker that is not an edge case, it is the NORMAL case: compose's
+// `depends_on` waits for the database CONTAINER to start, not for Postgres inside it to
+// accept connections, and TimescaleDB takes several seconds to initialise. So the engine
+// lost the race on essentially every `docker compose up`, logged one line, and ran for the
+// rest of its life with no persistence.
+//
+// What made that bad rather than merely unlucky: /api/history and /api/series answer
+// `200 []` when DB is nil. An empty array with a success code is indistinguishable from
+// "connected, no rows yet", so every history chart in the dashboard was permanently blank
+// and nothing anywhere said why. That is the project's own honesty rule — never let a
+// channel imply data it does not have — failing on an API instead of a sensor.
+//
+// The fast path is unchanged: if the database is up, this connects synchronously before
+// main() proceeds, exactly as before. Only the failure path is different.
 func initDB() {
 	dbURL := os.Getenv("DB_URL")
 	if dbURL == "" {
 		dbURL = "postgres://econ:econ@localhost:5432/econ?sslmode=disable"
 	}
 
-	var err error
-	DB, err = sql.Open("postgres", dbURL)
+	if tryConnectDB(dbURL) {
+		return
+	}
+
+	// Not up yet. Keep trying, because the reasons it is down are mostly temporary: a
+	// container still initialising, a database restarted for maintenance, a network blip.
+	// Backoff is capped at 30 s so a genuinely absent database costs one log line every
+	// half minute rather than a spin.
+	go func() {
+		delay := 2 * time.Second
+		for {
+			time.Sleep(delay)
+			if tryConnectDB(dbURL) {
+				return
+			}
+			if delay < 30*time.Second {
+				delay *= 2
+				if delay > 30*time.Second {
+					delay = 30 * time.Second
+				}
+			}
+		}
+	}()
+}
+
+// dbOnce guards the one-time setup that must not run twice if a retry races the first
+// attempt: migrateSchema is idempotent, but writeLoop is a goroutine and a second one would
+// double-write every reading.
+var dbOnce sync.Once
+
+// tryConnectDB attempts one connection. Returns true once the engine is persisting.
+//
+// Debugging note: the log line on success names the source, so `docker compose logs server
+// | grep '\[db\]'` tells you whether persistence came up immediately or on a retry. If you
+// see the "not reachable" line and never the "Connected" one, the database is genuinely
+// unreachable from inside the container — check DB_URL's host against the compose service
+// name, not localhost.
+func tryConnectDB(dbURL string) bool {
+	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
 		log.Printf("[db] Failed to open DB: %v", err)
-		DB = nil
-		return
+		return false
 	}
-
-	if err = DB.Ping(); err != nil {
-		log.Printf("[db] DB not reachable (is the container up?): %v", err)
-		DB = nil
-		return
+	if err = db.Ping(); err != nil {
+		log.Printf("[db] DB not reachable yet (%v) — retrying in the background; "+
+			"history endpoints stay empty until it answers", err)
+		db.Close()
+		return false
 	}
-	DB.SetMaxOpenConns(8)
-	DB.SetMaxIdleConns(4)
+	db.SetMaxOpenConns(8)
+	db.SetMaxIdleConns(4)
 
-	migrateSchema()
+	// Publish the handle only once it is usable. Handlers read DB without a lock, so a
+	// half-initialised handle must never be visible to them.
+	DB = db
 
-	writeCh = make(chan reading, 8192)
-	go writeLoop()
+	dbOnce.Do(func() {
+		migrateSchema()
+		writeCh = make(chan reading, 8192)
+		go writeLoop()
+	})
 	log.Println("[db] Connected to TimescaleDB.")
+	return true
 }
 
 // migrateSchema brings an existing database up to the current shape. Every statement is
