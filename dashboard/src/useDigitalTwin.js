@@ -14,7 +14,7 @@ import { getBuilding, subscribeBuildingChange } from './buildingStore';
 // fixture rather than to an invented number.
 export const FALLBACK_SETPOINT_C = 24.0;
 export const FALLBACK_DEADBAND_K = 2.0;
-import { API_BASE, WS_URL, getAdminToken, setAdminToken } from './api';
+import { API_BASE, WS_URL, getAdminToken, setAdminToken, writeHeaders } from './api';
 
 // Data-driven fault targets: derive the selectable zones from all known buildings so any
 // model switch or regenerated building-data.json "just works" (no hard-coded zoneIds to re-wire).
@@ -240,9 +240,15 @@ export function useDigitalTwin(onUpdate) {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ action, zone: zoneId }));
     } else {
+      // writeHeaders(), not a bare Content-Type. This is the REST fallback for a manual
+      // override when the websocket is down, and it was the ONE /api/command call site in
+      // the dashboard that did not attach the admin token — the other three do. On an engine
+      // with ECON_ADMIN_TOKEN set it would therefore be the only actuation path that
+      // silently stopped working, and only when the socket was already broken: the hardest
+      // possible time to notice.
       fetch(`${API_BASE}/api/command`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: writeHeaders(),
         body: JSON.stringify({ zone: zoneId, command: action, action: action }),
       }).catch(err => console.error('[econ] manual override fallback failed:', err));
     }

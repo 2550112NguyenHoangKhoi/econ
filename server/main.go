@@ -107,7 +107,29 @@ func main() {
 	})
 
 	// 4b. Hardware Inspector Manual Commands: allows direct human overrides from the device view.
-	http.HandleFunc("/api/command", commandHandler(engine))
+	// requireAdmin, like every other write endpoint.
+	//
+	// This was the one that did not have it, and it is the one that matters most: it is what
+	// sends LIGHTS_OFF, SETPOINT= and HVAC_SET:OFF to real hardware. /api/plugs,
+	// /api/precool, /api/building/deploy and /api/building/rollback all gate on the token;
+	// /api/command did not, so an engine started WITH ECON_ADMIN_TOKEN set logged
+	// "[auth] write operations require ECON_ADMIN_TOKEN" and then accepted commands from
+	// anyone who could reach the port. Verified against a running container before the fix:
+	// no token, wrong token and right token all returned 200.
+	//
+	// Demo mode is unchanged. tokenMatches() returns true when no token is configured, so an
+	// engine with ECON_ADMIN_TOKEN unset stays exactly as open as it was and as the compose
+	// comment says it is. The fix only makes the endpoint honour a token the operator has
+	// explicitly set, which is what every neighbouring endpoint already did.
+	http.HandleFunc("/api/command", func(w http.ResponseWriter, r *http.Request) {
+		if corsPreflight(w, r) {
+			return
+		}
+		if !requireAdmin(w, r) {
+			return
+		}
+		commandHandler(engine)(w, r)
+	})
 
 	// 4c. TEMPORARY bring-up module (devices.go): the raw MQTT view one level below
 	// /api/hardware — every node seen, per-field freshness, dropout log, and the

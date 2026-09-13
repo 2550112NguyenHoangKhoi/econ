@@ -41,6 +41,24 @@ export function getAdminToken() {
   }
 }
 
+// Headers for any request that CHANGES something, with the admin token attached when the
+// operator has entered one.
+//
+// This exists because four separate call sites were POSTing /api/command and only one of
+// them attached the token — so on an engine with ECON_ADMIN_TOKEN set, three of the four
+// actuation paths in the UI would have started failing the moment the server began checking
+// it. One helper, used everywhere, is the only way that stays true.
+//
+// Safe on a demo engine: an engine with no token configured accepts the header and ignores
+// it, and getAdminToken() returns '' when nothing is stored, in which case no header is sent
+// at all.
+export function writeHeaders(extra = {}) {
+  const headers = { 'Content-Type': 'application/json', ...extra };
+  const token = getAdminToken();
+  if (token) headers['X-Admin-Token'] = token;
+  return headers;
+}
+
 export function setAdminToken(token) {
   try {
     if (token) localStorage.setItem(TOKEN_KEY, token);
